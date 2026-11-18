@@ -12,3 +12,8 @@ export type {
   UserByEmail,
   UserRepository,
 } from "./user-repository.js";
+export type { DeviceAuthRepository } from "./device-auth-repository.js";
+export type { PairingCodeRepository } from "./pairing-code-repository.js";
+export type { ReplayCache } from "./replay-cache.js";
+export type { PairRateLimiter } from "./pair-rate-limiter.js";
+export type { PublishQueueOptions, QueueEventPayload, QueuePublisher } from "./queue-publisher.js";

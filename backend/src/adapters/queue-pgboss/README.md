@@ -1,4 +1,6 @@
-# `adapters/queue-pgboss` (reserved)
+# queue-pgboss adapter
 
-Queue / pg-boss adapters move here in a later PR (B2). Until then the
-live implementation remains under `src/queue/`.
+Postgres-backed queue (pg-boss): publisher (`publishInTx`), worker
+registration (`registerOwnerHandler`), idempotency helpers, and metrics.
+
+Implements the `QueuePublisher` port via `PgBossQueuePublisher`.

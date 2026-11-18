@@ -13,7 +13,7 @@ import {
   startBoss,
   startMetricsServer,
   type EventName,
-} from "./queue/index.js";
+} from "./adapters/queue-pgboss/index.js";
 
 /**
  * Queue worker: pg-boss consumer with per-job `withOwner` RLS scope.

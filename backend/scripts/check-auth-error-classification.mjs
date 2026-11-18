@@ -24,9 +24,7 @@ const targets = fixtureMode
   : [
       path.join(root, "src/adapters"),
       path.join(root, "src/application"),
-      path.join(root, "src/device"),
-      path.join(root, "src/routes"),
-      path.join(root, "src/queue"),
+      path.join(root, "src/composition"),
     ];
 
 /** @type {{ file: string; line: number; text: string; reason: string }[]} */

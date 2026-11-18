@@ -2,12 +2,23 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import { InfrastructureError } from "../../src/domain/errors.js";
 import {
+  PgDeviceAuthRepository,
   PgIdentityRepository,
+  PgPairingCodeRepository,
+  PgPairRateLimiter,
+  PgReplayCache,
   PgSessionRepository,
   PgUserRepository,
+  DEFAULT_RATE_LIMIT_CONFIG,
 } from "../../src/adapters/db-postgres/index.js";
+import { PgBossQueuePublisher } from "../../src/adapters/queue-pgboss/pg-queue-publisher.js";
 import {
+  MemoryDeviceAuthRepository,
   MemoryIdentityRepository,
+  MemoryPairingCodeRepository,
+  MemoryPairRateLimiter,
+  MemoryQueuePublisher,
+  MemoryReplayCache,
   MemorySessionRepository,
   MemoryUserRepository,
 } from "../application/fakes/memory-ports.js";
@@ -95,6 +106,61 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
           lastAuthMethod: "otp",
           displayName: "A",
         }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+    });
+
+    it("DeviceAuthRepository: each method throws InfrastructureError when fault is set", async () => {
+      const devices = new MemoryDeviceAuthRepository();
+      await expect(devices.lookupForAuth(OWNER)).resolves.toBeNull();
+
+      devices.fault.throwInfra = true;
+      await expect(devices.lookupForAuth(OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(
+        devices.pairWithBurnedCode({
+          ownerId: OWNER,
+          pairingCodeId: "pc",
+          displayName: "Phone",
+          publicKey: "pk",
+          deviceInfo: { platform: "android", app_version: "1" },
+          clientIp: "127.0.0.1",
+        }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(devices.findMe(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(devices.revoke(OWNER, OWNER, "127.0.0.1")).rejects.toBeInstanceOf(
+        InfrastructureError,
+      );
+    });
+
+    it("PairingCodeRepository: each method throws InfrastructureError when fault is set", async () => {
+      const codes = new MemoryPairingCodeRepository();
+      await expect(codes.lookupByHash(HASH)).resolves.toBeNull();
+
+      codes.fault.throwInfra = true;
+      await expect(codes.lookupByHash(HASH)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(
+        codes.insert({ ownerId: OWNER, codeHash: HASH, ttlSeconds: 300 }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(codes.burn(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+    });
+
+    it("ReplayCache + PairRateLimiter + QueuePublisher: fault → InfrastructureError", async () => {
+      const replay = new MemoryReplayCache();
+      await expect(replay.claimNonceAndSignature("id", "n", "s")).resolves.toBe("ok");
+      replay.fault.throwInfra = true;
+      await expect(replay.claimNonceAndSignature("id", "n", "s")).rejects.toBeInstanceOf(
+        InfrastructureError,
+      );
+
+      const rl = new MemoryPairRateLimiter();
+      rl.fault.throwInfra = true;
+      await expect(rl.checkIpAllowed("1.1.1.1")).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(rl.checkGlobalInvalidAllowed()).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(rl.noteInvalidCode("1.1.1.1")).rejects.toBeInstanceOf(InfrastructureError);
+
+      const q = new MemoryQueuePublisher();
+      q.fault.throwInfra = true;
+      await expect(
+        q.publishInTx(null, { type: "message.created", owner_id: OWNER }),
       ).rejects.toBeInstanceOf(InfrastructureError);
     });
   });
@@ -212,6 +278,77 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
       for (const [name, fn] of cases) {
         await expect(fn(), name).rejects.toBeInstanceOf(InfrastructureError);
       }
+    });
+
+    it("PgDeviceAuthRepository: null on miss; every method → InfrastructureError on fault", async () => {
+      const ok = new PgDeviceAuthRepository(appPool);
+      await expect(ok.lookupForAuth(OWNER)).resolves.toBeNull();
+
+      const broken = new PgDeviceAuthRepository(exploding);
+      const cases: Array<[string, () => Promise<unknown>]> = [
+        ["lookupForAuth", () => broken.lookupForAuth(OWNER)],
+        [
+          "pairWithBurnedCode",
+          () =>
+            broken.pairWithBurnedCode({
+              ownerId: OWNER,
+              pairingCodeId: OWNER,
+              displayName: "Phone",
+              publicKey: "pk",
+              deviceInfo: { platform: "android", app_version: "1" },
+              clientIp: "127.0.0.1",
+            }),
+        ],
+        ["findMe", () => broken.findMe(OWNER, OWNER)],
+        ["revoke", () => broken.revoke(OWNER, OWNER, "127.0.0.1")],
+      ];
+      for (const [name, fn] of cases) {
+        await expect(fn(), name).rejects.toBeInstanceOf(InfrastructureError);
+      }
+    });
+
+    it("PgPairingCodeRepository: null on miss; every method → InfrastructureError on fault", async () => {
+      const ok = new PgPairingCodeRepository(appPool);
+      await expect(ok.lookupByHash(HASH)).resolves.toBeNull();
+
+      const broken = new PgPairingCodeRepository(exploding);
+      await expect(broken.lookupByHash(HASH)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(
+        broken.insert({ ownerId: OWNER, codeHash: HASH, ttlSeconds: 300 }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(broken.burn(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+    });
+
+    it("PgReplayCache + PgPairRateLimiter: every method → InfrastructureError on fault", async () => {
+      const replay = new PgReplayCache(exploding);
+      await expect(replay.claimNonceAndSignature("id", "nonce", "sig")).rejects.toBeInstanceOf(
+        InfrastructureError,
+      );
+
+      const rl = new PgPairRateLimiter(exploding, DEFAULT_RATE_LIMIT_CONFIG);
+      await expect(rl.checkIpAllowed("127.0.0.1")).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(rl.checkGlobalInvalidAllowed()).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(rl.noteInvalidCode("127.0.0.1")).rejects.toBeInstanceOf(InfrastructureError);
+    });
+
+    it("PgBossQueuePublisher: publish failure → InfrastructureError", async () => {
+      const boss = {
+        send: async () => {
+          throw new Error("simulated pg-boss outage");
+        },
+      };
+      const publisher = new PgBossQueuePublisher(boss as never);
+      await expect(
+        publisher.publishInTx(
+          { query: async () => ({ rows: [] }) },
+          {
+            type: "message.created",
+            owner_id: OWNER,
+            message_id: OWNER,
+            device_id: OWNER,
+          },
+        ),
+      ).rejects.toBeInstanceOf(InfrastructureError);
     });
   });
 });

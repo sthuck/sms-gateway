@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
-import { MAX_BODY_BYTES } from "./signing.js";
+import { MAX_BODY_BYTES } from "../device-crypto/signing.js";
 
 declare module "fastify" {
   interface FastifyRequest {
