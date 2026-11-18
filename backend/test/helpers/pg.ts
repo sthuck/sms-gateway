@@ -250,6 +250,15 @@ export async function seedTwoOwners(admin: Pool): Promise<SeededOwners> {
       [userA, userB],
     );
 
+    await client.query(
+      `INSERT INTO sessions (
+         owner_id, session_id_hash, csrf_token_hash, expires_at
+       ) VALUES
+         ($1, 'sess-hash-a', 'csrf-hash-a', now() + interval '1 day'),
+         ($2, 'sess-hash-b', 'csrf-hash-b', now() + interval '1 day')`,
+      [userA, userB],
+    );
+
     await client.query("COMMIT");
 
     return {

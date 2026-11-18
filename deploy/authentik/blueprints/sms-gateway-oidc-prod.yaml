@@ -1,0 +1,50 @@
+# Production / homelab Authentik blueprint template.
+# Prod redirect URI only. No client secret, no seeded users.
+#
+# Application slug: sms-gateway
+# Issuer: https://auth.sthuck.info/application/o/sms-gateway/
+#
+# Set before import (Authentik blueprint !Env):
+#   AUTHENTIK_SMS_GATEWAY_CLIENT_ID   (required; e.g. sms-gateway)
+#   AUTHENTIK_SMS_GATEWAY_CLIENT_SECRET (required; generate out-of-band, store in
+#     k8s Secret sms-gateway-oidc as OIDC_CLIENT_SECRET — never commit it)
+#
+# Prefer generating the OAuth2 client secret in the Authentik UI and only using
+# this blueprint for structure if !Env injection is unavailable — then paste
+# the secret into the k8s Secret, not into git.
+#
+# See docs/deployment-auth.md. Do NOT import the *-dev.yaml blueprint in prod.
+
+version: 1
+metadata:
+  name: sms-gateway-oidc-prod
+  # Never auto-apply if this file is present under Authentik's blueprints mount.
+  # Local Compose mounts only *-dev.yaml; apply this file only via controlled import.
+  labels:
+    blueprints.goauthentik.io/instantiate: "false"
+entries:
+  - model: authentik_providers_oauth2.oauth2provider
+    id: provider
+    state: present
+    identifiers:
+      name: SMS Gateway
+    attrs:
+      name: SMS Gateway
+      client_type: confidential
+      client_id: !Env AUTHENTIK_SMS_GATEWAY_CLIENT_ID
+      client_secret: !Env AUTHENTIK_SMS_GATEWAY_CLIENT_SECRET
+      redirect_uris: |
+        https://sms.sthuck.info/v1/auth/callback
+      sub_mode: user_id
+      include_claims_in_id_token: true
+      issuer_mode: per_provider
+
+  - model: authentik_core.application
+    state: present
+    identifiers:
+      slug: sms-gateway
+    attrs:
+      name: SMS Gateway
+      slug: sms-gateway
+      provider: !KeyOf provider
+      meta_launch_url: https://sms.sthuck.info/v1/auth/login

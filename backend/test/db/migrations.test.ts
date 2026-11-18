@@ -38,6 +38,7 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
     );
     expect(Number(afterUp.rows[0]?.count)).toBeGreaterThan(0);
 
+    await runMigrations("down"); // auth-sessions
     await runMigrations("down"); // rls-policies
     await runMigrations("down"); // initial-schema
 
@@ -48,7 +49,8 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
     await runMigrations("up"); // idempotent no-op when already at head
 
     tables = await listOwnedTables(admin);
-    expect(tables.length).toBeGreaterThanOrEqual(12);
+    expect(tables.length).toBeGreaterThanOrEqual(13);
+    expect(tables).toContain("sessions");
 
     const { rows } = await admin.query<{ missing_force: number }>(`
       SELECT count(*)::int AS missing_force
