@@ -79,4 +79,14 @@ set -e
 
 # Don't leave a stuck sender if gradle failed early.
 wait "$SENDER_PID" || true
+
+# Pull Compose UI screenshots written by UiScreenshotTest (best-effort).
+SCREENSHOT_HOST="$ROOT/app/build/screenshots"
+SCREENSHOT_DEVICE="/sdcard/Android/data/${PACKAGE}/files/sms-gateway-screenshots"
+mkdir -p "$SCREENSHOT_HOST"
+log "Pulling screenshots from $SCREENSHOT_DEVICE -> $SCREENSHOT_HOST"
+adb pull "$SCREENSHOT_DEVICE/." "$SCREENSHOT_HOST/" 2>/dev/null || \
+  log "No screenshots found on device (tests may have skipped UI capture)."
+ls -la "$SCREENSHOT_HOST" || true
+
 exit "$GRADLE_RC"

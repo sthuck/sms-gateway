@@ -215,6 +215,14 @@ jobs:
           working-directory: android
           script: ./scripts/run-connected-dev-debug.sh
 
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-screenshots
+          path: android/app/build/screenshots/**
+          if-no-files-found: warn
+
       - name: Upload instrumented test reports
         if: failure()
         uses: actions/upload-artifact@v4
