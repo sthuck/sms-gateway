@@ -57,10 +57,8 @@ function oidcErrorCode(err: unknown): string | undefined {
  */
 export function isOidcTokenInfrastructureFailure(err: unknown): boolean {
   if (err instanceof InfrastructureError) return true;
+  // Node fetch network failures are TypeError ("fetch failed") — classify by type, not message.
   if (err instanceof TypeError) return true;
-  if (err instanceof Error && /fetch|network|econn|etimedout/i.test(err.message)) {
-    return true;
-  }
 
   const code = oidcErrorCode(err);
   // Non-JSON / unexpected content-type from the token endpoint.

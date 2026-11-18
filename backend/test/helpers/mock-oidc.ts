@@ -33,9 +33,14 @@ export type MockOidc = {
   setJwksFault: (fault: MockEndpointFault) => void;
   /** Force the next /token responses to this fault until cleared (`null`). */
   setTokenFault: (fault: MockEndpointFault) => void;
+  /**
+   * Serve 3 RS256 keys in JWKS (simulates IdP key rotation).
+   * Used by STH-50: kid-less tokens against multi-key JWKS.
+   */
+  setMultiKeyJwks: (enabled: boolean) => void;
   signToken: (
     claims: Record<string, unknown>,
-    overrides?: { aud?: string; exp?: number; iss?: string },
+    overrides?: { aud?: string; exp?: number; iss?: string; omitKid?: boolean; kid?: string },
   ) => Promise<string>;
   close: () => Promise<void>;
 };
@@ -52,10 +57,22 @@ export async function startMockOidc(options: MockOidcOptions): Promise<MockOidc>
   publicJwk.use = "sig";
   publicJwk.kid = "test-key";
 
+  const rotB = await generateKeyPair("RS256");
+  const rotC = await generateKeyPair("RS256");
+  const publicJwkB = await exportJWK(rotB.publicKey);
+  publicJwkB.alg = "RS256";
+  publicJwkB.use = "sig";
+  publicJwkB.kid = "kid-b";
+  const publicJwkC = await exportJWK(rotC.publicKey);
+  publicJwkC.alg = "RS256";
+  publicJwkC.use = "sig";
+  publicJwkC.kid = "kid-c";
+
   const pending = new Map<string, Pending>();
   let baseUrl = "";
   let jwksFault: MockEndpointFault = null;
   let tokenFault: MockEndpointFault = null;
+  let multiKeyJwks = false;
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", baseUrl || "http://127.0.0.1");
@@ -83,7 +100,9 @@ export async function startMockOidc(options: MockOidcOptions): Promise<MockOidc>
         res.end(jwksFault.body);
         return;
       }
-      json(res, { keys: [publicJwk] });
+      json(res, {
+        keys: multiKeyJwks ? [publicJwk, publicJwkB, publicJwkC] : [publicJwk],
+      });
       return;
     }
 
@@ -252,10 +271,17 @@ export async function startMockOidc(options: MockOidcOptions): Promise<MockOidc>
     setTokenFault(fault) {
       tokenFault = fault;
     },
+    setMultiKeyJwks(enabled) {
+      multiKeyJwks = enabled;
+    },
     async signToken(claims, overrides) {
       const now = Math.floor(Date.now() / 1000);
+      const header: { alg: "RS256"; kid?: string } = { alg: "RS256" };
+      if (!overrides?.omitKid) {
+        header.kid = overrides?.kid ?? "test-key";
+      }
       return new SignJWT({ ...claims })
-        .setProtectedHeader({ alg: "RS256", kid: "test-key" })
+        .setProtectedHeader(header)
         .setIssuer(overrides?.iss ?? baseUrl)
         .setAudience(overrides?.aud ?? options.clientId)
         .setSubject(String(claims.sub ?? "mock-sub"))

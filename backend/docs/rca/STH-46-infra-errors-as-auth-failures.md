@@ -35,15 +35,15 @@ already classified; **response-status** failures were not.
 
 ## Blast radius
 
-| Surface                          | Bug behaviour              | Fixed                  |
-| -------------------------------- | -------------------------- | ---------------------- |
-| Session/bearer **DB** error      | 401 (`17b5dd6`)            | 500 retryable          |
-| JWKS HTTP 5xx / non-JSON         | 401 (main + early head)    | 500 retryable (STH-48) |
-| IdP `/token` HTTP 5xx / non-JSON | 400 (main + early head)    | 500 retryable (STH-48) |
-| Bad JWT / `invalid_grant`        | 401 / 400                  | unchanged              |
-| OIDC unset → `/me`               | 503 on `17b5dd6`           | 401                    |
-| Login without pool               | 503 on `17b5dd6`           | 302                    |
-| CSRF reject → `last_seen_at`     | touched early on `17b5dd6` | touch after CSRF       |
+| Surface                                             | Bug behaviour              | Fixed                                                    |
+| --------------------------------------------------- | -------------------------- | -------------------------------------------------------- |
+| Session/bearer **DB** error                         | 401 (`17b5dd6`)            | 500 retryable                                            |
+| JWKS HTTP 5xx / non-JSON                            | 401 (main + early head)    | 500 retryable (STH-48)                                   |
+| IdP `/token` HTTP 5xx / non-JSON                    | 400 (main + early head)    | 500 retryable (STH-48)                                   |
+| Bad JWT / kid-less+multi-key JWKS / `invalid_grant` | 401 / 400                  | 401/400 (STH-50: never 500 for JWKSMultipleMatchingKeys) |
+| OIDC unset → `/me`                                  | 503 on `17b5dd6`           | 401                                                      |
+| Login without pool                                  | 503 on `17b5dd6`           | 302                                                      |
+| CSRF reject → `last_seen_at`                        | touched early on `17b5dd6` | touch after CSRF                                         |
 
 ## Audit table
 

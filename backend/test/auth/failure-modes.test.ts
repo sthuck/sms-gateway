@@ -429,6 +429,73 @@ describe.skipIf(!migratorOk)("auth failure-mode parity (STH-46)", () => {
     await app.close();
   });
 
+  it("STH-50: kid-less token vs multi-key JWKS → 401 (not 500); unknown kid → 401", async () => {
+    // Provision identity first (single-key JWKS).
+    const provision = await buildConfiguredApp(appPool);
+    await provision.ready();
+    await completeLogin(provision);
+    await provision.close();
+
+    mock.setMultiKeyJwks(true);
+    const env = {
+      NODE_ENV: "test",
+      HOST: "127.0.0.1",
+      PORT: "8080",
+      LOG_LEVEL: "silent",
+      DATABASE_URL: appDatabaseUrl(),
+      OIDC_ISSUER_URL: mock.issuer,
+      OIDC_CLIENT_ID: "sms-gateway-test",
+      OIDC_CLIENT_SECRET: "dev-only-test-client-secret",
+      OIDC_REDIRECT_URI: "http://127.0.0.1:8080/v1/auth/callback",
+      OIDC_AUDIENCE: "sms-gateway-test",
+      SESSION_SECRET,
+      REQUIRE_MFA: "true",
+      MFA_CLAIMS_MISSING: "deny",
+      OIDC_ALLOW_INSECURE: "true",
+      PUBLIC_BASE_URL: "http://127.0.0.1:8080/",
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8080",
+      AUTO_LINK_BY_EMAIL: "false",
+    };
+    const config = loadConfig(env);
+    // Fresh verifier so JWKS is fetched with 3 keys (no single-key cache).
+    const jwtVerifier = createJwtVerifier(config.oidc!, mock.jwksUri);
+    const app = await buildApp(config, {
+      pool: appPool,
+      auth: { config: config.oidc, jwtVerifier, skipDiscovery: false },
+    });
+    await app.ready();
+
+    const kidLess = await mock.signToken(
+      { sub: "sub-alice", email: "alice@example.com", amr: ["pwd", "otp"] },
+      { omitKid: true },
+    );
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: { authorization: `Bearer ${kidLess}` },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toMatchObject({ code: "unauthorized" });
+    expect(res.json().code).not.toBe("internal_error");
+
+    const unknownKid = await mock.signToken(
+      { sub: "sub-alice", email: "alice@example.com", amr: ["pwd", "otp"] },
+      { kid: "no-such-kid" },
+    );
+    // Sign with our private key but advertise a kid not in JWKS → JWKSNoMatchingKey → 401.
+    // (Signature won't verify against a missing key; jose raises before verify.)
+    const noMatch = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: { authorization: `Bearer ${unknownKid}` },
+    });
+    expect(noMatch.statusCode).toBe(401);
+    expect(noMatch.json()).toMatchObject({ code: "unauthorized" });
+
+    mock.setMultiKeyJwks(false);
+    await app.close();
+  });
+
   it("STH-48: IdP /token HTTP 503 → 500; invalid_grant still 400", async () => {
     const app = await buildConfiguredApp(appPool);
     await app.ready();
