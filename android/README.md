@@ -50,24 +50,31 @@ cleartext.
 
 ## Architecture
 
-Single-activity Compose app (`MainActivity`) with a status screen and an SMS
-permission rationale. Hilt wires the graph; Retrofit/OkHttp talk to
-`BuildConfig.BACKEND_URL`. Incoming SMS is written to a Room outbox; the
-WorkManager uploader is a later ticket (STH-13) and is not implemented yet.
+Single-activity Compose app (`MainActivity`). Unpaired devices land on the
+pairing screen (QR via CameraX + ML Kit, manual short code, or
+`smsgw://pair?code=…&server=…` deep link). After pairing, the status screen
+shows SMS permission state, queue depth, and an unpair action. Hilt wires the
+graph. OkHttp rewrites the backend base URL from stored credentials (flavour
+default until a QR/`server` override) and signs every device request per
+STH-5. Incoming SMS is written to a Room outbox; the WorkManager uploader is
+a later ticket (STH-13) and is not implemented yet.
 
 Package: `com.sthuck.smsgateway`
 
+- `pairing` — URI parse, DataStore credentials, pair/unpair repository
+- `crypto` — Android Keystore ES256 (P-256) key, canonical string, clock skew
 - `sms` — permission state, `SmsReceiver`, PDU reassembly, `device_msg_id` mapping
-- `data/remote` — `DeviceApi` and DTOs aligned with the STH-5 device contract
+- `data/remote` — `DeviceApi`, signing interceptor, backend URL interceptor
 - `data/local` — Room outbox (`queued_messages`) and enqueue helper.
   Schema JSON is exported to `app/schemas/` (committed). Release builds
   never use destructive migration; bump `AppDatabase` version only with
   an explicit Migration / AutoMigration and a `MigrationTestHelper` case.
 - `di` — Hilt modules for network and database
-- `ui` — status screen, permission rationale, and theme
+- `ui` — pairing screen, status screen, permission rationale, and theme
 
-Request signing (Keystore, ES256) is intentionally not implemented here; that
-is STH-11. DTOs and header names already match the contract.
+Signing matches `docs/contracts/device-signing.md` and is unit-tested against
+`docs/contracts/examples/test-vector.json` (including `devHostVector`).
+Keystore generation is covered by an instrumented test.
 
 ### Incoming SMS and `device_msg_id`
 
