@@ -25,8 +25,12 @@ data class PairingCredentials(
     val isPaired: Boolean get() = !deviceId.isNullOrBlank()
 }
 
-interface PairingStateAccess {
+/** Read-only pairing view used by the uploader (easy to fake in JVM tests). */
+interface PairingCredentialsReader {
     suspend fun current(): PairingCredentials
+}
+
+interface PairingStateAccess : PairingCredentialsReader {
     suspend fun clearDeviceId()
     suspend fun savePairing(deviceId: String, serverUrl: String)
     suspend fun clearAll()

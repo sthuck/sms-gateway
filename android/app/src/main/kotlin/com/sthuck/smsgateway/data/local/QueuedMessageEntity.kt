@@ -5,14 +5,22 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
- * Local outbox row. WorkManager upload (STH-13) will drain this table.
+ * Local outbox row drained by [com.sthuck.smsgateway.upload.MessageUploadWorker].
  *
  * [deviceMsgId] is the unique idempotency key. Inserting a row with an
  * existing id is a no-op ([OnConflictStrategy.IGNORE] in the DAO).
+ *
+ * Uploader columns (STH-13 / schema v3):
+ * - [attemptCount] / [nextAttemptAtEpochMs] drive retry scheduling
+ * - [lastError] holds the last RFC 9457 / per-item detail (also for parked)
+ * - [parked] marks non-retryable failures that stay visible until unpair/clear
  */
 @Entity(
     tableName = "queued_messages",
-    indices = [Index(value = ["contentKey"])],
+    indices = [
+        Index(value = ["contentKey"]),
+        Index(value = ["parked", "nextAttemptAtEpochMs"]),
+    ],
 )
 data class QueuedMessageEntity(
     @PrimaryKey val deviceMsgId: String,
@@ -23,4 +31,8 @@ data class QueuedMessageEntity(
     val direction: String,
     val simSlot: Int? = null,
     val createdAtEpochMs: Long,
+    val attemptCount: Int = 0,
+    val nextAttemptAtEpochMs: Long = 0L,
+    val lastError: String? = null,
+    val parked: Boolean = false,
 )
