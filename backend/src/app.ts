@@ -1,23 +1,35 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import type { Pool } from "pg";
+import type { PgBoss } from "pg-boss";
 import type { Config } from "./config.js";
 import { buildLoggerOptions } from "./logger.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
 import { pairingCodeRoutes } from "./routes/pairing-codes.js";
 import { deviceRoutes } from "./routes/devices.js";
+import { messageRoutes } from "./routes/messages.js";
 import { authPlugin, type AuthPluginOptions } from "./auth/plugin.js";
 import { devicePlugin } from "./device/plugin.js";
 import { rawBodyPlugin } from "./device/raw-body.js";
 import type { DeviceAuthConfig } from "./device/config.js";
+import type { IngestConfig } from "./ingest/config.js";
 import { createPool } from "./db/pool.js";
 import { sendProblem } from "./http/problems.js";
 
+declare module "fastify" {
+  interface FastifyInstance {
+    boss: PgBoss | null;
+    ingestConfig: IngestConfig;
+  }
+}
+
 export type BuildAppOptions = {
   pool?: Pool | null;
+  boss?: PgBoss | null;
   auth?: Partial<AuthPluginOptions>;
   deviceAuth?: DeviceAuthConfig | null;
+  ingest?: IngestConfig;
 };
 
 export async function buildApp(
@@ -73,6 +85,9 @@ export async function buildApp(
     });
   }
 
+  app.decorate("boss", options.boss ?? null);
+  app.decorate("ingestConfig", options.ingest ?? config.ingest);
+
   await app.register(rawBodyPlugin);
 
   await app.register(authPlugin, {
@@ -114,6 +129,7 @@ export async function buildApp(
   await app.register(authRoutes);
   await app.register(pairingCodeRoutes);
   await app.register(deviceRoutes);
+  await app.register(messageRoutes);
 
   return app;
 }

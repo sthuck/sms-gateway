@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
+import type { PgBoss } from "pg-boss";
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { createJwtVerifier } from "../../src/auth/jwt.js";
 import { requireUserAuth } from "../../src/auth/plugin.js";
-import { deviceAuthPreHandler } from "../../src/device/plugin.js";
 import { hashPairingCode, normalizePairingCode } from "../../src/device/pairing-code.js";
+import { ensureQueues, startBoss } from "../../src/queue/index.js";
 import {
   appDatabaseUrl,
   canConnect,
@@ -32,6 +33,7 @@ describe.skipIf(!migratorOk)("pairing + device auth (STH-14)", () => {
   let appPool: Pool;
   let mock: MockOidc;
   let app: FastifyInstance;
+  let boss: PgBoss;
   let sessionCookie: string;
   let csrfCookie: string;
   let ownerId: string;
@@ -41,6 +43,15 @@ describe.skipIf(!migratorOk)("pairing + device auth (STH-14)", () => {
     await resetSchema(admin);
     await runMigrations("up");
     appPool = createAppPool();
+
+    boss = await startBoss({
+      connectionString: appDatabaseUrl(),
+      installSchema: false,
+      applicationName: "test-device-auth",
+      supervise: false,
+      schedule: false,
+    });
+    await ensureQueues(boss);
 
     mock = await startMockOidc({
       clientId: "sms-gateway-test",
@@ -75,6 +86,8 @@ describe.skipIf(!migratorOk)("pairing + device auth (STH-14)", () => {
       PAIR_RATE_LIMIT_PER_IP: "100",
       PAIR_IP_INVALID_LOCK_THRESHOLD: "50",
       PAIR_IP_INVALID_LOCK_SEC: "60",
+      INGEST_RATE_LIMIT_PER_DEVICE: "1000",
+      INGEST_MESSAGE_RATE_LIMIT: "100000",
       CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8080",
       AUTO_LINK_BY_EMAIL: "false",
     };
@@ -84,30 +97,13 @@ describe.skipIf(!migratorOk)("pairing + device auth (STH-14)", () => {
 
     app = await buildApp(config, {
       pool: appPool,
+      boss,
       auth: {
         config: config.oidc,
         jwtVerifier,
         skipDiscovery: false,
       },
     });
-
-    // Stand-in for STH-15 ingestion: auth only, then 200.
-    app.post(
-      "/v1/messages:batch",
-      { preHandler: deviceAuthPreHandler({ rejectRevoked: true }) },
-      async (request) => {
-        return {
-          results: [
-            {
-              device_msg_id: "probe",
-              status: "accepted",
-              id: "00000000-0000-4000-8000-000000000001",
-            },
-          ],
-          device_id: request.device?.deviceId,
-        };
-      },
-    );
 
     app.get("/v1/test/user-only", { preHandler: requireUserAuth }, async (request) => {
       return { owner_id: request.ownerId };
@@ -130,6 +126,7 @@ describe.skipIf(!migratorOk)("pairing + device auth (STH-14)", () => {
 
   afterAll(async () => {
     await app?.close();
+    await boss?.stop({ graceful: false, timeout: 5_000 }).catch(() => undefined);
     await mock?.close();
     await appPool?.end().catch(() => undefined);
     await admin?.end().catch(() => undefined);
@@ -377,7 +374,22 @@ describe.skipIf(!migratorOk)("pairing + device auth (STH-14)", () => {
       payload: body,
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ device_id });
+    const json = res.json() as {
+      results: Array<{ device_msg_id: string; status: string; id?: string }>;
+    };
+    expect(json.results).toHaveLength(1);
+    expect(json.results[0]).toMatchObject({
+      device_msg_id: "sms-42",
+      status: "accepted",
+    });
+    expect(json.results[0]?.id).toBeTruthy();
+    // Owner comes from the paired device, not the payload.
+    const stored = await admin.query<{ owner_id: string; device_id: string }>(
+      `SELECT owner_id, device_id FROM messages WHERE device_msg_id = 'sms-42' AND device_id = $1`,
+      [device_id],
+    );
+    expect(stored.rows[0]?.owner_id).toBe(ownerId);
+    expect(stored.rows[0]?.device_id).toBe(device_id);
   });
 
   it("verifies the frozen test-vector signature over the canonical string", async () => {

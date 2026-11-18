@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
+import type { PgBoss } from "pg-boss";
 import { createRequire } from "node:module";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import { buildApp } from "../../src/app.js";
@@ -16,6 +17,7 @@ const addFormats = require("ajv-formats") as (ajv: instanceType) => void;
 type instanceType = InstanceType<typeof Ajv>;
 import { loadConfig } from "../../src/config.js";
 import { createJwtVerifier } from "../../src/auth/jwt.js";
+import { ensureQueues, startBoss } from "../../src/queue/index.js";
 import {
   appDatabaseUrl,
   canConnect,
@@ -81,11 +83,12 @@ function compileValidator(_doc: OpenApiDoc, schema: JsonSchema) {
   return ajv.compile(schema);
 }
 
-describe.skipIf(!migratorOk)("OpenAPI contract shapes (STH-14 endpoints)", () => {
+describe.skipIf(!migratorOk)("OpenAPI contract shapes (STH-14 / STH-15 endpoints)", () => {
   let admin: Pool;
   let appPool: Pool;
   let mock: MockOidc;
   let app: FastifyInstance;
+  let boss: PgBoss;
   let sessionCookie: string;
   let csrfCookie: string;
   let userApi: OpenApiDoc;
@@ -103,6 +106,15 @@ describe.skipIf(!migratorOk)("OpenAPI contract shapes (STH-14 endpoints)", () =>
     await resetSchema(admin);
     await runMigrations("up");
     appPool = createAppPool();
+
+    boss = await startBoss({
+      connectionString: appDatabaseUrl(),
+      installSchema: false,
+      applicationName: "test-contract",
+      supervise: false,
+      schedule: false,
+    });
+    await ensureQueues(boss);
 
     mock = await startMockOidc({
       clientId: "sms-gateway-test",
@@ -133,10 +145,13 @@ describe.skipIf(!migratorOk)("OpenAPI contract shapes (STH-14 endpoints)", () =>
       DEVICE_ALLOWED_HOSTS: "10.0.2.2:8080,api.sms-gateway.example",
       CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8080",
       PAIR_RATE_LIMIT_PER_IP: "100",
+      INGEST_RATE_LIMIT_PER_DEVICE: "1000",
+      INGEST_MESSAGE_RATE_LIMIT: "100000",
     });
 
     app = await buildApp(config, {
       pool: appPool,
+      boss,
       auth: {
         config: config.oidc,
         jwtVerifier: createJwtVerifier(config.oidc!, mock.jwksUri),
@@ -160,6 +175,7 @@ describe.skipIf(!migratorOk)("OpenAPI contract shapes (STH-14 endpoints)", () =>
 
   afterAll(async () => {
     await app?.close();
+    await boss?.stop({ graceful: false, timeout: 5_000 }).catch(() => undefined);
     await mock?.close();
     await appPool?.end().catch(() => undefined);
     await admin?.end().catch(() => undefined);
@@ -301,11 +317,115 @@ describe.skipIf(!migratorOk)("OpenAPI contract shapes (STH-14 endpoints)", () =>
     expect(userApi.paths["/v1/devices/{id}/revoke"]?.post?.responses?.["204"]).toBeTruthy();
   });
 
-  it("OpenAPI request/response schemas exist for the three STH-14 endpoints", () => {
+  it("POST /v1/messages:batch success and error bodies match device-api.yaml", async () => {
+    const issued = await app.inject({
+      method: "POST",
+      url: "/v1/pairing-codes",
+      headers: {
+        cookie: `${sessionCookie}; ${csrfCookie}`,
+        origin: "http://127.0.0.1:8080",
+        "x-csrf-token": csrfCookie.replace("sms_csrf=", ""),
+      },
+    });
+    const code = (issued.json() as { code: string }).code;
+    const pairBody = {
+      pairing_code: code,
+      alg: "ES256",
+      public_key: testVector.testPublicKeySpkiB64url,
+      device_info: { platform: "android", app_version: "1.0.0", name: "Contract Phone" },
+    };
+    const pairRaw = JSON.stringify(pairBody);
+    const pairSigned = signDeviceRequest({
+      method: "POST",
+      path: "/v1/devices/pair",
+      host: HOST,
+      deviceId: "",
+      body: pairRaw,
+    });
+    const paired = await app.inject({
+      method: "POST",
+      url: "/v1/devices/pair",
+      headers: pairSigned.headers,
+      payload: pairRaw,
+    });
+    const deviceId = (paired.json() as { device_id: string }).device_id;
+
+    const batchBody = {
+      messages: [
+        {
+          device_msg_id: "sms-contract-1",
+          sender: "+15551234567",
+          body: "Your code is 123456",
+          received_at: "2026-11-18T09:45:12Z",
+          sim_slot: 0,
+          direction: "inbound",
+        },
+        {
+          device_msg_id: "",
+          sender: "+15551234567",
+          body: "x",
+          received_at: "2026-11-18T09:45:12Z",
+          direction: "inbound",
+        },
+      ],
+    };
+    const raw = JSON.stringify(batchBody);
+    const signed = signDeviceRequest({
+      method: "POST",
+      path: "/v1/messages:batch",
+      host: HOST,
+      deviceId,
+      body: raw,
+    });
+    const ok = await app.inject({
+      method: "POST",
+      url: "/v1/messages:batch",
+      headers: signed.headers,
+      payload: raw,
+    });
+    expect(ok.statusCode).toBe(200);
+    const validateOk = compileValidator(
+      deviceApi,
+      responseSchema(deviceApi, "/v1/messages:batch", "post", "200"),
+    );
+    const okBody = ok.json();
+    expect(validateOk(okBody)).toBe(true);
+    expect(ok.json()).toMatchObject({
+      results: [
+        { device_msg_id: "sms-contract-1", status: "accepted" },
+        { device_msg_id: "", status: "rejected" },
+      ],
+    });
+
+    const badSigned = signDeviceRequest({
+      method: "POST",
+      path: "/v1/messages:batch",
+      host: HOST,
+      deviceId,
+      body: raw,
+      timestamp: Math.floor(Date.now() / 1000) - 10_000,
+    });
+    const bad = await app.inject({
+      method: "POST",
+      url: "/v1/messages:batch",
+      headers: badSigned.headers,
+      payload: raw,
+    });
+    expect(bad.statusCode).toBe(401);
+    const validateErr = compileValidator(
+      deviceApi,
+      responseSchema(deviceApi, "/v1/messages:batch", "post", "401", "application/problem+json"),
+    );
+    expect(validateErr(bad.json())).toBe(true);
+    expect(bad.json()).toMatchObject({ code: "invalid_timestamp", retryable: true });
+  });
+
+  it("OpenAPI request/response schemas exist for STH-14 / STH-15 endpoints", () => {
     expect(userApi.paths["/v1/pairing-codes"]?.post).toBeTruthy();
     expect(deviceApi.paths["/v1/devices/pair"]?.post).toBeTruthy();
     expect(userApi.paths["/v1/devices/{id}/revoke"]?.post).toBeTruthy();
     expect(deviceApi.paths["/v1/devices/me"]?.get).toBeTruthy();
+    expect(deviceApi.paths["/v1/messages:batch"]?.post).toBeTruthy();
   });
 });
 

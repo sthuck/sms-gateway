@@ -5,7 +5,6 @@ import { ensureQueues, loadQueueConfig, startBoss } from "./queue/index.js";
 async function main(): Promise<void> {
   const config = loadConfig();
   const queueConfig = loadQueueConfig();
-  const app = await buildApp(config);
 
   let boss: Awaited<ReturnType<typeof startBoss>> | undefined;
   if (config.DATABASE_URL) {
@@ -19,6 +18,11 @@ async function main(): Promise<void> {
       schedule: false,
     });
     await ensureQueues(boss, { queueConfig });
+  }
+
+  const app = await buildApp(config, { boss: boss ?? null });
+
+  if (boss) {
     app.log.info({ schema: queueConfig.QUEUE_SCHEMA }, "queue publisher ready (publishInTx)");
   } else {
     app.log.warn("DATABASE_URL unset; queue publisher not started");

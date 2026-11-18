@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { loadOidcAuthConfig, type OidcAuthConfig } from "./auth/oidc-config.js";
 import { loadDeviceAuthConfig, type DeviceAuthConfig } from "./device/config.js";
+import { loadIngestConfig, type IngestConfig } from "./ingest/config.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -34,6 +35,7 @@ export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS" | "T
   trustProxy: TrustProxyOption;
   oidc: OidcAuthConfig | null;
   deviceAuth: DeviceAuthConfig;
+  ingest: IngestConfig;
 };
 
 export function parseTrustProxy(raw: string | undefined): TrustProxyOption {
@@ -85,6 +87,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const deviceAuth = loadDeviceAuthConfig(env, {
     publicBaseUrl: oidc?.publicBaseUrl ?? null,
   });
+  const ingest = loadIngestConfig(env);
 
   return {
     ...rest,
@@ -92,5 +95,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: parseTrustProxy(trustProxyRaw),
     oidc,
     deviceAuth,
+    ingest,
   };
 }

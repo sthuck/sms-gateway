@@ -99,16 +99,17 @@ schema. It does **not** verify ECDSA request signatures, timestamps,
 nonces, or content hashes described in `docs/contracts/device-signing.md`.
 Treat mock responses as contract scaffolding only.
 
-The real backend (`:8080`) implements pairing, device registration, and
-signed-request verification (STH-14). Prefer it for end-to-end pairing
-from the emulator. See `docs/pairing.md`.
+The real backend (`:8080`) implements pairing, device registration,
+signed-request verification (STH-14), and message batch ingestion
+(STH-15). Prefer it for end-to-end pairing and uploads from the
+emulator. See `docs/pairing.md` and `docs/ingestion.md`.
 
 ## Android emulator networking
 
 The Android emulator reaches the host machine at `10.0.2.2`. Point the
 app at:
 
-- Real local API (pairing + signatures): `http://10.0.2.2:8080`
+- Real local API (pairing + signatures + ingestion): `http://10.0.2.2:8080`
 - Contract mock (shape only): `http://10.0.2.2:4010`
 
 Both Compose services bind `0.0.0.0` so the emulator can connect.
@@ -122,6 +123,17 @@ To pair against the real backend from the emulator:
    parameter matches the host the app will call.
 4. Ensure `DEVICE_ALLOWED_HOSTS` includes `10.0.2.2:8080` (local default).
 5. Scan the QR / enter the code in the Android `dev` flavour.
+
+### Posting a signed batch from the emulator
+
+After pairing, the app uploads with `POST /v1/messages:batch` to
+`http://10.0.2.2:8080`. The signed canonical `HOST` must be
+`10.0.2.2:8080` (port included). Do not point production-style signing
+at the Prism mock on `:4010` if you need persistence or real auth —
+use the real backend on `:8080`.
+
+Ingestion details (normalisation, idempotency, rate limits, encryption
+seam, latency bench): `docs/ingestion.md`.
 
 ## Signing test vector
 
