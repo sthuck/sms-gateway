@@ -18,6 +18,10 @@
 version: 1
 metadata:
   name: sms-gateway-oidc-prod
+  # Never auto-apply if this file is present under Authentik's blueprints mount.
+  # Local Compose mounts only *-dev.yaml; apply this file only via controlled import.
+  labels:
+    blueprints.goauthentik.io/instantiate: "false"
 entries:
   - model: authentik_providers_oauth2.oauth2provider
     id: provider

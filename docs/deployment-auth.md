@@ -32,6 +32,15 @@ Local Compose uses `http://127.0.0.1:9000/application/o/sms-gateway/` — see
 | `deploy/authentik/blueprints/sms-gateway-oidc-dev.yaml` | Local Compose only | localhost / 127.0.0.1 | DEV-ONLY via Compose `!Env`; seeded `sms-dev` |
 | `deploy/authentik/blueprints/sms-gateway-oidc-prod.yaml` | Homelab / production | `https://sms.sthuck.info/v1/auth/callback` only | Client id/secret from env (`!Env`); **no** seeded user |
 
+Local Compose (`docker-compose.authentik.yml`) mounts **only** the
+dev blueprint file into `/blueprints/` — not the whole directory — so the
+prod file is never visible to Authentik's auto-apply path. The prod
+blueprint also sets
+`metadata.labels.blueprints.goauthentik.io/instantiate: "false"` as a
+belt-and-suspenders guard if it is ever present under a blueprints mount;
+apply it only via a controlled Authentik import (System → Blueprints),
+after setting the `!Env` secrets.
+
 **Never** import the dev blueprint into production Authentik. Dev-only
 passwords and client secrets must not be reused outside local Compose.
 

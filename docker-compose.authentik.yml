@@ -52,8 +52,9 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      # Import only the *-dev.yaml blueprint locally; never apply *-prod.yaml here.
-      - ./deploy/authentik/blueprints:/blueprints:ro
+      # Mount only the dev blueprint file — never the whole blueprints/ dir
+      # (that would also expose *-prod.yaml to Authentik's auto-apply path).
+      - ./deploy/authentik/blueprints/sms-gateway-oidc-dev.yaml:/blueprints/sms-gateway-oidc-dev.yaml:ro
     depends_on:
       authentik-postgres:
         condition: service_healthy
@@ -75,7 +76,7 @@ services:
       AUTHENTIK_BLUEPRINT_DEV_USER_PASSWORD: "dev-only-sms-user-password"
     user: root
     volumes:
-      - ./deploy/authentik/blueprints:/blueprints:ro
+      - ./deploy/authentik/blueprints/sms-gateway-oidc-dev.yaml:/blueprints/sms-gateway-oidc-dev.yaml:ro
     depends_on:
       authentik-postgres:
         condition: service_healthy
