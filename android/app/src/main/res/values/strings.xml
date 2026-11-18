@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SMS Gateway</string>
+    <string name="status_flavor">Flavour</string>
+    <string name="status_backend">Backend URL</string>
+    <string name="status_version">App version</string>
+    <string name="status_pairing">Pairing</string>
+    <string name="status_sms_permission">SMS access</string>
+    <string name="status_queue">Outbound queue</string>
+    <plurals name="status_queue_count">
+        <item quantity="one">%d pending</item>
+        <item quantity="other">%d pending</item>
+    </plurals>
+    <string name="status_queue_recent">Recent queued messages</string>
+
+    <string name="sms_rationale_title">Allow SMS access</string>
+    <string name="sms_rationale_body">SMS Gateway reads incoming text messages on this phone so it can forward them to your gateway. It does not send SMS. Receive SMS is used for live delivery; Read SMS is used so the same messages can later be backfilled from the device inbox.</string>
+    <string name="sms_rationale_not_requested">You will be asked to allow Receive SMS and Read SMS.</string>
+    <string name="sms_rationale_denied">SMS access was denied. The app cannot queue incoming messages until both permissions are granted.</string>
+    <string name="sms_rationale_permanently_denied">SMS access was denied and the system will not ask again. Grant Receive SMS and Read SMS in system settings, then return here.</string>
+    <string name="sms_grant">Grant SMS access</string>
+    <string name="sms_open_settings">Open settings</string>
+    <string name="sms_status_granted">Granted</string>
+    <string name="sms_status_denied">Denied</string>
+    <string name="sms_status_permanently_denied">Denied — grant in settings</string>
+    <string name="sms_status_not_requested">Not granted yet</string>
+</resources>
