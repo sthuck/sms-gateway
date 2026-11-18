@@ -17,3 +17,9 @@ export {
   type ResolveDeviceAuthDeps,
   type ResolveDeviceAuthInput,
 } from "./resolve-device-auth.js";
+export {
+  IngestMessageBatch,
+  type IngestMessageBatchDeps,
+  type IngestMessageBatchInput,
+  type IngestMessageBatchResult,
+} from "./ingest-message-batch.js";

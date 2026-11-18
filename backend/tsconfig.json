@@ -28,6 +28,7 @@
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
+    "bench/**/*.ts",
     "scripts/**/*.d.ts",
     "scripts/**/*.d.mts",
     "vitest.config.ts",

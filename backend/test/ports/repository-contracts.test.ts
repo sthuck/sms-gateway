@@ -4,6 +4,8 @@ import { InfrastructureError } from "../../src/domain/errors.js";
 import {
   PgDeviceAuthRepository,
   PgIdentityRepository,
+  PgIngestRateLimiter,
+  PgMessageRepository,
   PgPairingCodeRepository,
   PgPairRateLimiter,
   PgReplayCache,
@@ -11,11 +13,14 @@ import {
   PgUserRepository,
   DEFAULT_RATE_LIMIT_CONFIG,
 } from "../../src/adapters/db-postgres/index.js";
+import { DEFAULT_INGEST_CONFIG } from "../../src/adapters/ingest/index.js";
 import { PgBossQueuePublisher } from "../../src/adapters/queue-pgboss/pg-queue-publisher.js";
 import {
   MemoryDeviceAuthRepository,
   MemoryIdentityRepository,
   MemoryPairingCodeRepository,
+  MemoryIngestRateLimiter,
+  MemoryMessageRepository,
   MemoryPairRateLimiter,
   MemoryQueuePublisher,
   MemoryReplayCache,
@@ -162,6 +167,32 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
       await expect(
         q.publishInTx(null, { type: "message.created", owner_id: OWNER }),
       ).rejects.toBeInstanceOf(InfrastructureError);
+
+      const msgs = new MemoryMessageRepository();
+      msgs.fault.throwInfra = true;
+      await expect(
+        msgs.upsertBatch({
+          ownerId: OWNER,
+          deviceId: OWNER,
+          messages: [
+            {
+              deviceMsgId: "x",
+              sender: "+1",
+              bodyCiphertext: new Uint8Array([1]),
+              receivedAt: new Date(),
+              simSlot: null,
+              direction: "inbound",
+            },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+
+      const ingestRl = new MemoryIngestRateLimiter();
+      ingestRl.fault.throwInfra = true;
+      await expect(ingestRl.checkRequestAllowed(OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(ingestRl.checkMessageVolumeAllowed(OWNER, 1)).rejects.toBeInstanceOf(
+        InfrastructureError,
+      );
     });
   });
 
@@ -349,6 +380,35 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
           },
         ),
       ).rejects.toBeInstanceOf(InfrastructureError);
+    });
+
+    it("PgMessageRepository + PgIngestRateLimiter: every method → InfrastructureError on fault", async () => {
+      const queue = new PgBossQueuePublisher({
+        send: async () => "job",
+      } as never);
+      const brokenMsgs = new PgMessageRepository(exploding, queue);
+      await expect(
+        brokenMsgs.upsertBatch({
+          ownerId: OWNER,
+          deviceId: OWNER,
+          messages: [
+            {
+              deviceMsgId: "x",
+              sender: "+15551234567",
+              bodyCiphertext: new Uint8Array([1]),
+              receivedAt: new Date(),
+              simSlot: null,
+              direction: "inbound",
+            },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+
+      const brokenRl = new PgIngestRateLimiter(exploding, DEFAULT_INGEST_CONFIG);
+      await expect(brokenRl.checkRequestAllowed(OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(brokenRl.checkMessageVolumeAllowed(OWNER, 1)).rejects.toBeInstanceOf(
+        InfrastructureError,
+      );
     });
   });
 });

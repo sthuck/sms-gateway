@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import {
   GetDeviceMe,
+  IngestMessageBatch,
   IssuePairingCode,
   PairDevice,
   ResolveDeviceAuth,
@@ -21,10 +22,16 @@ import {
 } from "../adapters/device-crypto/index.js";
 import {
   PgDeviceAuthRepository,
+  PgIngestRateLimiter,
+  PgMessageRepository,
   PgPairingCodeRepository,
   PgPairRateLimiter,
   PgReplayCache,
 } from "../adapters/db-postgres/index.js";
+import { IdentityBodyCodec } from "../adapters/body-codec/index.js";
+import { DEFAULT_INGEST_CONFIG, type IngestConfig } from "../adapters/ingest/index.js";
+import { formatPhoneSender } from "../adapters/phone/index.js";
+import type { QueuePublisher } from "../ports/outbound/queue-publisher.js";
 
 export type DeviceStack = {
   config: DeviceAuthConfig | null;
@@ -34,6 +41,8 @@ export type DeviceStack = {
 export type BuildDeviceStackOptions = {
   config: DeviceAuthConfig | null;
   pool: Pool | null;
+  queuePublisher?: QueuePublisher | null;
+  ingestConfig?: IngestConfig;
 };
 
 export function buildDeviceStack(options: BuildDeviceStackOptions): DeviceStack {
@@ -46,6 +55,19 @@ export function buildDeviceStack(options: BuildDeviceStackOptions): DeviceStack 
   const pairingCodes = new PgPairingCodeRepository(pool);
   const replay = new PgReplayCache(pool);
   const rateLimiter = new PgPairRateLimiter(pool, config.rateLimit);
+  const ingestConfig = options.ingestConfig ?? DEFAULT_INGEST_CONFIG;
+  const queuePublisher = options.queuePublisher ?? null;
+
+  const ingestMessageBatch =
+    queuePublisher !== null
+      ? new IngestMessageBatch({
+          messages: new PgMessageRepository(pool, queuePublisher),
+          rateLimiter: new PgIngestRateLimiter(pool, ingestConfig),
+          bodyCodec: new IdentityBodyCodec(),
+          formatPhone: formatPhoneSender,
+          defaultPhoneRegion: ingestConfig.defaultPhoneRegion,
+        })
+      : null;
 
   const useCases: DeviceUseCases = {
     issuePairingCode: new IssuePairingCode({
@@ -80,6 +102,7 @@ export function buildDeviceStack(options: BuildDeviceStackOptions): DeviceStack 
         verifyEs256P1363(canonical, signature, publicKey as Parameters<typeof verifyEs256P1363>[2]),
       nowSec: () => Math.floor(Date.now() / 1000),
     }),
+    ingestMessageBatch,
   };
 
   return { config, useCases };

@@ -53,7 +53,12 @@ export async function consumeRateLimit(
   bucketKey: string,
   limit: number,
   windowSec: number,
+  /** Increment by N (default 1). Used for message-volume limits. */
+  n = 1,
 ): Promise<RateLimitDecision> {
+  if (n < 1) {
+    throw new Error("consumeRateLimit n must be >= 1");
+  }
   return withDbInfra("rate limit consume failed", async () => {
     const client = await pool.connect();
     try {
@@ -102,18 +107,18 @@ export async function consumeRateLimit(
         Math.ceil(windowSec - (now.getTime() - windowStart.getTime()) / 1000),
       );
 
-      if (hitCount >= limit) {
+      if (hitCount + n > limit) {
         await client.query("COMMIT");
         return {
           allowed: false,
           limit,
-          remaining: 0,
+          remaining: Math.max(0, limit - hitCount),
           resetSec,
           retryAfterSec: resetSec,
         };
       }
 
-      hitCount += 1;
+      hitCount += n;
       await client.query(
         `INSERT INTO app.rate_limit_buckets (bucket_key, window_start, hit_count, locked_until)
        VALUES ($1, $2, $3, NULL)

@@ -67,9 +67,21 @@ import stability; new code should import from `src/adapters/*`.
 - Do not change SECURITY DEFINER lookup SQL signatures.
 - Wrap DB/network calls with `withDbInfra` so failures throw `InfrastructureError`.
 
+## Ingestion slice (PR C / STH-15)
+
+| Concern                                                         | Location                        |
+| --------------------------------------------------------------- | ------------------------------- |
+| Sender / timestamp / sim_slot / direction normalisation         | `domain/message/`               |
+| IngestMessageBatch                                              | `application/use-cases/`        |
+| MessageRepository, BodyCodec, IngestRateLimiter, QueuePublisher | `ports/outbound/`               |
+| `POST /v1/messages:batch`                                       | `adapters/http-fastify/`        |
+| Pg message upsert + publishInTx, ingest rate buckets            | `adapters/db-postgres/`         |
+| Identity BodyCodec (Phase 2 seam), libphonenumber sender        | `adapters/body-codec`, `phone/` |
+| Ingest env (`INGEST_*`)                                         | `adapters/ingest/`              |
+
 ## Planned follow-ups
 
-- **C** — redo STH-15 ingestion on the new structure (do not stack on draft #8).
+- Body encryption (STH-20) replaces `IdentityBodyCodec`.
 
 ## Error classification (STH-46 / STH-48 / STH-50)
 

@@ -1,13 +1,18 @@
 import { buildApp } from "./composition/index.js";
 import { loadConfig } from "./config.js";
-import { ensureQueues, loadQueueConfig, startBoss } from "./adapters/queue-pgboss/index.js";
+import {
+  ensureQueues,
+  loadQueueConfig,
+  PgBossQueuePublisher,
+  startBoss,
+} from "./adapters/queue-pgboss/index.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const queueConfig = loadQueueConfig();
-  const app = await buildApp(config);
 
   let boss: Awaited<ReturnType<typeof startBoss>> | undefined;
+  let queuePublisher: PgBossQueuePublisher | null = null;
   if (config.DATABASE_URL) {
     boss = await startBoss({
       connectionString: config.DATABASE_URL,
@@ -19,6 +24,12 @@ async function main(): Promise<void> {
       schedule: false,
     });
     await ensureQueues(boss, { queueConfig });
+    queuePublisher = new PgBossQueuePublisher(boss);
+  }
+
+  const app = await buildApp(config, { queuePublisher });
+
+  if (boss) {
     app.log.info({ schema: queueConfig.QUEUE_SCHEMA }, "queue publisher ready (publishInTx)");
   } else {
     app.log.warn("DATABASE_URL unset; queue publisher not started");
