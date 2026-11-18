@@ -38,9 +38,8 @@ android {
         }
         create("prod") {
             dimension = "environment"
-            // PLACEHOLDER: real production URL is on Aviad's homelab Kubernetes and is not decided yet.
             val url = (findProperty("prodBackendUrl") as String?)
-                ?: "https://sms-gateway.example.invalid"
+                ?: "https://sms.sthuck.info"
             buildConfigField("String", "BACKEND_URL", "\"$url\"")
         }
     }

@@ -35,13 +35,13 @@ Install on an emulator:
 | Flavour | `applicationId` | Default `BuildConfig.BACKEND_URL` |
 | --- | --- | --- |
 | `dev` (default) | `com.sthuck.smsgateway.dev` | `http://10.0.2.2:4010` |
-| `prod` | `com.sthuck.smsgateway` | `https://sms-gateway.example.invalid` (**placeholder** — the real URL is on the homelab Kubernetes cluster and is not decided yet) |
+| `prod` | `com.sthuck.smsgateway` | `https://sms.sthuck.info` (HTTPS only) |
 
 Override a URL at build time without editing source:
 
 ```bash
 ./gradlew assembleDevDebug -PdevBackendUrl=http://10.0.2.2:4010
-./gradlew assembleProdRelease -PprodBackendUrl=https://your-real-host.example
+./gradlew assembleProdRelease -PprodBackendUrl=https://sms.sthuck.info
 ```
 
 `dev` ships a network security config that allows cleartext HTTP only to
