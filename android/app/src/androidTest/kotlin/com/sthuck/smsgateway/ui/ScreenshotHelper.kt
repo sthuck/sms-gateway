@@ -1,7 +1,7 @@
 package com.sthuck.smsgateway.ui
 
-import android.content.Context
 import android.graphics.Bitmap
+import android.os.Environment
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.captureToImage
@@ -10,30 +10,42 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Writes Compose screenshots to the app's external files dir so CI can
- * `adb pull` them without root:
- * `/sdcard/Android/data/<package>/files/sms-gateway-screenshots/`.
+ * Writes Compose screenshots where CI can pull them without root:
+ * 1. App external files: `/sdcard/Android/data/<package>/files/sms-gateway-screenshots/`
+ * 2. Public Downloads mirror: `/sdcard/Download/sms-gateway-screenshots/`
  */
 object ScreenshotHelper {
     const val DIR_NAME = "sms-gateway-screenshots"
 
-    fun dir(context: Context = targetContext()): File =
-        File(context.getExternalFilesDir(null), DIR_NAME).also { it.mkdirs() }
-
     fun capture(node: SemanticsNodeInteraction, name: String): File {
         val bitmap = node.captureToImage().asAndroidBitmap()
-        val out = File(dir(), "$name.png")
+        val primary = write(bitmap, File(externalFilesDir(), "$name.png"))
+        // Best-effort mirror for flaky adb pull of app-specific external storage.
+        runCatching {
+            write(bitmap, File(publicDownloadDir(), "$name.png"))
+        }
+        return primary
+    }
+
+    private fun write(bitmap: Bitmap, out: File): File {
+        out.parentFile?.mkdirs()
         FileOutputStream(out).use { stream ->
             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
-                "Failed to compress screenshot $name"
+                "Failed to compress screenshot ${out.name}"
             }
         }
+        check(out.exists() && out.length() > 0L) { "Screenshot not written: ${out.absolutePath}" }
         return out
     }
 
-    fun targetContext(): Context =
+    private fun targetContext() =
         InstrumentationRegistry.getInstrumentation().targetContext
 
-    /** Absolute device path used by the CI pull step. */
-    fun devicePath(): String = dir().absolutePath
+    private fun externalFilesDir(): File =
+        File(targetContext().getExternalFilesDir(null), DIR_NAME).also { it.mkdirs() }
+
+    private fun publicDownloadDir(): File {
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        return File(downloads, DIR_NAME).also { it.mkdirs() }
+    }
 }

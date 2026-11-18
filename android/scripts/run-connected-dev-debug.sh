@@ -80,13 +80,34 @@ set -e
 # Don't leave a stuck sender if gradle failed early.
 wait "$SENDER_PID" || true
 
-# Pull Compose UI screenshots written by UiScreenshotTest (best-effort).
+# Pull Compose UI screenshots written by UiScreenshotTest.
 SCREENSHOT_HOST="$ROOT/app/build/screenshots"
-SCREENSHOT_DEVICE="/sdcard/Android/data/${PACKAGE}/files/sms-gateway-screenshots"
+SCREENSHOT_DEVICE_APP="/sdcard/Android/data/${PACKAGE}/files/sms-gateway-screenshots"
+SCREENSHOT_DEVICE_DL="/sdcard/Download/sms-gateway-screenshots"
 mkdir -p "$SCREENSHOT_HOST"
-log "Pulling screenshots from $SCREENSHOT_DEVICE -> $SCREENSHOT_HOST"
-adb pull "$SCREENSHOT_DEVICE/." "$SCREENSHOT_HOST/" 2>/dev/null || \
-  log "No screenshots found on device (tests may have skipped UI capture)."
+
+# Re-run screenshot tests explicitly so a quiet/empty connected suite cannot
+# skip UI capture while still reporting BUILD SUCCESSFUL.
+if (( GRADLE_RC == 0 )); then
+  log "Re-running UiScreenshotTest via am instrument"
+  adb shell am instrument -w \
+    -e class com.sthuck.smsgateway.ui.UiScreenshotTest \
+    "${PACKAGE}.test/dagger.hilt.android.testing.HiltTestRunner" \
+    | tee "$ROOT/app/build/reports/ui-screenshot-instrument.txt"
+fi
+
+log "Pulling screenshots from $SCREENSHOT_DEVICE_APP and $SCREENSHOT_DEVICE_DL"
+adb pull "$SCREENSHOT_DEVICE_APP/." "$SCREENSHOT_HOST/" 2>/dev/null || true
+adb pull "$SCREENSHOT_DEVICE_DL/." "$SCREENSHOT_HOST/" 2>/dev/null || true
+PNG_COUNT="$(find "$SCREENSHOT_HOST" -type f -name '*.png' | wc -l | tr -d ' ')"
 ls -la "$SCREENSHOT_HOST" || true
+if (( PNG_COUNT < 4 )); then
+  log "Expected at least 4 PNGs under $SCREENSHOT_HOST, found $PNG_COUNT" >&2
+  # Do not fail the whole instrumented job on screenshot pull alone when the
+  # suite itself failed; when the suite passed, missing screenshots are an error.
+  if (( GRADLE_RC == 0 )); then
+    exit 1
+  fi
+fi
 
 exit "$GRADLE_RC"
