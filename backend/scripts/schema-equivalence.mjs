@@ -2,10 +2,13 @@
 /**
  * CI: prove (legacy migrations up + stamp) ≡ (empty DB + Drizzle baseline).
  *
- * Creates two temporary databases, applies each path, dumps schema-only
- * (excluding pgboss + drizzle), normalizes, and diffs. Exit 1 on mismatch.
+ * Creates two temporary databases, applies each path, then:
+ *   1. dumps schema-only (excluding pgboss + drizzle), normalizes, and diffs
+ *   2. captures security catalog fingerprints (ACLs, policies, role attrs,
+ *      proconfig, RLS flags) and diffs those too
  *
- * Requires a privileged MIGRATE_DATABASE_URL that can CREATE DATABASE.
+ * Exit 1 on mismatch. Requires a privileged MIGRATE_DATABASE_URL that can
+ * CREATE DATABASE.
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -13,6 +16,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import {
+  captureCatalog,
+  diffCatalogs,
+  formatCatalogDiffs,
+  stableStringify,
+  EXPECTED_CATALOG_PATH,
+} from "./catalog-fingerprint.mjs";
 
 const backendRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const adminUrl = process.env.MIGRATE_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -137,13 +147,61 @@ async function main() {
     dumpNormalized(legacyDb, legacyDump);
     dumpNormalized(drizzleDb, drizzleDump);
 
+    let failed = false;
     try {
       execFileSync("diff", ["-u", legacyDump, drizzleDump], { stdio: "inherit" });
-      console.log("Schema equivalence OK.");
+      console.log("Schema dump equivalence OK.");
     } catch {
       console.error("Schema dumps differ (legacy+stamp vs drizzle baseline).");
-      process.exitCode = 1;
+      failed = true;
     }
+
+    const legacyClient = new pg.Client({ connectionString: dbUrl(legacyDb) });
+    const drizzleClient = new pg.Client({ connectionString: dbUrl(drizzleDb) });
+    await legacyClient.connect();
+    await drizzleClient.connect();
+    try {
+      const legacyCatalog = await captureCatalog(legacyClient);
+      const drizzleCatalog = await captureCatalog(drizzleClient);
+      const catalogDiffs = diffCatalogs(legacyCatalog, drizzleCatalog, {
+        leftLabel: "legacy+stamp",
+        rightLabel: "drizzle-baseline",
+      });
+      if (catalogDiffs.length > 0) {
+        console.error(formatCatalogDiffs(catalogDiffs, "Catalog fingerprint differs"));
+        failed = true;
+      } else {
+        console.log("Catalog equivalence OK (ACLs, policies, roles, proconfig, RLS).");
+      }
+
+      // Keep committed expected-catalog.json in sync with the drizzle baseline path.
+      if (process.env.SMS_UPDATE_EXPECTED_CATALOG === "1") {
+        fs.writeFileSync(EXPECTED_CATALOG_PATH, stableStringify(drizzleCatalog));
+        console.log(`Updated ${EXPECTED_CATALOG_PATH}`);
+      } else {
+        const committed = JSON.parse(fs.readFileSync(EXPECTED_CATALOG_PATH, "utf8"));
+        const expectedDiffs = diffCatalogs(committed, drizzleCatalog, {
+          leftLabel: "expected-catalog.json",
+          rightLabel: "drizzle-baseline",
+        });
+        if (expectedDiffs.length > 0) {
+          console.error(
+            formatCatalogDiffs(
+              expectedDiffs,
+              "Committed expected-catalog.json is stale — re-run with SMS_UPDATE_EXPECTED_CATALOG=1",
+            ),
+          );
+          failed = true;
+        } else {
+          console.log("expected-catalog.json matches drizzle baseline.");
+        }
+      }
+    } finally {
+      await legacyClient.end();
+      await drizzleClient.end();
+    }
+
+    if (failed) process.exitCode = 1;
   } finally {
     const cleanup = new pg.Client({ connectionString: adminUrl });
     await cleanup.connect();

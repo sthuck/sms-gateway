@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   canConnect,
   createAdminPool,
@@ -10,6 +16,9 @@ import {
   runMigrations,
 } from "../helpers/pg.js";
 import { OWNED_TABLE_FORCE_RLS_FLOOR } from "../../src/adapters/db-postgres/schema.js";
+
+const execFileAsync = promisify(execFile);
+const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const migratorOk = await canConnect(migrateDatabaseUrl());
 if (!migratorOk && process.env.CI === "true") {
@@ -57,13 +66,6 @@ describe.skipIf(!migratorOk)("Drizzle migrations", () => {
   }, 180_000);
 
   it("refuses migrate down (Drizzle has no down)", async () => {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const path = await import("node:path");
-    const { fileURLToPath } = await import("node:url");
-    const execFileAsync = promisify(execFile);
-    const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-
     await expect(
       execFileAsync("node", ["scripts/migrate.mjs", "down"], {
         cwd: backendRoot,
@@ -79,6 +81,26 @@ describe.skipIf(!migratorOk)("Drizzle migrations", () => {
       stderr: expect.stringMatching(/no down/i),
     });
   });
+
+  it("detects legacy DB on migrate:up and hints migrate:stamp", async () => {
+    await resetSchema(admin);
+    await runLegacyMigrations("up");
+
+    await expect(
+      execFileAsync("node", ["scripts/migrate.mjs", "up"], {
+        cwd: backendRoot,
+        env: {
+          ...process.env,
+          MIGRATE_DATABASE_URL: migrateDatabaseUrl(),
+          SMS_APP_PASSWORD: "sms_app",
+        },
+        encoding: "utf8",
+      }),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringMatching(/legacy DB detected: run migrate:stamp/i),
+    });
+  }, 180_000);
 });
 
 describe.skipIf(!migratorOk)("baseline stamp (legacy → Drizzle)", () => {
@@ -111,10 +133,6 @@ describe.skipIf(!migratorOk)("baseline stamp (legacy → Drizzle)", () => {
     );
     expect(journal).toHaveLength(1);
 
-    const fs = await import("node:fs");
-    const path = await import("node:path");
-    const { fileURLToPath } = await import("node:url");
-    const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
     const journalFile = JSON.parse(
       fs.readFileSync(path.join(backendRoot, "drizzle/meta/_journal.json"), "utf8"),
     ) as { entries: Array<{ when: number; tag: string }> };
@@ -127,37 +145,46 @@ describe.skipIf(!migratorOk)("baseline stamp (legacy → Drizzle)", () => {
     );
     expect(afterCols.rows[0]?.n).toBe(beforeCols.rows[0]?.n);
 
-    // Simulate a later migration with when > stamped created_at; it must still apply.
+    // Probe a later migration on a TEMP copy of drizzle/ — never rewrite tracked journal.
+    const tmpDrizzle = fs.mkdtempSync(path.join(os.tmpdir(), "sms-drizzle-probe-"));
+    fs.cpSync(path.join(backendRoot, "drizzle"), tmpDrizzle, { recursive: true });
     const laterWhen = journalFile.entries[0]!.when + 1_000;
     const laterTag = "0001_stamp_probe";
-    const laterSql = `ALTER TABLE users ADD COLUMN IF NOT EXISTS stamp_probe_col text;`;
-    const drizzleDir = path.join(backendRoot, "drizzle");
-    const laterPath = path.join(drizzleDir, `${laterTag}.sql`);
-    const journalPath = path.join(drizzleDir, "meta/_journal.json");
-    const journalOriginal = fs.readFileSync(journalPath, "utf8");
-    fs.writeFileSync(laterPath, laterSql);
-    const journalObj = JSON.parse(journalOriginal) as {
+    fs.writeFileSync(
+      path.join(tmpDrizzle, `${laterTag}.sql`),
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS stamp_probe_col text;`,
+    );
+    const tmpJournalPath = path.join(tmpDrizzle, "meta/_journal.json");
+    const tmpJournal = JSON.parse(fs.readFileSync(tmpJournalPath, "utf8")) as {
       entries: Array<Record<string, unknown>>;
     };
-    journalObj.entries.push({
+    tmpJournal.entries.push({
       idx: 1,
       version: "7",
       when: laterWhen,
       tag: laterTag,
       breakpoints: true,
     });
-    fs.writeFileSync(journalPath, JSON.stringify(journalObj, null, 2) + "\n");
+    fs.writeFileSync(tmpJournalPath, JSON.stringify(tmpJournal, null, 2) + "\n");
 
     try {
-      await runMigrations("up");
+      await execFileAsync("node", ["scripts/migrate.mjs", "up"], {
+        cwd: backendRoot,
+        env: {
+          ...process.env,
+          MIGRATE_DATABASE_URL: migrateDatabaseUrl(),
+          SMS_APP_PASSWORD: "sms_app",
+          DRIZZLE_MIGRATIONS_FOLDER: tmpDrizzle,
+        },
+        maxBuffer: 10 * 1024 * 1024,
+      });
       const probe = await admin.query(
         `SELECT 1 FROM information_schema.columns
          WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'stamp_probe_col'`,
       );
       expect(probe.rows).toHaveLength(1);
     } finally {
-      fs.unlinkSync(laterPath);
-      fs.writeFileSync(journalPath, journalOriginal);
+      fs.rmSync(tmpDrizzle, { recursive: true, force: true });
       await admin
         .query(`ALTER TABLE users DROP COLUMN IF EXISTS stamp_probe_col`)
         .catch(() => undefined);
@@ -168,4 +195,25 @@ describe.skipIf(!migratorOk)("baseline stamp (legacy → Drizzle)", () => {
     await resetSchema(admin);
     await expect(runMigrations("stamp")).rejects.toThrow(/legacy|pgmigrations/i);
   }, 60_000);
+});
+
+describe("drizzle journal + push guards", () => {
+  it("journal when values strictly increase", () => {
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(backendRoot, "drizzle/meta/_journal.json"), "utf8"),
+    ) as { entries: Array<{ when: number }> };
+    for (let i = 1; i < journal.entries.length; i++) {
+      expect(journal.entries[i]!.when).toBeGreaterThan(journal.entries[i - 1]!.when);
+    }
+  });
+
+  it("package.json has no drizzle-kit push script", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(backendRoot, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    for (const [name, value] of Object.entries(pkg.scripts)) {
+      expect(name, name).not.toMatch(/\bpush\b/i);
+      expect(value, `${name}=${value}`).not.toMatch(/drizzle-kit\s+push/);
+    }
+  });
 });

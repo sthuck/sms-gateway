@@ -1,0 +1,1404 @@
+{
+  "version": 1,
+  "roles": [
+    {
+      "rolname": "sms_app",
+      "rolsuper": false,
+      "rolinherit": true,
+      "rolcreaterole": false,
+      "rolcreatedb": false,
+      "rolcanlogin": true,
+      "rolreplication": false,
+      "rolbypassrls": false,
+      "rolconnlimit": -1
+    }
+  ],
+  "tables": [
+    {
+      "schema": "app",
+      "name": "device_replay_cache",
+      "rls": false,
+      "force_rls": false,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "app",
+      "name": "rate_limit_buckets",
+      "rls": false,
+      "force_rls": false,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "agent_clients",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "agent_grants",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "audit_log",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "device_credentials",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "devices",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "messages",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "pairing_codes",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "queue_processed_jobs",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "sender_ai_optout",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "sessions",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "stream_membership",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "streams",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "user_identities",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "name": "users",
+      "rls": true,
+      "force_rls": true,
+      "owner": "sms",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "REFERENCES",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRIGGER",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "TRUNCATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "schema": "public",
+      "table": "agent_clients",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "agent_grants",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "audit_log",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "device_credentials",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "devices",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "messages",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "pairing_codes",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "queue_processed_jobs",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "sender_ai_optout",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "sessions",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "stream_membership",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "streams",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "user_identities",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    },
+    {
+      "schema": "public",
+      "table": "users",
+      "name": "owner_isolation",
+      "permissive": "PERMISSIVE",
+      "roles": ["sms_app"],
+      "cmd": "ALL",
+      "qual": "(owner_id = app.current_owner_id())",
+      "with_check": "(owner_id = app.current_owner_id())"
+    }
+  ],
+  "functions": [
+    {
+      "schema": "app",
+      "name": "current_owner_id",
+      "args": "",
+      "security_definer": false,
+      "config": [],
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "app",
+      "name": "lookup_device_for_auth",
+      "args": "p_device_id uuid",
+      "security_definer": true,
+      "config": ["search_path=pg_catalog, public, app"],
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "app",
+      "name": "lookup_pairing_code",
+      "args": "p_code_hash text",
+      "security_definer": true,
+      "config": ["search_path=pg_catalog, public, app"],
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "app",
+      "name": "lookup_session",
+      "args": "p_session_id_hash text",
+      "security_definer": true,
+      "config": ["search_path=pg_catalog, public, app"],
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "app",
+      "name": "lookup_user_by_email",
+      "args": "p_email text",
+      "security_definer": true,
+      "config": ["search_path=pg_catalog, public, app"],
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "app",
+      "name": "lookup_user_identity",
+      "args": "p_issuer text, p_sub text",
+      "security_definer": true,
+      "config": ["search_path=pg_catalog, public, app"],
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "app",
+      "name": "users_set_owner_id",
+      "args": "",
+      "security_definer": false,
+      "config": [],
+      "acl": [
+        {
+          "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ]
+    }
+  ],
+  "namespaces": [
+    {
+      "name": "app",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "USAGE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "CREATE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms",
+          "privilege": "USAGE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "name": "public",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "USAGE",
+          "grantable": false
+        }
+      ]
+    }
+  ],
+  "database": {
+    "acl": [
+      {
+        "grantee": "sms_app",
+        "privilege": "CONNECT",
+        "grantable": false
+      }
+    ]
+  },
+  "defaultAcls": [
+    {
+      "schema": "public",
+      "objtype": "S",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "USAGE",
+          "grantable": false
+        }
+      ]
+    },
+    {
+      "schema": "public",
+      "objtype": "r",
+      "acl": [
+        {
+          "grantee": "sms_app",
+          "privilege": "DELETE",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "INSERT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "SELECT",
+          "grantable": false
+        },
+        {
+          "grantee": "sms_app",
+          "privilege": "UPDATE",
+          "grantable": false
+        }
+      ]
+    }
+  ]
+}

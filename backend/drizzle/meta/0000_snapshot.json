@@ -392,7 +392,7 @@
               "expression": "at",
               "isExpression": false,
               "asc": false,
-              "nulls": "last"
+              "nulls": "first"
             }
           ],
           "isUnique": false,
@@ -585,8 +585,8 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "device_replay_cache_identity_kind_value_hash_pk": {
-          "name": "device_replay_cache_identity_kind_value_hash_pk",
+        "device_replay_cache_pkey": {
+          "name": "device_replay_cache_pkey",
           "columns": ["identity", "kind", "value_hash"]
         }
       },
@@ -777,7 +777,7 @@
               "expression": "received_at",
               "isExpression": false,
               "asc": false,
-              "nulls": "last"
+              "nulls": "first"
             }
           ],
           "isUnique": false,
@@ -1005,7 +1005,7 @@
               "expression": "processed_at",
               "isExpression": false,
               "asc": false,
-              "nulls": "last"
+              "nulls": "first"
             }
           ],
           "isUnique": false,
@@ -1026,8 +1026,8 @@
         }
       },
       "compositePrimaryKeys": {
-        "queue_processed_jobs_owner_id_dedupe_key_pk": {
-          "name": "queue_processed_jobs_owner_id_dedupe_key_pk",
+        "queue_processed_jobs_pkey": {
+          "name": "queue_processed_jobs_pkey",
           "columns": ["owner_id", "dedupe_key"]
         }
       },
@@ -1347,7 +1347,7 @@
               "expression": "created_at",
               "isExpression": false,
               "asc": false,
-              "nulls": "last"
+              "nulls": "first"
             }
           ],
           "isUnique": false,
@@ -1416,8 +1416,8 @@
         }
       },
       "compositePrimaryKeys": {
-        "stream_membership_stream_id_message_id_pk": {
-          "name": "stream_membership_stream_id_message_id_pk",
+        "stream_membership_pkey": {
+          "name": "stream_membership_pkey",
           "columns": ["stream_id", "message_id"]
         }
       },

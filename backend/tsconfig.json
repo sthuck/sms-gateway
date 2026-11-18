@@ -25,6 +25,13 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts", "drizzle.config.ts"],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.d.ts",
+    "scripts/**/*.d.mts",
+    "vitest.config.ts",
+    "drizzle.config.ts"
+  ],
   "exclude": ["dist", "node_modules"]
 }

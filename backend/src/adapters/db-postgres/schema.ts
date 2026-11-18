@@ -31,6 +31,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import ownedTablesJson from "./owned-tables.json" with { type: "json" };
 
 /** Application role — created in baseline custom SQL; kit must not manage it. */
 export const smsAppRole = pgRole("sms_app").existing();
@@ -418,7 +419,7 @@ export const rateLimitBuckets = appSchema.table("rate_limit_buckets", {
 });
 
 /** Tables with owner_id that must have FORCE ROW LEVEL SECURITY (custom SQL). */
-export const OWNED_TABLES = [
+export const OWNED_TABLES = ownedTablesJson as unknown as readonly [
   "users",
   "user_identities",
   "devices",
@@ -433,6 +434,6 @@ export const OWNED_TABLES = [
   "sender_ai_optout",
   "sessions",
   "queue_processed_jobs",
-] as const;
+];
 
 export const OWNED_TABLE_FORCE_RLS_FLOOR = OWNED_TABLES.length;

@@ -24,7 +24,10 @@
     "migrate:stamp": "node scripts/migrate.mjs stamp",
     "migrate:baseline": "node scripts/migrate.mjs baseline",
     "drizzle:generate": "drizzle-kit generate",
+    "drizzle:check": "node scripts/check-drizzle-drift.mjs",
     "schema:equivalence": "node scripts/schema-equivalence.mjs",
+    "catalog:write": "node scripts/catalog-fingerprint.mjs write",
+    "catalog:check": "node scripts/catalog-fingerprint.mjs check",
     "queue:bootstrap": "node scripts/bootstrap-pgboss.mjs"
   },
   "dependencies": {

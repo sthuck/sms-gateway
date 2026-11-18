@@ -147,8 +147,8 @@ See `docs/schema.md` and `backend/drizzle/README.md`.
 pnpm migrate:stamp   # marks baseline applied; does not re-run DDL
 ```
 
-There is **no** `migrate:down` (Drizzle has no down). Recreate the DB or
-restore a backup. Never use `drizzle-kit push`.
+There is **no** `migrate:down` script (Drizzle has no down). Recreate the DB or
+restore a backup. Never use `drizzle-kit push` (CI guards against exposing it).
 
 Integration tests expect the same URLs (or `APP_DATABASE_URL` for the app
 role) and an explicit `SMS_APP_PASSWORD`. They run against a real Postgres

@@ -223,13 +223,29 @@ DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms
 - **Existing DB:** if `pgmigrations` shows the legacy head and the Drizzle
   journal is empty, `migrate:stamp` records the baseline as applied **without**
   re-running DDL. `created_at` uses the journal entry's exact `when` (not
-  wall-clock — see drizzle-orm#5769).
-- **Down:** Drizzle has no down migrations. `migrate:down` exits with an error;
+  wall-clock — see drizzle-orm#5769). Before stamping, the wrapper compares the
+  live catalog to `drizzle/meta/expected-catalog.json` (policies, ENABLE+FORCE
+  RLS, grants / default privileges, `sms_app` role attributes, function
+  `search_path`) and refuses with a listed diff on mismatch. Stamp is idempotent
+  when the baseline row is already present.
+- **Legacy mistaken `up`:** if `public.pgmigrations` exists and the Drizzle
+  journal is empty, `migrate:up` fails with `legacy DB detected: run migrate:stamp`
+  instead of a raw `CREATE SCHEMA app failed`.
+- **Down:** Drizzle has no down migrations. There is no `migrate:down` script —
   restore a backup or recreate the database.
-- **Never** `drizzle-kit push`.
-- CI runs `pnpm schema:equivalence` to assert legacy+stamp ≡ drizzle baseline
-  via normalized `pg_dump --schema-only` (ignoring `pgmigrations`,
-  `drizzle.__drizzle_migrations`, and `pgboss`).
+- **Never** `drizzle-kit push` (no push script; CI greps for it). Apply only via
+  `pnpm migrate:up` / `migrate:stamp`. Authors use `drizzle-kit generate`; CI
+  runs `pnpm drizzle:check` so generate is a no-op against the committed snapshot
+  and journal `when` values strictly increase.
+- **Concurrency:** `migrate:up` / `stamp` take a Postgres advisory lock so
+  concurrent runs serialize.
+- CI `pnpm schema:equivalence` asserts legacy+stamp ≡ drizzle baseline via:
+  1. normalized `pg_dump --schema-only --no-privileges` (ignoring
+     `pgmigrations`, `drizzle.__drizzle_migrations`, and `pgboss`), **and**
+  2. a catalog fingerprint diff covering table/function/schema/database ACLs
+     (`aclexplode`), `pg_default_acl`, `sms_app` role flags (`rolcanlogin`,
+     `rolbypassrls`, `rolsuper`, …), function `proconfig` (`search_path`),
+     `relrowsecurity` / `relforcerowsecurity`, and `pg_policies`.
 
 ## RLS
 
