@@ -1,0 +1,80 @@
+# Optional Authentik stack for local OIDC (STH-9).
+# Does NOT start with the default `docker compose up`.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.authentik.yml --profile authentik up
+#
+# DEV-ONLY credentials below — never reuse in production.
+# See docs/local-dev.md for blueprint / seeded user steps.
+
+services:
+  authentik-postgres:
+    profiles: ["authentik"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: authentik
+      # DEV-ONLY — local Authentik DB password
+      POSTGRES_PASSWORD: authentik-dev-only
+      POSTGRES_DB: authentik
+    volumes:
+      - authentik_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik -d authentik"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  authentik-redis:
+    profiles: ["authentik"]
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  authentik-server:
+    profiles: ["authentik"]
+    image: ghcr.io/goauthentik/server:2024.10.4
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: "dev-only-authentik-secret-key-change-me"
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: authentik-dev-only
+      # Initial bootstrap (DEV-ONLY)
+      AUTHENTIK_BOOTSTRAP_EMAIL: akadmin@example.com
+      AUTHENTIK_BOOTSTRAP_PASSWORD: "dev-only-akadmin-password"
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./deploy/authentik/blueprints:/blueprints:ro
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+
+  authentik-worker:
+    profiles: ["authentik"]
+    image: ghcr.io/goauthentik/server:2024.10.4
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: "dev-only-authentik-secret-key-change-me"
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: authentik-dev-only
+    user: root
+    volumes:
+      - ./deploy/authentik/blueprints:/blueprints:ro
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+
+volumes:
+  authentik_pg_data:

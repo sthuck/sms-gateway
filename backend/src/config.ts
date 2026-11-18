@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { loadOidcAuthConfig, type OidcAuthConfig } from "./auth/oidc-config.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -17,7 +18,9 @@ const envSchema = z.object({
   LLM_API_KEY: z.string().optional(),
 });
 
-export type Config = z.infer<typeof envSchema>;
+export type Config = z.infer<typeof envSchema> & {
+  oidc: OidcAuthConfig | null;
+};
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = envSchema.safeParse(env);
@@ -27,5 +30,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .join("; ");
     throw new Error(`Invalid configuration: ${details}`);
   }
-  return parsed.data;
+
+  const oidc = loadOidcAuthConfig(env, { nodeEnv: parsed.data.NODE_ENV });
+
+  return {
+    ...parsed.data,
+    oidc,
+  };
 }

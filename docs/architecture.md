@@ -18,9 +18,13 @@ auth.
 | Packaging | pnpm workspaces | Monorepo: `backend/`, `web/`, `android/` |
 | Deploy | Helm on Kubernetes | Chart under `deploy/helm/sms-gateway/` |
 
-Decisions that remain open (see also Linear STH-6 / architecture canvas):
+Decisions:
 
-- Exact OIDC provider for user auth (STH-9)
+- User auth IdP: **Authentik** via generic OIDC (STH-9) — see
+  `docs/adr/0001-oidc-authentik.md` and `docs/deployment-auth.md`
+
+Still open (see also Linear STH-6 / architecture canvas):
+
 - Message-body encryption key / KMS secret handling (see below)
 
 ## Monorepo layout

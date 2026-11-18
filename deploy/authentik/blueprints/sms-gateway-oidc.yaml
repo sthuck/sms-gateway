@@ -1,0 +1,50 @@
+# Authentik blueprint (DEV-ONLY) — OAuth2/OIDC provider + application for SMS Gateway.
+# Apply via Authentik UI (System → Blueprints) or document-manual steps in docs/local-dev.md
+# if blueprint import is unavailable in your Authentik version.
+#
+# Redirect URI matches the local API callback. Client secret is DEV-ONLY.
+
+version: 1
+metadata:
+  name: sms-gateway-oidc-dev
+entries:
+  - model: authentik_providers_oauth2.oauth2provider
+    id: provider
+    state: present
+    identifiers:
+      name: SMS Gateway (dev)
+    attrs:
+      name: SMS Gateway (dev)
+      client_type: confidential
+      client_id: sms-gateway-dev
+      # DEV-ONLY client secret — local compose only
+      client_secret: "dev-only-oidc-client-secret"
+      redirect_uris: |
+        http://127.0.0.1:8080/v1/auth/callback
+        http://localhost:8080/v1/auth/callback
+        http://localhost:5173/v1/auth/callback
+      sub_mode: user_id
+      include_claims_in_id_token: true
+      issuer_mode: per_provider
+
+  - model: authentik_core.application
+    state: present
+    identifiers:
+      slug: sms-gateway
+    attrs:
+      name: SMS Gateway
+      slug: sms-gateway
+      provider: !KeyOf provider
+      meta_launch_url: http://127.0.0.1:8080/v1/auth/login
+
+  - model: authentik_core.user
+    state: present
+    identifiers:
+      username: sms-dev
+    attrs:
+      username: sms-dev
+      name: SMS Dev User
+      email: sms-dev@example.com
+      # DEV-ONLY password for the seeded test user
+      password: "dev-only-sms-user-password"
+      is_active: true

@@ -63,6 +63,7 @@ describe.skipIf(!migratorOk)("RLS owner isolation", () => {
         "agent_grants",
         "audit_log",
         "sender_ai_optout",
+        "sessions",
       ]),
     );
   });

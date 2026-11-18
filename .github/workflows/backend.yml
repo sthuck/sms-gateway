@@ -11,6 +11,8 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "docker-compose.yml"
+      - "docker-compose.authentik.yml"
+      - "deploy/authentik/**"
       - ".github/workflows/backend.yml"
   pull_request:
     paths:
@@ -19,6 +21,8 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "docker-compose.yml"
+      - "docker-compose.authentik.yml"
+      - "deploy/authentik/**"
       - ".github/workflows/backend.yml"
 
 concurrency:
@@ -70,8 +74,14 @@ jobs:
           pnpm migrate:up
           pnpm migrate:down
           pnpm migrate:down
+          pnpm migrate:down
           pnpm migrate:up
       - run: pnpm test
       - name: Build Docker image
         working-directory: ${{ github.workspace }}
         run: docker build -f backend/Dockerfile -t sms-gateway-backend:ci .
+      - name: Validate Compose files
+        working-directory: ${{ github.workspace }}
+        run: |
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.authentik.yml --profile authentik config -q

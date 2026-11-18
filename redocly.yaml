@@ -4,3 +4,5 @@ extends:
 apis:
   device@v1:
     root: docs/contracts/device-api.yaml
+  user@v1:
+    root: docs/contracts/user-api.yaml

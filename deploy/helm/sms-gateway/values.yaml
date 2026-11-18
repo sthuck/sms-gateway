@@ -17,6 +17,22 @@ config:
   # OpenAI-compatible classifier provider (non-secret pieces)
   LLM_BASE_URL: ""
   LLM_MODEL: ""
+  # OIDC (Authentik or any generic provider) — see docs/deployment-auth.md
+  OIDC_ISSUER_URL: ""
+  OIDC_CLIENT_ID: ""
+  OIDC_REDIRECT_URI: ""
+  OIDC_SCOPES: "openid profile email"
+  OIDC_CLAIM_EMAIL: email
+  OIDC_CLAIM_NAME: name
+  OIDC_AUDIENCE: ""
+  OIDC_ALLOWED_ALGS: "RS256,ES256"
+  REQUIRE_MFA: "true"
+  MFA_CLAIMS_MISSING: deny
+  AUTO_LINK_BY_EMAIL: "false"
+  PUBLIC_BASE_URL: ""
+  SESSION_COOKIE_NAME: sms_session
+  CSRF_COOKIE_NAME: sms_csrf
+  SESSION_TTL_SECONDS: "604800"
 
 # Secret-backed references. Create these Secrets out-of-band; nothing is generated.
 secrets:
@@ -29,6 +45,12 @@ secrets:
   # Expected keys: LLM_API_KEY
   llmSecretName: sms-gateway-llm
   llmSecretKey: LLM_API_KEY
+  # Expected keys: OIDC_CLIENT_SECRET, SESSION_SECRET (min 32 chars)
+  oidcSecretName: sms-gateway-oidc
+  oidcClientSecretKey: OIDC_CLIENT_SECRET
+  sessionSecretKey: SESSION_SECRET
+  # When false, OIDC secret refs are omitted (API runs without login until configured).
+  oidcEnabled: false
 
 api:
   enabled: true
