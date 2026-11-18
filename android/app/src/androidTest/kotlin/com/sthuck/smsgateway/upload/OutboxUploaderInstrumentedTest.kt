@@ -59,12 +59,14 @@ class OutboxUploaderInstrumentedTest {
                 serverUrl = server.url("/").toString(),
             )
         }
+        val dao = db.queuedMessageDao()
         uploader = OutboxUploader(
-            dao = db.queuedMessageDao(),
+            dao = dao,
             deviceApi = api,
             credentialStore = credentials,
             pairingSession = PairingSession(),
             json = json,
+            housekeeping = OutboxHousekeeping(dao),
         )
     }
 

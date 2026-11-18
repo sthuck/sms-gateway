@@ -8,9 +8,12 @@ import com.sthuck.smsgateway.data.remote.dto.Problem
 import com.sthuck.smsgateway.data.remote.dto.ProblemCodes
 import com.sthuck.smsgateway.pairing.PairingCredentialsReader
 import com.sthuck.smsgateway.pairing.PairingSession
+import com.sthuck.smsgateway.sms.IncomingSmsMapper
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import java.io.IOException
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.ThreadLocalRandom
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,7 +27,6 @@ sealed class UploadPassResult {
     data object Idle : UploadPassResult()
     data class RetryLater(val reason: String) : UploadPassResult()
     data class StopForRePair(val code: String) : UploadPassResult()
-    data class Failed(val reason: String) : UploadPassResult()
 }
 
 /**
@@ -42,11 +44,14 @@ class OutboxUploader @Inject constructor(
     private val credentialStore: PairingCredentialsReader,
     private val pairingSession: PairingSession,
     private val json: Json,
+    private val housekeeping: OutboxHousekeeping,
 ) {
     suspend fun runOnce(nowEpochMs: Long = System.currentTimeMillis()): UploadPassResult {
         if (!credentialStore.current().isPaired) {
             return UploadPassResult.NothingToDo
         }
+
+        housekeeping.enforceLimits(nowEpochMs)
 
         val ready = dao.getReadyForUpload(nowEpochMs, UploadDefaults.MAX_BATCH_MESSAGES)
         if (ready.isEmpty()) return UploadPassResult.Idle
@@ -54,10 +59,10 @@ class OutboxUploader @Inject constructor(
         // Park oversized bodies locally (contract body_too_large) without a round-trip.
         val uploadable = mutableListOf<QueuedMessageEntity>()
         for (row in ready) {
-            if (row.body.length > UploadDefaults.MAX_BODY_CHARS) {
+            if (IncomingSmsMapper.unicodeLength(row.body) > UploadDefaults.MAX_BODY_CHARS) {
                 dao.park(
                     deviceMsgId = row.deviceMsgId,
-                    error = "body_too_large: body exceeds ${UploadDefaults.MAX_BODY_CHARS} characters",
+                    error = "body_too_large: body exceeds ${UploadDefaults.MAX_BODY_CHARS} Unicode characters",
                     nowEpochMs = nowEpochMs,
                 )
             } else {
@@ -162,13 +167,13 @@ class OutboxUploader @Inject constructor(
                 return tryUploadSubset(first.rows, nowEpochMs)
             }
             ProblemCodes.RATE_LIMITED -> {
-                val delay = retryAfterDelayMs(e)
+                val delay = retryAfterDelayMs(e, nowEpochMs)
                     ?: backoffMs(rows.first().attemptCount)
                 scheduleRetry(rows, nowEpochMs, code, delayMs = delay)
                 return UploadPassResult.RetryLater(code)
             }
             ProblemCodes.INTERNAL_ERROR, ProblemCodes.SERVICE_UNAVAILABLE -> {
-                val delay = retryAfterDelayMs(e)
+                val delay = retryAfterDelayMs(e, nowEpochMs)
                     ?: backoffMs(rows.minOf { it.attemptCount })
                 val reason = code!!
                 scheduleRetry(rows, nowEpochMs, reason, delayMs = delay)
@@ -177,7 +182,7 @@ class OutboxUploader @Inject constructor(
             else -> {
                 if (shouldRetryHttp(e.code(), problem)) {
                     val reason = code ?: "http_${e.code()}"
-                    val delay = retryAfterDelayMs(e)
+                    val delay = retryAfterDelayMs(e, nowEpochMs)
                         ?: backoffMs(rows.minOf { it.attemptCount })
                     scheduleRetry(rows, nowEpochMs, reason, delayMs = delay)
                     return UploadPassResult.RetryLater(reason)
@@ -272,10 +277,21 @@ class OutboxUploader @Inject constructor(
             return httpCode !in 400..499
         }
 
-        fun retryAfterDelayMs(e: HttpException): Long? {
-            val raw = e.response()?.headers()?.get("Retry-After") ?: return null
+        /**
+         * Parses `Retry-After` as delta-seconds or HTTP-date (RFC 9110).
+         * Returns delay from [nowEpochMs]; null when the header is absent/unparsable.
+         */
+        fun retryAfterDelayMs(
+            e: HttpException,
+            nowEpochMs: Long = System.currentTimeMillis(),
+        ): Long? {
+            val raw = e.response()?.headers()?.get("Retry-After")?.trim().orEmpty()
+            if (raw.isEmpty()) return null
             raw.toLongOrNull()?.let { return it.coerceAtLeast(0L) * 1000L }
-            return null
+            return runCatching {
+                val instant = Instant.from(DateTimeFormatter.RFC_1123_DATE_TIME.parse(raw))
+                (instant.toEpochMilli() - nowEpochMs).coerceAtLeast(0L)
+            }.getOrNull()
         }
 
         /** Full-jitter exponential backoff from 15s, capped at 15m (contract). */

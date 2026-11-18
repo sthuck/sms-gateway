@@ -6,7 +6,12 @@ import android.content.Intent
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
-/** Re-schedules outbox upload after reboot (WorkManager + app start also cover this). */
+/**
+ * Re-schedules outbox upload after reboot.
+ *
+ * Not `directBootAware`: WorkManager / Room / DataStore use credential-encrypted
+ * storage, so we only listen for [Intent.ACTION_BOOT_COMPLETED] (after unlock).
+ */
 @AndroidEntryPoint
 class BootUploadReceiver : BroadcastReceiver() {
 
@@ -14,11 +19,7 @@ class BootUploadReceiver : BroadcastReceiver() {
     lateinit var uploadScheduler: UploadScheduler
 
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action != Intent.ACTION_BOOT_COMPLETED &&
-            intent?.action != Intent.ACTION_LOCKED_BOOT_COMPLETED
-        ) {
-            return
-        }
+        if (intent?.action != Intent.ACTION_BOOT_COMPLETED) return
         uploadScheduler.enqueueUpload()
     }
 }

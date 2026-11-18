@@ -1,5 +1,6 @@
 package com.sthuck.smsgateway.upload
 
+import com.sthuck.smsgateway.data.local.ContentKeyCounterEntity
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.data.local.QueuedMessageEntity
 import com.sthuck.smsgateway.data.remote.DeviceApi
@@ -51,7 +52,7 @@ class OutboxUploaderTest {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(DeviceApi::class.java)
-        uploader = OutboxUploader(dao, api, credentials, PairingSession(), json)
+        uploader = OutboxUploader(dao, api, credentials, PairingSession(), json, OutboxHousekeeping(dao))
     }
 
     @After
@@ -283,6 +284,35 @@ class OutboxUploaderTest {
     }
 
     @Test
+    fun retryAfterHttpDateIsHonoured() = runBlocking {
+        dao.rows += sample("sms-1")
+        val now = 1_000_000L
+        val httpDate = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
+            .withZone(java.time.ZoneOffset.UTC)
+            .format(java.time.Instant.ofEpochMilli(now + 45_000L))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(503)
+                .setBody(
+                    """
+                    {
+                      "type":"about:blank",
+                      "title":"unavailable",
+                      "status":503,
+                      "code":"service_unavailable",
+                      "retryable":true,
+                      "detail":"try later"
+                    }
+                    """.trimIndent(),
+                )
+                .addHeader("Content-Type", "application/problem+json")
+                .addHeader("Retry-After", httpDate),
+        )
+        uploader.runOnce(nowEpochMs = now)
+        assertEquals(now + 45_000L, dao.rows.single().nextAttemptAtEpochMs)
+    }
+
+    @Test
     fun batchTooLargeSplitsAndUploadsSubset() = runBlocking {
         dao.rows += sample("sms-a")
         dao.rows += sample("sms-b")
@@ -391,13 +421,25 @@ private fun PairingCredentialsReader(
 
 private class FakeDao : QueuedMessageDao {
     val rows = mutableListOf<QueuedMessageEntity>()
+    private val counters = mutableMapOf<String, Int>()
 
     override suspend fun getAll(): List<QueuedMessageEntity> = rows.toList()
     override fun observePendingCount(): Flow<Int> = flowOf(rows.count { !it.parked })
     override fun observeParkedCount(): Flow<Int> = flowOf(rows.count { it.parked })
     override fun observePendingRecent(limit: Int) = flowOf(rows.filter { !it.parked }.take(limit))
     override fun observeParkedRecent(limit: Int) = flowOf(rows.filter { it.parked }.take(limit))
+    override suspend fun countPending() = rows.count { !it.parked }
+    override suspend fun countAll() = rows.size
     override suspend fun countByContentKey(contentKey: String) = rows.count { it.contentKey == contentKey }
+    override suspend fun getNextOrdinal(contentKey: String): Int? = counters[contentKey]
+    override suspend fun upsertContentKeyCounter(counter: ContentKeyCounterEntity) {
+        counters[counter.contentKey] = counter.nextOrdinal
+    }
+    override suspend fun getExpiredPending(cutoffEpochMs: Long) =
+        rows.filter { !it.parked && it.createdAtEpochMs < cutoffEpochMs }
+            .sortedBy { it.createdAtEpochMs }
+    override suspend fun getOldestPending(limit: Int) =
+        rows.filter { !it.parked }.sortedBy { it.createdAtEpochMs }.take(limit)
     override suspend fun getReadyForUpload(nowEpochMs: Long, limit: Int) =
         rows.filter { !it.parked && it.nextAttemptAtEpochMs <= nowEpochMs }
             .sortedBy { it.createdAtEpochMs }

@@ -91,6 +91,15 @@ fun StatusScreen(
                     }
                 }
             }
+            Text(
+                text = stringResource(
+                    R.string.status_outbox_retention,
+                    state.outboxMaxRows,
+                    state.outboxTtlDays,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             StatusRow(
                 stringResource(R.string.status_queue),
                 pluralStringResource(R.plurals.status_queue_count, state.queuedCount, state.queuedCount),

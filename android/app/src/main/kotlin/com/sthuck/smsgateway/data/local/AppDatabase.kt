@@ -6,7 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Current Room schema version; must match `app/schemas/.../<n>.json`. */
-const val APP_DATABASE_VERSION = 3
+const val APP_DATABASE_VERSION = 4
 
 /**
  * Outbox database. Schema JSON is exported under `app/schemas/` and must
@@ -14,7 +14,7 @@ const val APP_DATABASE_VERSION = 3
  * AutoMigration (see STH-41). Do not enable destructive fallback on release.
  */
 @Database(
-    entities = [QueuedMessageEntity::class],
+    entities = [QueuedMessageEntity::class, ContentKeyCounterEntity::class],
     version = APP_DATABASE_VERSION,
     exportSchema = true,
 )
@@ -44,6 +44,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_2_3)
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `content_key_counters` " +
+                        "(`contentKey` TEXT NOT NULL, `nextOrdinal` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`contentKey`))",
+                )
+                // Seed counters from any rows still in the outbox so a later
+                // identical SMS does not reuse an in-flight ordinal.
+                db.execSQL(
+                    """
+                    INSERT INTO content_key_counters (contentKey, nextOrdinal)
+                    SELECT contentKey, COUNT(*) FROM queued_messages GROUP BY contentKey
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4)
     }
 }

@@ -4,12 +4,19 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface QueuedMessageDao {
     @Query("SELECT * FROM queued_messages ORDER BY createdAtEpochMs ASC")
     suspend fun getAll(): List<QueuedMessageEntity>
+
+    @Query("SELECT COUNT(*) FROM queued_messages")
+    suspend fun countAll(): Int
+
+    @Query("SELECT COUNT(*) FROM queued_messages WHERE parked = 0")
+    suspend fun countPending(): Int
 
     @Query("SELECT COUNT(*) FROM queued_messages WHERE parked = 0")
     fun observePendingCount(): Flow<Int>
@@ -32,6 +39,23 @@ interface QueuedMessageDao {
     @Query("SELECT COUNT(*) FROM queued_messages WHERE contentKey = :contentKey")
     suspend fun countByContentKey(contentKey: String): Int
 
+    @Query("SELECT nextOrdinal FROM content_key_counters WHERE contentKey = :contentKey")
+    suspend fun getNextOrdinal(contentKey: String): Int?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertContentKeyCounter(counter: ContentKeyCounterEntity)
+
+    /**
+     * Allocate the next ordinal for [contentKey]. Counters survive upload
+     * deletes so a later identical SMS does not reuse ordinal 0 (M2).
+     */
+    @Transaction
+    suspend fun allocateOrdinal(contentKey: String): Int {
+        val next = getNextOrdinal(contentKey) ?: 0
+        upsertContentKeyCounter(ContentKeyCounterEntity(contentKey, next + 1))
+        return next
+    }
+
     @Query(
         "SELECT * FROM queued_messages WHERE parked = 0 " +
             "AND nextAttemptAtEpochMs <= :nowEpochMs " +
@@ -42,6 +66,18 @@ interface QueuedMessageDao {
     /** Earliest nextAttemptAt among non-parked rows, or null when the outbox is empty. */
     @Query("SELECT MIN(nextAttemptAtEpochMs) FROM queued_messages WHERE parked = 0")
     suspend fun earliestPendingAttemptAtEpochMs(): Long?
+
+    @Query(
+        "SELECT * FROM queued_messages WHERE parked = 0 " +
+            "AND createdAtEpochMs < :cutoffEpochMs ORDER BY createdAtEpochMs ASC",
+    )
+    suspend fun getExpiredPending(cutoffEpochMs: Long): List<QueuedMessageEntity>
+
+    @Query(
+        "SELECT * FROM queued_messages WHERE parked = 0 " +
+            "ORDER BY createdAtEpochMs ASC LIMIT :limit",
+    )
+    suspend fun getOldestPending(limit: Int): List<QueuedMessageEntity>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(message: QueuedMessageEntity): Long

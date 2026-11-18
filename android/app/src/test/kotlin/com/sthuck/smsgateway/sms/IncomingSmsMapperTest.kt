@@ -113,8 +113,10 @@ class IncomingSmsMapperTest {
     fun mapsSimSlotIncludingUnknown() {
         assertEquals(0, IncomingSmsMapper.mapSimSlot(0))
         assertEquals(1, IncomingSmsMapper.mapSimSlot(1))
+        assertEquals(9, IncomingSmsMapper.mapSimSlot(9))
         assertNull(IncomingSmsMapper.mapSimSlot(null))
         assertNull(IncomingSmsMapper.mapSimSlot(-1))
+        assertNull(IncomingSmsMapper.mapSimSlot(10))
         assertNull(IncomingSmsMapper.mapSimSlot(SubscriptionLike.INVALID_SLOT))
         val withSlot = IncomingSmsMapper.reassemble(
             listOf(SmsPduPart("+1555", "x", second)),
@@ -126,6 +128,31 @@ class IncomingSmsMapperTest {
             simSlot = -1,
         )
         assertNull(unknown.single().simSlot)
+        val over = IncomingSmsMapper.reassemble(
+            listOf(SmsPduPart("+1555", "x", second)),
+            simSlot = 10,
+        )
+        assertNull(over.single().simSlot)
+    }
+
+    @Test
+    fun clipsSenderTo64CodePoints() {
+        val longSender = "A".repeat(80)
+        val clipped = IncomingSmsMapper.clipSender(longSender)
+        assertEquals(64, IncomingSmsMapper.unicodeLength(clipped))
+        val assembled = IncomingSmsMapper.reassemble(
+            listOf(SmsPduPart(longSender, "hi", second)),
+            simSlot = null,
+        ).single()
+        assertEquals(64, IncomingSmsMapper.unicodeLength(assembled.sender))
+    }
+
+    @Test
+    fun unicodeLengthCountsCodePointsNotCharUnits() {
+        val emoji = "😀" // one code point, two UTF-16 chars
+        assertEquals(2, emoji.length)
+        assertEquals(1, IncomingSmsMapper.unicodeLength(emoji))
+        assertEquals("😀😀", IncomingSmsMapper.takeCodePoints(emoji.repeat(5), 2))
     }
 
     @Test
