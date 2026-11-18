@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { cruise, type ICruiseResult } from "dependency-cruiser";
@@ -66,6 +67,19 @@ describe("architecture dependency rules", () => {
     const errors = summary.violations.filter((v) => v.rule.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((v) => v.rule.name === "fixture-must-not-import-adapters")).toBe(true);
+  });
+
+  it("auth-error classification lint passes, and fixture is rejected", () => {
+    execFileSync("node", ["scripts/check-auth-error-classification.mjs"], {
+      cwd: backendRoot,
+      stdio: "pipe",
+    });
+    expect(() =>
+      execFileSync("node", ["scripts/check-auth-error-classification.mjs", "--fixture"], {
+        cwd: backendRoot,
+        stdio: "pipe",
+      }),
+    ).not.toThrow();
   });
 
   it("negative proof: application importing pg / config is rejected by allow-list", async () => {

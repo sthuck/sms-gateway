@@ -27,6 +27,16 @@ import type {
 } from "../../../src/ports/outbound/user-repository.js";
 import { evaluateMfa, extractMfaClaims, mapClaims } from "../../../src/domain/auth/index.js";
 import type { MfaPolicy } from "../../../src/domain/auth/types.js";
+import { InfrastructureError } from "../../../src/domain/errors.js";
+
+/** When set, the next port call throws InfrastructureError (fault injection). */
+export type FaultSwitch = { throwInfra: boolean };
+
+function maybeFault(fault: FaultSwitch | undefined, label: string): void {
+  if (fault?.throwInfra) {
+    throw new InfrastructureError(label);
+  }
+}
 
 export class MemoryClock implements Clock {
   constructor(private current: Date = new Date("2026-01-01T00:00:00.000Z")) {}
@@ -58,8 +68,10 @@ export class MemoryTokenHasher implements TokenHasher {
 
 export class MemorySessionRepository implements SessionRepository {
   readonly byHash = new Map<string, Session>();
+  fault: FaultSwitch = { throwInfra: false };
 
   async insert(input: InsertSessionInput): Promise<void> {
+    maybeFault(this.fault, "memory session insert failed");
     this.byHash.set(input.sessionIdHash, {
       sessionRowId: `row-${this.byHash.size + 1}`,
       ownerId: input.ownerId,
@@ -70,10 +82,12 @@ export class MemorySessionRepository implements SessionRepository {
   }
 
   async lookupBySessionIdHash(sessionIdHash: string): Promise<Session | null> {
+    maybeFault(this.fault, "memory session lookup failed");
     return this.byHash.get(sessionIdHash) ?? null;
   }
 
   async revokeBySessionIdHash(ownerId: string, sessionIdHash: string): Promise<void> {
+    maybeFault(this.fault, "memory session revoke failed");
     const session = this.byHash.get(sessionIdHash);
     if (session && session.ownerId === ownerId && !session.revokedAt) {
       session.revokedAt = new Date();
@@ -82,18 +96,22 @@ export class MemorySessionRepository implements SessionRepository {
 
   readonly touched: string[] = [];
   async touch(_ownerId: string, sessionRowId: string): Promise<void> {
+    maybeFault(this.fault, "memory session touch failed");
     this.touched.push(sessionRowId);
   }
 }
 
 export class MemoryIdentityRepository implements IdentityRepository {
   readonly rows: Array<IdentityRecord & { issuer: string; sub: string }> = [];
+  fault: FaultSwitch = { throwInfra: false };
 
   async findByIssuerSub(issuer: string, sub: string): Promise<IdentityRecord | null> {
+    maybeFault(this.fault, "memory identity lookup failed");
     return this.rows.find((r) => r.issuer === issuer && r.sub === sub) ?? null;
   }
 
   async link(ownerId: string, issuer: string, sub: string): Promise<void> {
+    maybeFault(this.fault, "memory identity link failed");
     this.rows.push({
       identityId: `id-${this.rows.length + 1}`,
       ownerId,
@@ -108,14 +126,17 @@ export class MemoryIdentityRepository implements IdentityRepository {
 
 export class MemoryUserRepository implements UserRepository {
   readonly users = new Map<string, User>();
+  fault: FaultSwitch = { throwInfra: false };
 
   constructor(private readonly identities?: MemoryIdentityRepository) {}
 
   async findById(_ownerId: string, userId: string): Promise<User | null> {
+    maybeFault(this.fault, "memory user findById failed");
     return this.users.get(userId) ?? null;
   }
 
   async findByEmail(email: string): Promise<UserByEmail | null> {
+    maybeFault(this.fault, "memory user findByEmail failed");
     for (const user of this.users.values()) {
       if (user.email === email) {
         return { ownerId: user.id, email: user.email, mfaEnrolled: user.mfaEnrolled };

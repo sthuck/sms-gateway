@@ -33,6 +33,12 @@ export type UserByEmail = {
   mfaEnrolled: boolean;
 };
 
+/**
+ * User persistence.
+ *
+ * - `null` from find* = not found (domain absence).
+ * - Infra failures MUST throw `InfrastructureError`.
+ */
 export interface UserRepository {
   findById(ownerId: string, userId: string): Promise<User | null>;
   findByEmail(email: string): Promise<UserByEmail | null>;

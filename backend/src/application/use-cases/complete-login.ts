@@ -1,5 +1,6 @@
 import { AuthError } from "../../domain/auth/errors.js";
 import type { MappedClaims } from "../../domain/auth/types.js";
+import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
 import type { CompleteLoginInput, CompleteLoginResult } from "../../ports/inbound/auth.js";
 import type { Clock } from "../../ports/outbound/clock.js";
 import type { IdGenerator } from "../../ports/outbound/id-generator.js";
@@ -34,6 +35,9 @@ export class CompleteLogin {
     try {
       result = await this.deps.oidc.finishAuthorization(input.callbackUrl, input.sealedState);
     } catch (err) {
+      if (isInfrastructureError(err) || err instanceof InfrastructureError) {
+        throw err;
+      }
       throw new AuthError(
         "invalid_callback",
         err instanceof Error ? err.message : "Invalid OAuth callback",

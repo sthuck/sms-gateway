@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthError } from "../../domain/auth/errors.js";
+import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
 import { requireUserAuth } from "./auth-plugin.js";
 import { sendProblem } from "./problems.js";
 
@@ -97,6 +98,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.redirect(result.redirectTo);
     } catch (err) {
+      if (err instanceof InfrastructureError || isInfrastructureError(err)) {
+        request.log.error({ err: messageOf(err) }, "OIDC/callback infrastructure failure");
+        return sendProblem(reply, "internal_error", 500, "Failed to complete login", {
+          retryable: true,
+          instance: request.url,
+        });
+      }
       if (err instanceof AuthError) {
         if (err.code === "mfa_required") {
           return sendProblem(reply, "mfa_required", 401, err.message, {

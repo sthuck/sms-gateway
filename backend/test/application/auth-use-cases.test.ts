@@ -311,4 +311,37 @@ describe("ResolveBearer", () => {
       }).execute({ token: "t" }),
     ).rejects.toMatchObject({ code: "unauthorized", message: "Unknown identity" });
   });
+
+  it("rethrows InfrastructureError from JWT verify (never maps to unauthorized)", async () => {
+    const { InfrastructureError } = await import("../../src/domain/errors.js");
+    const identities = new MemoryIdentityRepository();
+    const jwt = new StubJwtVerifier();
+    jwt.fail = new InfrastructureError("JWKS down");
+    await expect(
+      new ResolveBearer({
+        jwt,
+        identities,
+        mfa: { requireMfa: true, claimsMissing: "deny" },
+      }).execute({ token: "t" }),
+    ).rejects.toBeInstanceOf(InfrastructureError);
+  });
+
+  it("rethrows InfrastructureError from identity lookup", async () => {
+    const { InfrastructureError } = await import("../../src/domain/errors.js");
+    const identities = new MemoryIdentityRepository();
+    identities.fault.throwInfra = true;
+    const jwt = new StubJwtVerifier();
+    jwt.next = {
+      payload: { sub: "sub-1", amr: ["pwd", "otp"] },
+      sub: "sub-1",
+      iss: "https://idp.example",
+    };
+    await expect(
+      new ResolveBearer({
+        jwt,
+        identities,
+        mfa: { requireMfa: true, claimsMissing: "deny" },
+      }).execute({ token: "t" }),
+    ).rejects.toBeInstanceOf(InfrastructureError);
+  });
 });

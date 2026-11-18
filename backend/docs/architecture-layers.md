@@ -55,6 +55,26 @@ undici, …). Negative proof lives in `test/architecture/`.
   `db-postgres`, reserved `queue-pgboss/`).
 - **C** — redo STH-15 ingestion on the new structure (do not stack on draft #8).
 
+## Error classification (STH-46)
+
+| Outcome                                  | Representation                        | HTTP                                        |
+| ---------------------------------------- | ------------------------------------- | ------------------------------------------- |
+| Domain absence (not found)               | `null` from port lookups              | mapped by use case → 401/404 as appropriate |
+| Invalid credentials / MFA / CSRF         | `AuthError` (or device problem codes) | 401 / 403                                   |
+| Infrastructure (DB / JWKS / IdP network) | `InfrastructureError` (never `null`)  | 500 / 503 `retryable: true`                 |
+
+Rules:
+
+1. Ports: `null` means absence only; infra MUST throw `InfrastructureError`.
+2. Use cases: never catch and convert `InfrastructureError` into `AuthError`.
+3. HTTP (`mapAuthError` / routes): rethrow non-`AuthError` so the global handler
+   returns 500 `internal_error` retryable — never collapse into unauthorized.
+4. Enforced by `pnpm lint:auth-errors` (`scripts/check-auth-error-classification.mjs`)
+   plus port contract tests under `test/ports/` and HTTP matrix in
+   `test/auth/failure-modes.test.ts`.
+
+See `docs/rca/STH-46-infra-errors-as-auth-failures.md`.
+
 ## Logging
 
 Never log request bodies or tokens (pino redaction + request child logger

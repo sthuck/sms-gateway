@@ -168,6 +168,142 @@ describe.skipIf(!migratorOk)("auth failure-mode parity (STH-46)", () => {
     await app.close();
   });
 
+  it("DB errors while resolving a bearer become 500 internal_error (retryable)", async () => {
+    const app = await buildConfiguredApp(appPool);
+    await app.ready();
+    const exploding = {
+      query: async () => {
+        throw new Error("simulated postgres outage");
+      },
+      connect: async () => {
+        throw new Error("simulated postgres outage");
+      },
+      end: async () => undefined,
+    } as unknown as Pool;
+
+    const env = {
+      NODE_ENV: "test",
+      HOST: "127.0.0.1",
+      PORT: "8080",
+      LOG_LEVEL: "silent",
+      DATABASE_URL: appDatabaseUrl(),
+      OIDC_ISSUER_URL: mock.issuer,
+      OIDC_CLIENT_ID: "sms-gateway-test",
+      OIDC_CLIENT_SECRET: "dev-only-test-client-secret",
+      OIDC_REDIRECT_URI: "http://127.0.0.1:8080/v1/auth/callback",
+      OIDC_AUDIENCE: "sms-gateway-test",
+      SESSION_SECRET,
+      REQUIRE_MFA: "true",
+      MFA_CLAIMS_MISSING: "deny",
+      OIDC_ALLOW_INSECURE: "true",
+      PUBLIC_BASE_URL: "http://127.0.0.1:8080/",
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8080",
+      AUTO_LINK_BY_EMAIL: "false",
+    };
+    const config = loadConfig(env);
+    const broken = await buildApp(config, {
+      pool: exploding,
+      auth: {
+        config: config.oidc,
+        jwtVerifier: {
+          async verify() {
+            return {
+              payload: { sub: "sub-alice", amr: ["pwd", "otp"] },
+              sub: "sub-alice",
+              iss: mock.issuer,
+            };
+          },
+        },
+        oidcProvider: {
+          async startAuthorization() {
+            return { redirectUrl: "https://example/authorize", sealedState: "s" };
+          },
+          async finishAuthorization() {
+            throw new Error("unused");
+          },
+        },
+        skipDiscovery: true,
+      },
+    });
+    await broken.ready();
+    const res = await broken.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: { authorization: "Bearer anything" },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toMatchObject({ code: "internal_error", retryable: true });
+    await broken.close();
+    await app.close();
+  });
+
+  it("device auth DB failure becomes 500, never device_unknown 401", async () => {
+    const exploding = {
+      query: async () => {
+        throw new Error("simulated postgres outage");
+      },
+      connect: async () => {
+        throw new Error("simulated postgres outage");
+      },
+      end: async () => undefined,
+    } as unknown as Pool;
+
+    const env = {
+      NODE_ENV: "test",
+      HOST: "127.0.0.1",
+      PORT: "8080",
+      LOG_LEVEL: "silent",
+      DATABASE_URL: appDatabaseUrl(),
+      OIDC_ISSUER_URL: mock.issuer,
+      OIDC_CLIENT_ID: "sms-gateway-test",
+      OIDC_CLIENT_SECRET: "dev-only-test-client-secret",
+      OIDC_REDIRECT_URI: "http://127.0.0.1:8080/v1/auth/callback",
+      OIDC_AUDIENCE: "sms-gateway-test",
+      SESSION_SECRET,
+      REQUIRE_MFA: "true",
+      MFA_CLAIMS_MISSING: "deny",
+      OIDC_ALLOW_INSECURE: "true",
+      PUBLIC_BASE_URL: "http://10.0.2.2:8080/",
+      DEVICE_API_PUBLIC_URL: "http://10.0.2.2:8080",
+      DEVICE_ALLOWED_HOSTS: "10.0.2.2:8080,api.sms-gateway.example,127.0.0.1:8080",
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8080",
+      AUTO_LINK_BY_EMAIL: "false",
+    };
+    const config = loadConfig(env);
+    const jwtVerifier = createJwtVerifier(config.oidc!, mock.jwksUri);
+    const broken = await buildApp(config, {
+      pool: exploding,
+      auth: { config: config.oidc, jwtVerifier, skipDiscovery: false },
+    });
+    const { deviceAuthPreHandler } = await import("../../src/device/plugin.js");
+    const { signDeviceRequest } = await import("../helpers/device-signing.js");
+    broken.post(
+      "/v1/messages:batch",
+      { preHandler: deviceAuthPreHandler({ rejectRevoked: true }) },
+      async () => ({ ok: true }),
+    );
+    await broken.ready();
+
+    const deviceId = "00000000-0000-4000-8000-000000000099";
+    const signed = signDeviceRequest({
+      method: "POST",
+      path: "/v1/messages:batch",
+      host: "10.0.2.2:8080",
+      deviceId,
+      body: "{}",
+    });
+    const res = await broken.inject({
+      method: "POST",
+      url: "/v1/messages:batch",
+      headers: signed.headers,
+      payload: signed.body,
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toMatchObject({ code: "internal_error", retryable: true });
+    expect(res.json().code).not.toBe("device_unknown");
+    await broken.close();
+  });
+
   it("CSRF-rejected requests do not update last_seen_at", async () => {
     const app = await buildConfiguredApp(appPool);
     await app.ready();

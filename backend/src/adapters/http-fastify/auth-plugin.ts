@@ -12,6 +12,7 @@ import type {
 } from "../../application/use-cases/index.js";
 import { AuthError } from "../../domain/auth/errors.js";
 import type { Session } from "../../domain/auth/types.js";
+import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
 import type { JwtVerifier } from "../../ports/outbound/jwt-verifier.js";
 import type { OidcProvider } from "../../ports/outbound/oidc-provider.js";
 import type { OidcAuthConfig } from "../auth-oidc/oidc-config.js";
@@ -209,8 +210,13 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
 }
 
 function mapAuthError(reply: FastifyReply, request: FastifyRequest, err: unknown): void {
-  if (!(err instanceof AuthError)) {
-    // Infra errors (e.g. Postgres down) must surface as 500 like main (STH-46).
+  // Infra / unknown non-AuthError must reach the global handler → 500 retryable (STH-46).
+  // Never collapse them into unauthorized.
+  if (
+    err instanceof InfrastructureError ||
+    isInfrastructureError(err) ||
+    !(err instanceof AuthError)
+  ) {
     throw err;
   }
   if (err.code === "mfa_required") {
