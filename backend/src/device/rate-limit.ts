@@ -118,6 +118,7 @@ export async function consumeRateLimit(
       [bucketKey, windowStart, hitCount],
     );
     await client.query("COMMIT");
+    void maybePurgeStaleRateLimitBuckets(pool).catch(() => undefined);
 
     return {
       allowed: true,
@@ -261,4 +262,32 @@ export function rateLimitHeaders(decision: RateLimitDecision): Record<string, nu
     "RateLimit-Remaining": decision.remaining,
     "RateLimit-Reset": decision.resetSec,
   };
+}
+
+/**
+ * Delete stale per-IP / global buckets whose window (and lock) have expired.
+ * Without this, unique client IPs accumulate forever in `rate_limit_buckets`.
+ */
+export async function purgeStaleRateLimitBuckets(
+  pool: Pool,
+  olderThanSec = 3600,
+  limit = 256,
+): Promise<number> {
+  const { rowCount } = await pool.query(
+    `DELETE FROM app.rate_limit_buckets
+     WHERE ctid IN (
+       SELECT ctid FROM app.rate_limit_buckets
+       WHERE window_start < now() - make_interval(secs => $1)
+         AND (locked_until IS NULL OR locked_until < now())
+       LIMIT $2
+     )`,
+    [olderThanSec, limit],
+  );
+  return rowCount ?? 0;
+}
+
+/** Opportunistic bounded prune (~1/32 of consumes); multi-instance safe. */
+export async function maybePurgeStaleRateLimitBuckets(pool: Pool): Promise<void> {
+  if ((Math.random() * 32) | 0) return;
+  await purgeStaleRateLimitBuckets(pool);
 }

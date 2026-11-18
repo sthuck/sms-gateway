@@ -30,6 +30,7 @@ export async function claimReplay(
       return "replay";
     }
     await client.query("COMMIT");
+    void maybePurgeExpiredReplays(pool).catch(() => undefined);
     return "ok";
   } catch (err) {
     try {
@@ -108,17 +109,27 @@ async function claimOnClient(
 }
 
 /**
- * Opportunistic bounded prune of expired rows (avoids unbounded table growth
- * when pairing/device auth is high-volume). ~1/32 of claims run a small delete.
+ * Bounded delete of expired replay rows. Safe under concurrent API instances
+ * (DELETE by ctid batch; lost races just leave work for the next purge).
  */
-export async function maybePurgeExpiredReplays(pool: Pool): Promise<void> {
-  if ((Math.random() * 32) | 0) return;
-  await pool.query(
+export async function purgeExpiredReplays(pool: Pool, limit = 256): Promise<number> {
+  const { rowCount } = await pool.query(
     `DELETE FROM app.device_replay_cache
      WHERE ctid IN (
        SELECT ctid FROM app.device_replay_cache
        WHERE expires_at <= now()
-       LIMIT 256
+       LIMIT $1
      )`,
+    [limit],
   );
+  return rowCount ?? 0;
+}
+
+/**
+ * Opportunistic bounded prune (~1/32 of claims) to avoid unbounded growth
+ * without a dedicated sweeper when pairing/device auth is high-volume.
+ */
+export async function maybePurgeExpiredReplays(pool: Pool): Promise<void> {
+  if ((Math.random() * 32) | 0) return;
+  await purgeExpiredReplays(pool);
 }

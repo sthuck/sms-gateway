@@ -23,31 +23,56 @@ const HOST = "10.0.2.2:8080";
 const SPOOFED = "198.51.100.77";
 const PROXY = "10.0.0.5";
 const PEER = "192.0.2.10";
+const INTERMEDIATE = "203.0.113.50";
 
 describe("parseTrustProxy", () => {
-  it("defaults to trusting nothing", () => {
+  it("parses false / empty / 0 as trust nothing", () => {
     expect(parseTrustProxy(undefined)).toBe(false);
-    expect(parseTrustProxy("false")).toBe(false);
     expect(parseTrustProxy("")).toBe(false);
+    expect(parseTrustProxy("false")).toBe(false);
     expect(parseTrustProxy("0")).toBe(false);
-    expect(parseTrustProxy("no")).toBe(false);
   });
 
-  it("parses hop counts before boolean keywords (STH-42)", () => {
-    // "1" must be hop count 1, never boolean true (would trust every hop).
+  it("parses true as boolean true only via the word true", () => {
+    expect(parseTrustProxy("true")).toBe(true);
+  });
+
+  it("parses digit strings as hop counts (STH-42: 1 is not true)", () => {
     expect(parseTrustProxy("1")).toBe(1);
     expect(parseTrustProxy("2")).toBe(2);
-    expect(parseTrustProxy("true")).toBe(true);
-    expect(parseTrustProxy("yes")).toBe(true);
+    expect(parseTrustProxy("1")).not.toBe(true);
   });
 
-  it("parses CIDR/IP lists", () => {
+  it("parses a single IP and a CIDR list", () => {
     expect(parseTrustProxy("10.0.0.5")).toBe("10.0.0.5");
     expect(parseTrustProxy("10.0.0.5,10.0.0.0/8")).toEqual(["10.0.0.5", "10.0.0.0/8"]);
   });
+
+  it("rejects invalid input", () => {
+    expect(() => parseTrustProxy("yes")).toThrow(/Invalid TRUST_PROXY/);
+    expect(() => parseTrustProxy("no")).toThrow(/Invalid TRUST_PROXY/);
+    expect(() => parseTrustProxy("not-an-ip")).toThrow(/Invalid TRUST_PROXY/);
+    expect(() => parseTrustProxy("10.0.0.5,bogus")).toThrow(/Invalid TRUST_PROXY/);
+    expect(() => loadConfig({ TRUST_PROXY: "yes" })).toThrow(/Invalid configuration/);
+  });
+
+  it("warns in production when TRUST_PROXY=true", () => {
+    const warn = console.warn;
+    const calls: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      calls.push(args);
+    };
+    try {
+      const config = loadConfig({ NODE_ENV: "production", TRUST_PROXY: "true" });
+      expect(config.trustProxy).toBe(true);
+      expect(calls.some((c) => String(c[0]).includes("TRUST_PROXY=true"))).toBe(true);
+    } finally {
+      console.warn = warn;
+    }
+  });
 });
 
-describe.skipIf(!migratorOk)("trustProxy vs spoofed X-Forwarded-For (STH-38)", () => {
+describe.skipIf(!migratorOk)("trustProxy vs spoofed X-Forwarded-For (STH-38/42)", () => {
   let admin: Pool;
   let appPool: Pool;
 
@@ -154,19 +179,33 @@ describe.skipIf(!migratorOk)("trustProxy vs spoofed X-Forwarded-For (STH-38)", (
     }
   });
 
-  it("TRUST_PROXY=1 peels one hop only, not the whole chain (STH-42)", async () => {
+  it("TRUST_PROXY=1 peels exactly one hop; leftmost spoof is not trusted (STH-42)", async () => {
     await appPool.query(`DELETE FROM app.rate_limit_buckets`);
-    const intermediate = "203.0.113.50";
     const app = await build("1");
     try {
-      // Multi-hop XFF: hop-count 1 → client is the rightmost entry, not leftmost.
+      // Direct peer + multi-hop XFF: hop-count 1 → rightmost entry only.
       await hitPair(app, {
         remoteAddress: PEER,
-        xff: `${SPOOFED}, ${intermediate}`,
+        xff: `${SPOOFED}, ${INTERMEDIATE}`,
       });
-      expect(await bucketHits(intermediate)).toBeGreaterThanOrEqual(1);
+      expect(await bucketHits(INTERMEDIATE)).toBeGreaterThanOrEqual(1);
       expect(await bucketHits(SPOOFED)).toBe(0);
       expect(await bucketHits(PEER)).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("TRUST_PROXY=true peels the whole chain (contrast with hop count 1)", async () => {
+    await appPool.query(`DELETE FROM app.rate_limit_buckets`);
+    const app = await build("true");
+    try {
+      await hitPair(app, {
+        remoteAddress: PEER,
+        xff: `${SPOOFED}, ${INTERMEDIATE}`,
+      });
+      expect(await bucketHits(SPOOFED)).toBeGreaterThanOrEqual(1);
+      expect(await bucketHits(INTERMEDIATE)).toBe(0);
     } finally {
       await app.close();
     }
