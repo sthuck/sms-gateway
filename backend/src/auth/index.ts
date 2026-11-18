@@ -1,9 +1,11 @@
 export { loadOidcAuthConfig, type OidcAuthConfig } from "./oidc-config.js";
 export {
   mapClaims,
+  extractMfaClaims,
   DEFAULT_CLAIM_MAPPING,
   type MappedClaims,
   type ClaimMapping,
+  type MfaClaimFields,
 } from "./claims.js";
 export { evaluateMfa, detectMfaMethod, type MfaPolicy, type MfaEvaluation } from "./mfa.js";
 export {

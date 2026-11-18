@@ -290,6 +290,53 @@ describe.skipIf(!migratorOk)("OIDC auth flow (mock provider)", () => {
     expect(invalid.statusCode).toBe(401);
   });
 
+  it("rejects bearer JWT without email claim when MFA claims are absent (STH-36)", async () => {
+    await findOrProvisionUser(
+      appPool,
+      mock.issuer,
+      mapClaims({
+        sub: "sub-alice",
+        email: "alice@example.com",
+        name: "Alice",
+        amr: ["pwd", "otp"],
+      }),
+      { mfaEnrolled: true, lastAuthMethod: "otp", autoLinkByEmail: false },
+    );
+
+    // No email, no amr/acr — previously skipped MFA when mapClaims failed.
+    const token = await mock.signToken({ sub: "sub-alice", amr: ["pwd"] });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toMatchObject({ code: "mfa_required" });
+  });
+
+  it("accepts bearer JWT without email claim when MFA claims are present (STH-36)", async () => {
+    await findOrProvisionUser(
+      appPool,
+      mock.issuer,
+      mapClaims({
+        sub: "sub-alice",
+        email: "alice@example.com",
+        name: "Alice",
+        amr: ["pwd", "otp"],
+      }),
+      { mfaEnrolled: true, lastAuthMethod: "otp", autoLinkByEmail: false },
+    );
+
+    const token = await mock.signToken({ sub: "sub-alice", amr: ["pwd", "otp"] });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { email: string }).email).toBe("alice@example.com");
+  });
+
   it("authenticated handlers see app.owner_id and cannot see other owners' rows", async () => {
     const { sessionCookie } = await completeLogin();
     const me = await app.inject({

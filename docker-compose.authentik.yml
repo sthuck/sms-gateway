@@ -46,9 +46,13 @@ services:
       # Initial bootstrap (DEV-ONLY)
       AUTHENTIK_BOOTSTRAP_EMAIL: akadmin@example.com
       AUTHENTIK_BOOTSTRAP_PASSWORD: "dev-only-akadmin-password"
+      # Wired into sms-gateway-oidc-dev.yaml via !Env (DEV-ONLY — never for prod)
+      AUTHENTIK_BLUEPRINT_CLIENT_SECRET: "dev-only-oidc-client-secret"
+      AUTHENTIK_BLUEPRINT_DEV_USER_PASSWORD: "dev-only-sms-user-password"
     ports:
       - "9000:9000"
     volumes:
+      # Import only the *-dev.yaml blueprint locally; never apply *-prod.yaml here.
       - ./deploy/authentik/blueprints:/blueprints:ro
     depends_on:
       authentik-postgres:
@@ -67,6 +71,8 @@ services:
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
       AUTHENTIK_POSTGRESQL__PASSWORD: authentik-dev-only
+      AUTHENTIK_BLUEPRINT_CLIENT_SECRET: "dev-only-oidc-client-secret"
+      AUTHENTIK_BLUEPRINT_DEV_USER_PASSWORD: "dev-only-sms-user-password"
     user: root
     volumes:
       - ./deploy/authentik/blueprints:/blueprints:ro

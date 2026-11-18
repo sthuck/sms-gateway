@@ -1,0 +1,54 @@
+# DEV-ONLY Authentik blueprint for local Compose.
+# Localhost redirect URIs only. Never apply this file to production/homelab.
+#
+# Application slug: sms-gateway
+# Local issuer: http://127.0.0.1:9000/application/o/sms-gateway/
+#
+# Client secret and seeded user password come from Compose env
+# (AUTHENTIK_BLUEPRINT_CLIENT_SECRET / AUTHENTIK_BLUEPRINT_DEV_USER_PASSWORD).
+# Defaults below are DEV-ONLY labels — never reuse outside local development.
+#
+# Apply via Authentik UI (System → Blueprints) or docs/local-dev.md manual steps.
+
+version: 1
+metadata:
+  name: sms-gateway-oidc-dev
+entries:
+  - model: authentik_providers_oauth2.oauth2provider
+    id: provider
+    state: present
+    identifiers:
+      name: SMS Gateway (dev)
+    attrs:
+      name: SMS Gateway (dev)
+      client_type: confidential
+      client_id: sms-gateway
+      client_secret: !Env [AUTHENTIK_BLUEPRINT_CLIENT_SECRET, "dev-only-oidc-client-secret"]
+      redirect_uris: |
+        http://127.0.0.1:8080/v1/auth/callback
+        http://localhost:8080/v1/auth/callback
+        http://localhost:5173/v1/auth/callback
+      sub_mode: user_id
+      include_claims_in_id_token: true
+      issuer_mode: per_provider
+
+  - model: authentik_core.application
+    state: present
+    identifiers:
+      slug: sms-gateway
+    attrs:
+      name: SMS Gateway (dev)
+      slug: sms-gateway
+      provider: !KeyOf provider
+      meta_launch_url: http://127.0.0.1:8080/v1/auth/login
+
+  - model: authentik_core.user
+    state: present
+    identifiers:
+      username: sms-dev
+    attrs:
+      username: sms-dev
+      name: SMS Dev User
+      email: sms-dev@example.com
+      password: !Env [AUTHENTIK_BLUEPRINT_DEV_USER_PASSWORD, "dev-only-sms-user-password"]
+      is_active: true

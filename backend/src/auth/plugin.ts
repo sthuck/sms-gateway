@@ -10,7 +10,7 @@ import { isSessionActive, lookupSession, touchSession, type SessionRecord } from
 import { resolveOwnerFromIdentity } from "./identity.js";
 import { allowedOriginsFromConfig, csrfTokensMatch, isSafeMethod, originAllowed } from "./csrf.js";
 import { sendProblem } from "./problems.js";
-import { mapClaims } from "./claims.js";
+import { extractMfaClaims } from "./claims.js";
 import { evaluateMfa } from "./mfa.js";
 
 export type AuthRequestContext = {
@@ -208,22 +208,16 @@ async function authenticateBearer(
     return;
   }
 
-  const mapped = (() => {
-    try {
-      return mapClaims(verified.payload as Record<string, unknown>, config.claimMapping);
-    } catch {
-      return null;
-    }
-  })();
-
-  if (mapped) {
-    const mfa = evaluateMfa(mapped, config.mfa);
-    if (!mfa.ok) {
-      sendProblem(reply, "mfa_required", 401, mfa.reason ?? "MFA required", {
-        instance: request.url,
-      });
-      return;
-    }
+  // MFA is independent of email/name mapping — access tokens may omit email.
+  const mfa = evaluateMfa(
+    extractMfaClaims(verified.payload as Record<string, unknown>),
+    config.mfa,
+  );
+  if (!mfa.ok) {
+    sendProblem(reply, "mfa_required", 401, mfa.reason ?? "MFA required", {
+      instance: request.url,
+    });
+    return;
   }
 
   const user = await resolveOwnerFromIdentity(pool, verified.iss, verified.sub);

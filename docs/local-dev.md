@@ -138,26 +138,32 @@ docker compose -f docker-compose.yml -f docker-compose.authentik.yml --profile a
 | Authentik Postgres | internal | DEV-ONLY password `authentik-dev-only` |
 | Authentik Redis | internal | |
 
-All Authentik secrets in Compose and
-`deploy/authentik/blueprints/sms-gateway-oidc.yaml` are **DEV-ONLY** — never
-reuse them outside local development.
+All Authentik secrets in Compose and the **dev** blueprint are **DEV-ONLY** —
+never reuse them outside local development, and never import the prod
+blueprint into local Compose (or the reverse).
+
+| Blueprint | Path |
+| --- | --- |
+| Dev (local only) | `deploy/authentik/blueprints/sms-gateway-oidc-dev.yaml` |
+| Prod (homelab) | `deploy/authentik/blueprints/sms-gateway-oidc-prod.yaml` — see `docs/deployment-auth.md` |
+
+Compose sets `AUTHENTIK_BLUEPRINT_CLIENT_SECRET` and
+`AUTHENTIK_BLUEPRINT_DEV_USER_PASSWORD` for the dev blueprint `!Env` tags.
 
 ### Create the OIDC application (manual steps)
 
-Application **slug** is always `sms-gateway` (same as homelab
-`https://auth.sthuck.info/application/o/sms-gateway/`). Prefer importing
-`deploy/authentik/blueprints/sms-gateway-oidc.yaml`. If import fails for your
-Authentik version, create the app manually:
+Application **slug** is always `sms-gateway`. Prefer importing
+**`sms-gateway-oidc-dev.yaml` only**. If import fails for your Authentik
+version, create the app manually:
 
 1. Open `http://127.0.0.1:9000` and sign in as the bootstrap admin
    (`akadmin@example.com` / `dev-only-akadmin-password`).
 2. Create an **OAuth2/OpenID Provider**:
-   - Name: `SMS Gateway`
+   - Name: `SMS Gateway (dev)`
    - Client type: Confidential
    - Client ID: `sms-gateway`
-   - Client secret: `dev-only-oidc-client-secret` (DEV-ONLY)
-   - Redirect URIs (include prod + localhost; matches the blueprint):
-     - `https://sms.sthuck.info/v1/auth/callback`
+   - Client secret: `dev-only-oidc-client-secret` (DEV-ONLY; matches Compose env)
+   - Redirect URIs (**localhost only** — no production host on the dev client):
      - `http://127.0.0.1:8080/v1/auth/callback`
      - `http://localhost:8080/v1/auth/callback`
      - (web Vite, if used) `http://localhost:5173/v1/auth/callback`

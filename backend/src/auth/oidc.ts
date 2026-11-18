@@ -1,6 +1,6 @@
 import * as client from "openid-client";
 import type { OidcAuthConfig } from "./oidc-config.js";
-import { mapClaims, type MappedClaims } from "./claims.js";
+import { extractMfaClaims, mapClaims, type MappedClaims } from "./claims.js";
 import { evaluateMfa, type MfaEvaluation } from "./mfa.js";
 import { sealOAuthState, openOAuthState, type OAuthDanceState } from "./oauth-state.js";
 
@@ -84,8 +84,10 @@ export async function finishAuthorization(
     throw new Error("OIDC token response missing ID token claims");
   }
 
-  const claims = mapClaims(idClaims as Record<string, unknown>, oidc.config.claimMapping);
-  const mfa = evaluateMfa(claims, oidc.config.mfa);
+  const raw = idClaims as Record<string, unknown>;
+  // MFA must not depend on email/name mapping succeeding (STH-36).
+  const mfa = evaluateMfa(extractMfaClaims(raw), oidc.config.mfa);
+  const claims = mapClaims(raw, oidc.config.claimMapping);
   const issuer = (typeof idClaims.iss === "string" && idClaims.iss) || oidc.config.issuerUrl;
 
   return { claims, mfa, issuer };

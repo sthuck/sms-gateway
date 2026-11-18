@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapClaims } from "../../src/auth/claims.js";
+import { extractMfaClaims, mapClaims } from "../../src/auth/claims.js";
 
 describe("mapClaims", () => {
   it("maps standard claims", () => {
@@ -29,5 +29,15 @@ describe("mapClaims", () => {
   it("requires sub and email", () => {
     expect(() => mapClaims({ email: "a@example.com" })).toThrow(/sub/);
     expect(() => mapClaims({ sub: "x" })).toThrow(/email/);
+  });
+});
+
+describe("extractMfaClaims", () => {
+  it("reads amr/acr without requiring email", () => {
+    expect(extractMfaClaims({ sub: "x", amr: ["pwd", "otp"] })).toEqual({
+      amr: ["pwd", "otp"],
+      acr: null,
+    });
+    expect(extractMfaClaims({ sub: "x" })).toEqual({ amr: null, acr: null });
   });
 });

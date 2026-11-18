@@ -29,6 +29,22 @@ function asStringArray(value: unknown): string[] | null {
   return items.length > 0 ? items : null;
 }
 
+export type MfaClaimFields = {
+  amr: string[] | null;
+  acr: string | null;
+};
+
+/**
+ * Read amr/acr for MFA policy. Independent of email/name mapping so bearer
+ * tokens without an email claim still get MFA enforcement (STH-36).
+ */
+export function extractMfaClaims(claims: Record<string, unknown>): MfaClaimFields {
+  return {
+    amr: asStringArray(claims.amr),
+    acr: asString(claims.acr),
+  };
+}
+
 /**
  * Map IdP token claims using configurable claim names.
  * Never keys identity on email alone — `sub` is required.
@@ -49,8 +65,7 @@ export function mapClaims(
   }
 
   const name = asString(claims[mapping.name]);
-  const amr = asStringArray(claims.amr);
-  const acr = asString(claims.acr);
+  const { amr, acr } = extractMfaClaims(claims);
 
   return {
     sub,
