@@ -1,40 +1,30 @@
 package com.sthuck.smsgateway.ui
 
+import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.sthuck.smsgateway.MainActivity
 import com.sthuck.smsgateway.sms.SmsPermissionState
 import com.sthuck.smsgateway.ui.theme.SmsGatewayTheme
 import com.sthuck.smsgateway.upload.UploadDefaults
-import dagger.hilt.android.testing.HiltAndroidRule
-import dagger.hilt.android.testing.HiltAndroidTest
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import java.util.concurrent.TimeUnit
 
 /**
  * Captures the main Compose surfaces for CI artifact / PR docs.
  * Uses synthetic UI state only — no real pairing codes, device ids, or SMS bodies.
+ *
+ * No Hilt: pure Compose setContent on an empty [ComponentActivity] from the
+ * compose ui-test-manifest, so capture does not depend on app DI.
  */
-@HiltAndroidTest
 @RunWith(AndroidJUnit4::class)
 class UiScreenshotTest {
 
-    private val hiltRule = HiltAndroidRule(this)
-    private val composeRule = createAndroidComposeRule<MainActivity>()
-
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(hiltRule).around(composeRule)
-
-    @Before
-    fun setUp() {
-        hiltRule.inject()
-    }
+    val composeRule = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     fun capturePairingEntry() {

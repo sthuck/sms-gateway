@@ -15,7 +15,7 @@ cd "$ROOT"
 
 PACKAGE="com.sthuck.smsgateway.dev"
 TEST_PACKAGE="${PACKAGE}.test"
-RUNNER="dagger.hilt.android.testing.HiltTestRunner"
+RUNNER="androidx.test.runner.AndroidJUnitRunner"
 SINGLE_SENDER="+15551234567"
 MULTIPART_SENDER="+15559876543"
 TOKEN="${SMS_E2E_TOKEN:-${GITHUB_RUN_ID:-local}-$(date +%s)}"

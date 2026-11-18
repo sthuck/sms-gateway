@@ -23,7 +23,9 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        testInstrumentationRunner = "dagger.hilt.android.testing.HiltTestRunner"
+        // Hilt 2.60+ removed HiltTestRunner; AndroidJUnitRunner + @HiltAndroidTest
+        // / HiltAndroidRule is the supported path.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     flavorDimensions += "environment"
