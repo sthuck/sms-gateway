@@ -9,6 +9,13 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# dorny/paths-filter lists PR files via the GitHub API on pull_request events.
+# Without pull-requests:read the default GITHUB_TOKEN gets
+# "Resource not accessible by integration" and Detect changes fails.
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   changes:
     name: Detect changes
@@ -171,26 +178,53 @@ jobs:
       - name: Evaluate job results
         run: |
           set -euo pipefail
-          echo "backend=${{ needs.backend.result }}"
-          echo "helm=${{ needs.helm.result }}"
-          echo "openapi=${{ needs.openapi.result }}"
-          echo "web=${{ needs.web.result }}"
-          echo "android=${{ needs.android.result }}"
+          changes="${{ needs.changes.result }}"
+          backend="${{ needs.backend.result }}"
+          helm="${{ needs.helm.result }}"
+          openapi="${{ needs.openapi.result }}"
+          web="${{ needs.web.result }}"
+          android="${{ needs.android.result }}"
+
+          echo "changes=${changes}"
+          echo "backend=${backend}"
+          echo "helm=${helm}"
+          echo "openapi=${openapi}"
+          echo "web=${web}"
+          echo "android=${android}"
 
           fail=0
-          for result in \
-            "${{ needs.backend.result }}" \
-            "${{ needs.helm.result }}" \
-            "${{ needs.openapi.result }}" \
-            "${{ needs.web.result }}" \
-            "${{ needs.android.result }}"
+
+          # Detect changes must succeed. If it fails, every downstream job is
+          # skipped and we must not treat that as an intentional path filter skip.
+          if [ "${changes}" != "success" ]; then
+            echo "Failing aggregate because Detect changes result was: ${changes}"
+            fail=1
+          fi
+
+          for name_result in \
+            "backend:${backend}" \
+            "helm:${helm}" \
+            "openapi:${openapi}" \
+            "web:${web}" \
+            "android:${android}"
           do
-            case "$result" in
-              success|skipped) ;;
+            name="${name_result%%:*}"
+            result="${name_result#*:}"
+            case "${result}" in
+              success)
+                ;;
+              skipped)
+                # Intentional only when Detect changes succeeded (path filter).
+                if [ "${changes}" != "success" ]; then
+                  echo "Failing aggregate because ${name} was skipped after Detect changes=${changes}"
+                  fail=1
+                fi
+                ;;
               *)
-                echo "Failing aggregate because a needed job result was: $result"
+                echo "Failing aggregate because ${name} result was: ${result}"
                 fail=1
                 ;;
             esac
           done
-          exit "$fail"
+
+          exit "${fail}"
