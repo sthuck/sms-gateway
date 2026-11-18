@@ -48,7 +48,7 @@ describe.skipIf(!migratorOk)("RLS owner isolation", () => {
   });
 
   it("discovers owned tables from the catalog (owner_id column)", () => {
-    expect(ownedTables.length).toBeGreaterThanOrEqual(12);
+    expect(ownedTables.length).toBeGreaterThanOrEqual(14);
     expect(ownedTables).toEqual(
       expect.arrayContaining([
         "users",
@@ -64,6 +64,7 @@ describe.skipIf(!migratorOk)("RLS owner isolation", () => {
         "audit_log",
         "sender_ai_optout",
         "sessions",
+        "queue_processed_jobs",
       ]),
     );
   });

@@ -46,9 +46,12 @@ application. They are deployed with Helm (application chart under
 ### Queue (pg-boss)
 
 pg-boss stores jobs in Postgres tables in the **same** database the API
-uses. There is no Redis, RabbitMQ, or other queue infrastructure to
-operate. The `worker` Deployment runs the pg-boss consumer process
-against `DATABASE_URL`.
+uses (schema `pgboss`, installed by the migrator bootstrap). There is no
+Redis, RabbitMQ, or other queue infrastructure to operate. Locally the
+Compose `worker` service (or `pnpm worker`) consumes jobs against
+`DATABASE_URL` (`sms_app`). See `docs/queue.md` for event schemas,
+`publishInTx`, retries/DLQ, and privileges. Homelab Helm queue/replica
+wiring is deferred past STH-12.
 
 ### Postgres options
 

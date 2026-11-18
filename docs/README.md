@@ -4,6 +4,7 @@
 | --- | --- |
 | [architecture.md](./architecture.md) | Proposed stack and homelab Kubernetes notes |
 | [schema.md](./schema.md) | Postgres ER diagram, RLS, roles, device/pairing lookups |
+| [queue.md](./queue.md) | pg-boss events, publishInTx, retries/DLQ, worker RLS |
 | [local-dev.md](./local-dev.md) | Docker Compose, ports, emulator access, Prism mock, Authentik |
 | [pairing.md](./pairing.md) | Pairing codes, device auth, rate limits, replay cache, revoke (STH-14) |
 | [deployment-auth.md](./deployment-auth.md) | OIDC/Authentik hostnames and Helm env examples (deploy deferred) |
