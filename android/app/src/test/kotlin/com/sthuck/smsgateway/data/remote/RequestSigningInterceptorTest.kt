@@ -217,6 +217,7 @@ class RequestSigningInterceptorTest {
             deleted = true
         }
         override fun requireSigner() = signer
+        override fun requirePendingSigner() = signer
         override fun createPendingKeypair() = error("not used")
         override fun commitPendingKey() = error("not used")
         override fun discardPendingKey() = Unit

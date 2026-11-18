@@ -71,7 +71,13 @@ class DeviceKeyStoreInstrumentedTest {
             nonce = "V1nQe4r0sK8mP2yL6dF9TQ",
         ).toByteArray(Charsets.UTF_8)
 
-        val signature = store.requireSigner().sign(canonical)
+        try {
+            store.requireSigner()
+            fail("requireSigner must not use the pending key")
+        } catch (_: Exception) {
+            // expected — committed key only
+        }
+        val signature = store.requirePendingSigner().sign(canonical)
         assertEquals(64, signature.size)
         assertTrue(verifyEs256P1363(publicKey, canonical, signature))
         assertNotNull(Base64Url.encode(signature))

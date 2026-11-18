@@ -27,7 +27,10 @@ interface DeviceKeyAccess {
     fun hasKey(): Boolean
     fun hasPendingKey(): Boolean
     fun deleteKey()
+    /** Committed (active) key only — never the in-flight pending pair key. */
     fun requireSigner(): DeviceSigner
+    /** Pending pair key only; used exclusively while signing `POST .../pair`. */
+    fun requirePendingSigner(): DeviceSigner
     fun createPendingKeypair(): String
     fun commitPendingKey()
     fun discardPendingKey()
@@ -44,16 +47,20 @@ class DeviceKeyStore @Inject constructor() : DeviceKeyAccess {
     override fun hasPendingKey(): Boolean = pendingAlias.get()?.let { contains(it) } == true
 
     /**
-     * Returns a signer for the active key, or the pending key while a
-     * pairing attempt is in flight. Never creates a key.
+     * Signer for the committed key only. Never creates a key and never
+     * returns the in-flight pending pair key (uploader/status stay on the
+     * previously committed key).
      */
     override fun requireSigner(): DeviceSigner {
+        val alias = committedAlias() ?: error("Device signing key missing")
+        return signerForAlias(alias)
+    }
+
+    /** Signer for the pending pair key. Never creates a key. */
+    override fun requirePendingSigner(): DeviceSigner {
         val alias = pendingAlias.get()?.takeIf { contains(it) }
-            ?: committedAlias()
-            ?: error("Device signing key missing")
-        val privateKey = androidKeyStore().getKey(alias, null) as? PrivateKey
-            ?: error("Device signing key missing for alias=$alias")
-        return PrivateKeyDeviceSigner(privateKey)
+            ?: error("Pending device signing key missing")
+        return signerForAlias(alias)
     }
 
     fun publicKey(): PublicKey {
@@ -61,6 +68,12 @@ class DeviceKeyStore @Inject constructor() : DeviceKeyAccess {
             ?: committedAlias()
             ?: error("Device public key missing")
         return requirePublicKey(alias)
+    }
+
+    private fun signerForAlias(alias: String): DeviceSigner {
+        val privateKey = androidKeyStore().getKey(alias, null) as? PrivateKey
+            ?: error("Device signing key missing for alias=$alias")
+        return PrivateKeyDeviceSigner(privateKey)
     }
 
     /** SPKI of the active (committed) key only. */
