@@ -35,19 +35,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Install
-        working-directory: .
+        working-directory: ${{ github.workspace }}
         run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - name: Build Docker image
-        working-directory: .
+        working-directory: ${{ github.workspace }}
         run: docker build -f backend/Dockerfile -t sms-gateway-backend:ci .
