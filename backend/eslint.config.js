@@ -37,7 +37,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["scripts/**/*.{js,mjs,cjs}"],
+    files: ["scripts/**/*.{js,mjs,cjs}", ".dependency-cruiser.cjs"],
     languageOptions: {
       globals: {
         console: "readonly",
@@ -46,6 +46,10 @@ export default tseslint.config(
         Buffer: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",
+        module: "writable",
+        require: "readonly",
+        __dirname: "readonly",
+        __filename: "readonly",
       },
     },
   },

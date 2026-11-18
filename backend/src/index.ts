@@ -1,4 +1,4 @@
-import { buildApp } from "./app.js";
+import { buildApp } from "./composition/index.js";
 import { loadConfig } from "./config.js";
 import { ensureQueues, loadQueueConfig, startBoss } from "./queue/index.js";
 

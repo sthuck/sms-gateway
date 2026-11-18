@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg, { type Pool } from "pg";
-import { createPool } from "../../src/db/pool.js";
+import { createPool } from "../../src/adapters/db-postgres/pool.js";
 
 const { Pool: PgPool } = pg;
 const execFileAsync = promisify(execFile);

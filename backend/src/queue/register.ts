@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { Pool, PoolClient } from "pg";
 import type { Job, PgBoss } from "pg-boss";
-import { withOwner } from "../db/with-owner.js";
+import { withOwner } from "../adapters/db-postgres/with-owner.js";
 import type { QueueConfig } from "./config.js";
 import { loadQueueConfig } from "./config.js";
 import { type EventName, type QueueEvent, parseQueueEvent } from "./events.js";

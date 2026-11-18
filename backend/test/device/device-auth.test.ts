@@ -3,8 +3,8 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
-import { createJwtVerifier } from "../../src/auth/jwt.js";
-import { requireUserAuth } from "../../src/auth/plugin.js";
+import { createJwtVerifier } from "../../src/adapters/auth-oidc/jwt.js";
+import { requireUserAuth } from "../../src/adapters/http-fastify/auth-plugin.js";
 import { deviceAuthPreHandler } from "../../src/device/plugin.js";
 import { hashPairingCode, normalizePairingCode } from "../../src/device/pairing-code.js";
 import {

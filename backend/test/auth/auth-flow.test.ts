@@ -3,10 +3,10 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
-import { requireUserAuth } from "../../src/auth/plugin.js";
-import { createJwtVerifier } from "../../src/auth/jwt.js";
-import { findOrProvisionUser } from "../../src/auth/identity.js";
-import { mapClaims } from "../../src/auth/claims.js";
+import { requireUserAuth } from "../../src/adapters/http-fastify/auth-plugin.js";
+import { createJwtVerifier } from "../../src/adapters/auth-oidc/jwt.js";
+import { findOrProvisionUser } from "../../src/adapters/db-postgres/provision.js";
+import { mapClaims } from "../../src/domain/auth/claims.js";
 import {
   appDatabaseUrl,
   canConnect,
@@ -211,6 +211,22 @@ describe.skipIf(!migratorOk)("OIDC auth flow (mock provider)", () => {
       `SELECT count(*)::int AS n FROM users WHERE email = 'alice@example.com'`,
     );
     expect(rows[0]!.n).toBe(1);
+  });
+
+  it("logout clears cookies (204)", async () => {
+    const { sessionCookie, csrfCookie } = await completeLogin();
+    const logout = await app.inject({
+      method: "POST",
+      url: "/v1/auth/logout",
+      cookies: { sms_session: sessionCookie, sms_csrf: csrfCookie },
+    });
+    expect(logout.statusCode).toBe(204);
+    const me = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      cookies: { sms_session: sessionCookie },
+    });
+    expectAuthProblem(userApi, "/v1/auth/me", "get", me, 401);
   });
 
   it("rejects bad state", async () => {

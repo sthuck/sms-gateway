@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadOidcAuthConfig } from "../../src/auth/oidc-config.js";
+import { loadOidcAuthConfig } from "../../src/adapters/auth-oidc/oidc-config.js";
 
 const secret = "dev-only-session-secret-min-32-chars!!";
 

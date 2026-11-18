@@ -37,6 +37,14 @@ deploy/helm/      # Kubernetes Helm charts
 docs/             # Architecture, local-dev, API contracts
 ```
 
+### Backend ports & adapters
+
+The API is migrating to hexagonal (ports & adapters) layout, slice by
+slice. **User auth** (`/v1/auth/*`, sessions, identity) lives under
+`backend/src/{domain,application,ports,adapters,composition}/`. See
+`backend/docs/architecture-layers.md` for the dependency rule, layer map,
+how to add a use case/adapter, and planned B2/C follow-ups.
+
 ## Homelab Kubernetes: Postgres and the queue
 
 Postgres and the queue run in the same homelab Kubernetes cluster as the

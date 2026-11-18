@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import type { PgBoss } from "pg-boss";
-import { withOwner } from "../../src/db/with-owner.js";
+import { withOwner } from "../../src/adapters/db-postgres/with-owner.js";
 import {
   claimProcessed,
   ensureQueues,

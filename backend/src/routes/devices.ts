@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { requireUserAuth } from "../auth/plugin.js";
-import { sendProblem } from "../http/problems.js";
-import { withOwner } from "../db/with-owner.js";
+import { requireUserAuth } from "../adapters/http-fastify/auth-plugin.js";
+import { sendProblem } from "../adapters/http-fastify/problems.js";
+import { withOwner } from "../adapters/db-postgres/with-owner.js";
 import { verifyPairProofOfPossession } from "../device/pair-auth.js";
 import { hashPairingCode, normalizePairingCode } from "../device/pairing-code.js";
 import { burnPairingCode, lookupPairingCode } from "../device/lookup.js";

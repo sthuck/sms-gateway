@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateMfa } from "../../src/auth/mfa.js";
+import { evaluateMfa } from "../../src/domain/auth/mfa.js";
 
 describe("evaluateMfa", () => {
   it("passes when MFA is not required", () => {
