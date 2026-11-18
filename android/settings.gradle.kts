@@ -1,12 +1,9 @@
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
+        // No content filters: filtered google() can resolve com.google.*
+        // metadata without serving the jar, and Gradle then fails looking
+        // only at that repo (seen in CI as missing protobuf/guava jars).
+        google()
         mavenCentral()
         gradlePluginPortal()
     }

@@ -33,11 +33,13 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
-          cache-dependency-path: |
-            android/*.gradle*
-            android/gradle/wrapper/gradle-wrapper.properties
-            android/gradle/libs.versions.toml
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Cache can retain incomplete artifact downloads across retries.
+          cache-read-only: false
+          dependency-graph: disabled
 
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
@@ -65,7 +67,7 @@ jobs:
           "$SDKMANAGER" "platforms;android-37.2" "build-tools;36.0.0"
 
       - name: Build, lint, and unit test (devDebug)
-        run: ./gradlew assembleDevDebug lintDevDebug testDevDebugUnitTest --stacktrace
+        run: ./gradlew assembleDevDebug lintDevDebug testDevDebugUnitTest --stacktrace --refresh-dependencies
 
       - name: Upload dev debug APK
         uses: actions/upload-artifact@v4
@@ -91,11 +93,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
-          cache-dependency-path: |
-            android/*.gradle*
-            android/gradle/wrapper/gradle-wrapper.properties
-            android/gradle/libs.versions.toml
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+          dependency-graph: disabled
 
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew scripts/run-connected-dev-debug.sh
