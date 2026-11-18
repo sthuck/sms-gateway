@@ -120,19 +120,21 @@ jobs:
           echo "No web package yet; placeholder OK"
 
   android:
-    name: Android (placeholder)
+    name: Android (see Android CI)
     needs: changes
     if: needs.changes.outputs.android == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Skip until Android project exists
+      - name: Defer to android-ci.yml
         run: |
-          if [ -f android/settings.gradle ] || [ -f android/settings.gradle.kts ]; then
-            echo "Android Gradle project present — replace this job with real build"
+          if [ ! -f android/settings.gradle.kts ]; then
+            echo "Expected android/settings.gradle.kts" >&2
             exit 1
           fi
-          echo "No Android project yet; placeholder OK"
+          echo "Android Gradle project present."
+          echo "Real assemble/lint/unit/instrumented jobs run in .github/workflows/android-ci.yml."
+
 
   # Aggregate required check: always succeeds/fails based on needed jobs.
   # Mark this as the required status check in branch protection.
