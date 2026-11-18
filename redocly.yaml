@@ -1,3 +1,6 @@
+extends:
+  - recommended
+
 apis:
   device@v1:
     root: docs/contracts/device-api.yaml
