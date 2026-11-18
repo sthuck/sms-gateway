@@ -51,15 +51,16 @@ describe("message normalisation", () => {
     expect(normaliseReceivedAt("1970-01-01T00:00:00Z", now).ok).toBe(true);
   });
 
-  it("rejects NUL in sender, device_msg_id, and body as invalid_field", () => {
+  it("rejects NUL in sender and device_msg_id as invalid_field; body may contain NUL", () => {
     expect(normaliseSender("Bank\u0000Alert", "US", formatPhoneSender)).toMatchObject({
       ok: false,
       code: "invalid_field",
     });
+    const nulId = "sms-\u0000-1";
     expect(
       validateBatchItem(
         {
-          device_msg_id: "sms-\u0000-1",
+          device_msg_id: nulId,
           sender: "+15551234567",
           body: "hi",
           received_at: "2026-11-18T09:45:12Z",
@@ -69,7 +70,7 @@ describe("message normalisation", () => {
         formatPhoneSender,
         new Date("2026-11-18T12:00:00Z"),
       ),
-    ).toMatchObject({ ok: false, code: "invalid_field" });
+    ).toMatchObject({ ok: false, code: "invalid_field", deviceMsgId: nulId });
     expect(
       validateBatchItem(
         {
@@ -83,7 +84,7 @@ describe("message normalisation", () => {
         formatPhoneSender,
         new Date("2026-11-18T12:00:00Z"),
       ),
-    ).toMatchObject({ ok: false, code: "invalid_field" });
+    ).toMatchObject({ ok: true });
   });
 
   it("validates sim_slot and direction", () => {

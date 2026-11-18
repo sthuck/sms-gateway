@@ -155,6 +155,7 @@ describe("IngestMessageBatch use case", () => {
       error: { code: "invalid_field" },
     });
     expect(result.results[2]).toMatchObject({
+      device_msg_id: "bad\u0000id",
       status: "rejected",
       error: { code: "invalid_field" },
     });
