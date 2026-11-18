@@ -4,6 +4,7 @@
 | --- | --- |
 | [architecture.md](./architecture.md) | Proposed stack and homelab Kubernetes notes |
 | [schema.md](./schema.md) | Postgres ER diagram, RLS, roles, device/pairing lookups |
+| [queue.md](./queue.md) | pg-boss events, publishInTx, retries/DLQ, worker RLS |
 | [local-dev.md](./local-dev.md) | Docker Compose, ports, emulator access, Prism mock, Authentik |
 | [deployment-auth.md](./deployment-auth.md) | OIDC/Authentik hostnames and Helm env examples (deploy deferred) |
 | [adr/0001-oidc-authentik.md](./adr/0001-oidc-authentik.md) | ADR: generic OIDC, identity mapping, MFA, sessions |

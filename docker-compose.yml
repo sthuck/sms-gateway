@@ -19,7 +19,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    environment:
+    environment: &backend-env
       NODE_ENV: development
       HOST: "0.0.0.0"
       PORT: "8080"
@@ -32,6 +32,11 @@ services:
       MIGRATE_DATABASE_URL: postgres://sms:sms@postgres:5432/sms
       # LOCAL-DEV ONLY — required by migrate:up; never a silent script default
       SMS_APP_PASSWORD: sms_app
+      QUEUE_SCHEMA: pgboss
+      QUEUE_RETRY_LIMIT: "5"
+      QUEUE_RETRY_DELAY_SECONDS: "1"
+      QUEUE_RETRY_BACKOFF: "true"
+      QUEUE_METRICS_PORT: "9090"
     ports:
       # Host + Android emulator (10.0.2.2:8080)
       - "8080:8080"
@@ -49,6 +54,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # pg-boss consumer (STH-12). Same image as API; SIGTERM drains in-flight jobs.
+  # Run migrations before the first start so schema pgboss + sms_app exist.
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["node", "dist/worker.js"]
+    environment:
+      <<: *backend-env
+    ports:
+      - "9090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 30s
 
   # OpenAPI mock for the device API contract (STH-5).
   # Does NOT verify ECDSA signatures — schema-only.

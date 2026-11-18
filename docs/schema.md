@@ -165,12 +165,16 @@ erDiagram
 | `agent_grants` | Scopes default `stream:read`. |
 | `audit_log` | Actor is `user` \| `device` \| `agent`. |
 | `sender_ai_optout` | Per-owner sender patterns excluded from AI classification. |
+| `queue_processed_jobs` | Handler idempotency / dedupe keys (STH-12). Not for message bodies. |
 
 Every owned table carries `owner_id` so RLS is a single predicate. Foreign
 keys use `ON DELETE CASCADE` from `users` (and along device / stream /
 client edges) so a hard delete of a user’s data is possible.
 `audit_log.stream_id` is `ON DELETE SET NULL` so history can outlive a
 stream row when desired.
+
+Queue job storage lives in schema **`pgboss`** (not RLS). It is installed
+by `scripts/bootstrap-pgboss.mjs` after migrations; see `docs/queue.md`.
 
 ## Roles
 

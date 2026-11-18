@@ -18,9 +18,15 @@ docker compose up --build
 docker compose --profile mock up --build
 ```
 
+Worker service (STH-12) is included in Compose; scale with
+`docker compose up --build --scale worker=2`. Metrics: `http://localhost:9090/metrics`.
+Migrate once first (`SMS_APP_PASSWORD` required) so `sms_app` + `pgboss` exist —
+see Migrations below and `docs/queue.md`.
+
 | Service | Host port | Emulator URL | Notes |
 | --- | --- | --- | --- |
 | Backend API | **8080** | `http://10.0.2.2:8080` | Fastify; listens on `0.0.0.0` |
+| Worker | **9090** | n/a | pg-boss consumer; metrics at `/metrics` |
 | Postgres | **5432** | n/a (internal) | User/db/password: `sms` / `sms` / `sms` (local only) |
 | Device API mock (Prism) | **4010** | `http://10.0.2.2:4010` | Profile `mock`; see below |
 
@@ -43,7 +49,7 @@ pnpm dev               # API on 0.0.0.0:8080
 Separate stubs:
 
 ```bash
-pnpm worker   # queue worker stub
+pnpm worker   # pg-boss consumer (needs migrate:up first)
 pnpm mcp      # MCP server stub
 ```
 
@@ -121,6 +127,7 @@ RLS, and lookup functions. The API should then use
 `DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms`.
 See `docs/schema.md` for the ER diagram and roles model. To rotate the
 app role password later: `ALTER ROLE sms_app PASSWORD '…'` (not migrate).
+It also bootstraps the `pgboss` queue schema (see `docs/queue.md`).
 
 Integration tests expect the same URLs (or `APP_DATABASE_URL` for the app
 role) and an explicit `SMS_APP_PASSWORD`. They run against a real Postgres
