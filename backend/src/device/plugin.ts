@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
 import type { Pool, PoolClient } from "pg";
-import { withOwner } from "../db/with-owner.js";
-import { sendProblem } from "../http/problems.js";
+import { withOwner } from "../adapters/db-postgres/with-owner.js";
+import { sendProblem } from "../adapters/http-fastify/problems.js";
 import type { DeviceAuthConfig } from "./config.js";
 import { lookupDeviceForAuth } from "./lookup.js";
 import { claimNonceAndSignature } from "./replay-cache.js";

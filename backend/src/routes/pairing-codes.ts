@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { requireUserAuth } from "../auth/plugin.js";
-import { sendProblem } from "../http/problems.js";
+import { requireUserAuth } from "../adapters/http-fastify/auth-plugin.js";
+import { sendProblem } from "../adapters/http-fastify/problems.js";
 import {
   formatPairingQrPayload,
   generatePairingCode,

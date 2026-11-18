@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractMfaClaims, mapClaims } from "../../src/auth/claims.js";
+import { extractMfaClaims, mapClaims } from "../../src/domain/auth/claims.js";
 
 describe("mapClaims", () => {
   it("maps standard claims", () => {

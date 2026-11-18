@@ -15,7 +15,7 @@ const Ajv = require("ajv") as new (opts?: object) => {
 const addFormats = require("ajv-formats") as (ajv: instanceType) => void;
 type instanceType = InstanceType<typeof Ajv>;
 import { loadConfig } from "../../src/config.js";
-import { createJwtVerifier } from "../../src/auth/jwt.js";
+import { createJwtVerifier } from "../../src/adapters/auth-oidc/jwt.js";
 import {
   appDatabaseUrl,
   canConnect,

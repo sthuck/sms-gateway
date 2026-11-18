@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { createPool } from "./db/pool.js";
+import { createPool } from "./adapters/db-postgres/pool.js";
 import { createLogger } from "./logger.js";
 import {
   deadLetterQueueName,

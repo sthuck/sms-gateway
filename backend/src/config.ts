@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { loadOidcAuthConfig, type OidcAuthConfig } from "./auth/oidc-config.js";
+import { loadOidcAuthConfig, type OidcAuthConfig } from "./adapters/auth-oidc/oidc-config.js";
 import { loadDeviceAuthConfig, type DeviceAuthConfig } from "./device/config.js";
 
 const envSchema = z.object({
@@ -131,7 +131,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const corsAllowedOrigins = parseCorsAllowedOrigins(corsRaw);
   for (const origin of corsAllowedOrigins) {
     try {
-      // Validate each entry is an absolute origin URL.
       void new URL(origin);
     } catch {
       throw new Error(`Invalid configuration: CORS_ALLOWED_ORIGINS entry is not a URL: ${origin}`);
@@ -145,7 +144,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Invalid configuration: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (trustProxy === true && rest.NODE_ENV === "production") {
-    // Bare true trusts every XFF hop (client-controlled). Prefer CIDR/IP list.
     console.warn(
       "[config] TRUST_PROXY=true trusts every forwarded hop; prefer an explicit proxy IP/CIDR list",
     );

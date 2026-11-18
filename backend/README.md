@@ -2,6 +2,17 @@
 
 Fastify API, pg-boss worker, and MCP stub.
 
+## Layout (ports & adapters)
+
+User-auth is packaged by layer (`domain` / `application` / `ports` /
+`adapters` / `composition`). Pairing, device auth, and queue remain under
+`src/device` and `src/queue` until PR B2. Details:
+`docs/architecture-layers.md`.
+
+```bash
+pnpm lint:arch   # dependency-cruiser: domain/application stay framework-free
+```
+
 ## Database
 
 - **Schema:** `src/adapters/db-postgres/schema.ts` (Drizzle ORM 0.45.x)
