@@ -304,18 +304,19 @@ describe.skipIf(!migratorOk)("auth failure-mode parity (STH-46)", () => {
     await broken.close();
   });
 
-  it("CSRF-rejected requests do not update last_seen_at", async () => {
+  it("CSRF-rejected requests do not update last_seen_at (awaits fire-and-forget)", async () => {
+    const { createHash } = await import("node:crypto");
     const app = await buildConfiguredApp(appPool);
     await app.ready();
     const { sessionCookie, csrfCookie } = await completeLogin(app);
+    const sessionHash = createHash("sha256").update(sessionCookie).digest("hex");
 
-    const before = await admin.query<{ last_seen_at: Date | null }>(
-      `SELECT last_seen_at FROM sessions WHERE revoked_at IS NULL`,
-    );
-    const previous = before.rows[0]?.last_seen_at?.getTime() ?? null;
-
-    // Give the clock a tick so a wrong touch would move last_seen_at.
-    await new Promise((r) => setTimeout(r, 20));
+    // Seed a stable old timestamp so an early touch is observable after a wait.
+    const seeded = new Date("2020-01-01T00:00:00.000Z");
+    await admin.query(`UPDATE sessions SET last_seen_at = $1 WHERE session_id_hash = $2`, [
+      seeded,
+      sessionHash,
+    ]);
 
     const rejected = await app.inject({
       method: "POST",
@@ -329,14 +330,179 @@ describe.skipIf(!migratorOk)("auth failure-mode parity (STH-46)", () => {
     expect(rejected.statusCode).toBe(403);
     expect(rejected.json()).toMatchObject({ code: "csrf_rejected" });
 
-    const after = await admin.query<{ last_seen_at: Date | null }>(
-      `SELECT last_seen_at FROM sessions WHERE revoked_at IS NULL`,
+    // Wait long enough that a fire-and-forget early touch would have committed.
+    await new Promise((r) => setTimeout(r, 350));
+    const afterReject = await admin.query<{ last_seen_at: Date }>(
+      `SELECT last_seen_at FROM sessions WHERE session_id_hash = $1`,
+      [sessionHash],
     );
-    const next = after.rows[0]?.last_seen_at?.getTime() ?? null;
-    expect(next).toBe(previous);
+    expect(afterReject.rows[0]!.last_seen_at.getTime()).toBe(seeded.getTime());
+
+    // Positive control: a successful authenticated request DOES advance last_seen_at.
+    const ok = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      cookies: { sms_session: sessionCookie },
+    });
+    expect(ok.statusCode).toBe(200);
+    const advanced = await pollLastSeen(
+      admin,
+      sessionHash,
+      (t) => t.getTime() > seeded.getTime(),
+      2000,
+    );
+    expect(advanced.getTime()).toBeGreaterThan(seeded.getTime());
+    await app.close();
+  });
+
+  it("STH-48: JWKS HTTP 500/503/non-JSON → 500 retryable; bad token still 401", async () => {
+    const env = {
+      NODE_ENV: "test",
+      HOST: "127.0.0.1",
+      PORT: "8080",
+      LOG_LEVEL: "silent",
+      DATABASE_URL: appDatabaseUrl(),
+      OIDC_ISSUER_URL: mock.issuer,
+      OIDC_CLIENT_ID: "sms-gateway-test",
+      OIDC_CLIENT_SECRET: "dev-only-test-client-secret",
+      OIDC_REDIRECT_URI: "http://127.0.0.1:8080/v1/auth/callback",
+      OIDC_AUDIENCE: "sms-gateway-test",
+      SESSION_SECRET,
+      REQUIRE_MFA: "true",
+      MFA_CLAIMS_MISSING: "deny",
+      OIDC_ALLOW_INSECURE: "true",
+      PUBLIC_BASE_URL: "http://127.0.0.1:8080/",
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8080",
+      AUTO_LINK_BY_EMAIL: "false",
+    };
+    const config = loadConfig(env);
+
+    // Provision identity so a good token would resolve after JWKS recovers.
+    const provision = await buildConfiguredApp(appPool);
+    await provision.ready();
+    await completeLogin(provision);
+    await provision.close();
+
+    const faults: Array<{ status: number; body: string; contentType?: string }> = [
+      { status: 500, body: JSON.stringify({ error: "down" }) },
+      { status: 503, body: JSON.stringify({ error: "unavailable" }) },
+      { status: 200, body: "<html>not-json</html>", contentType: "text/html" },
+    ];
+
+    for (const fault of faults) {
+      mock.setJwksFault(fault);
+      const jwtVerifier = createJwtVerifier(config.oidc!, mock.jwksUri);
+      const app = await buildApp(config, {
+        pool: appPool,
+        auth: { config: config.oidc, jwtVerifier, skipDiscovery: false },
+      });
+      await app.ready();
+      const token = await mock.signToken({
+        sub: "sub-alice",
+        email: "alice@example.com",
+        amr: ["pwd", "otp"],
+      });
+      const res = await app.inject({
+        method: "GET",
+        url: "/v1/auth/me",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode, `JWKS fault ${fault.status}`).toBe(500);
+      expect(res.json()).toMatchObject({ code: "internal_error", retryable: true });
+      await app.close();
+    }
+
+    mock.setJwksFault(null);
+    const jwtVerifier = createJwtVerifier(config.oidc!, mock.jwksUri);
+    const app = await buildApp(config, {
+      pool: appPool,
+      auth: { config: config.oidc, jwtVerifier, skipDiscovery: false },
+    });
+    await app.ready();
+    const bad = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: { authorization: "Bearer not-a-jwt" },
+    });
+    expect(bad.statusCode).toBe(401);
+    expect(bad.json()).toMatchObject({ code: "unauthorized" });
+    await app.close();
+  });
+
+  it("STH-48: IdP /token HTTP 503 → 500; invalid_grant still 400", async () => {
+    const app = await buildConfiguredApp(appPool);
+    await app.ready();
+
+    mock.setTokenFault({ status: 503, body: JSON.stringify({ error: "temporarily_unavailable" }) });
+    const login = await app.inject({ method: "GET", url: "/v1/auth/login" });
+    expect(login.statusCode).toBe(302);
+    const idpRes = await fetch(login.headers.location!, { redirect: "manual" });
+    const callbackPath = idpRes.headers.get("location")!.replace("http://127.0.0.1:8080", "");
+    const oauthCookie = cookieValue(login, "sms_oauth")!;
+    const down = await app.inject({
+      method: "GET",
+      url: callbackPath,
+      cookies: { sms_oauth: oauthCookie },
+    });
+    expect(down.statusCode).toBe(500);
+    expect(down.json()).toMatchObject({ code: "internal_error", retryable: true });
+
+    mock.setTokenFault({
+      status: 400,
+      body: JSON.stringify({ error: "invalid_grant" }),
+    });
+    const login2 = await app.inject({ method: "GET", url: "/v1/auth/login" });
+    const idpRes2 = await fetch(login2.headers.location!, { redirect: "manual" });
+    const callbackPath2 = idpRes2.headers.get("location")!.replace("http://127.0.0.1:8080", "");
+    const oauthCookie2 = cookieValue(login2, "sms_oauth")!;
+    const badGrant = await app.inject({
+      method: "GET",
+      url: callbackPath2,
+      cookies: { sms_oauth: oauthCookie2 },
+    });
+    expect(badGrant.statusCode).toBe(400);
+    expect(badGrant.json()).toMatchObject({ code: "invalid_request" });
+
+    mock.setTokenFault({
+      status: 200,
+      body: "<html>nope</html>",
+      contentType: "text/html",
+    });
+    const login3 = await app.inject({ method: "GET", url: "/v1/auth/login" });
+    const idpRes3 = await fetch(login3.headers.location!, { redirect: "manual" });
+    const callbackPath3 = idpRes3.headers.get("location")!.replace("http://127.0.0.1:8080", "");
+    const oauthCookie3 = cookieValue(login3, "sms_oauth")!;
+    const nonJson = await app.inject({
+      method: "GET",
+      url: callbackPath3,
+      cookies: { sms_oauth: oauthCookie3 },
+    });
+    expect(nonJson.statusCode).toBe(500);
+    expect(nonJson.json()).toMatchObject({ code: "internal_error", retryable: true });
+
+    mock.setTokenFault(null);
     await app.close();
   });
 });
+
+async function pollLastSeen(
+  admin: Pool,
+  sessionHash: string,
+  pred: (t: Date) => boolean,
+  timeoutMs: number,
+): Promise<Date> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const { rows } = await admin.query<{ last_seen_at: Date }>(
+      `SELECT last_seen_at FROM sessions WHERE session_id_hash = $1`,
+      [sessionHash],
+    );
+    const t = rows[0]?.last_seen_at;
+    if (t && pred(t)) return t;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error("last_seen_at did not advance in time");
+}
 
 function cookieValue(
   response: {

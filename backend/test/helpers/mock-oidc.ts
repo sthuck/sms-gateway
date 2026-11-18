@@ -18,6 +18,8 @@ type Pending = {
 
 type SigningKey = Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
 
+export type MockEndpointFault = { status: number; body: string; contentType?: string } | null;
+
 export type MockOidc = {
   issuer: string;
   jwksUri: string;
@@ -27,6 +29,10 @@ export type MockOidc = {
   server: Server;
   /** Override claims for a pending authorization code (before token exchange). */
   setCodeClaims: (code: string, claims: Record<string, unknown>) => void;
+  /** Force the next JWKS responses to this fault until cleared (`null`). */
+  setJwksFault: (fault: MockEndpointFault) => void;
+  /** Force the next /token responses to this fault until cleared (`null`). */
+  setTokenFault: (fault: MockEndpointFault) => void;
   signToken: (
     claims: Record<string, unknown>,
     overrides?: { aud?: string; exp?: number; iss?: string },
@@ -48,6 +54,8 @@ export async function startMockOidc(options: MockOidcOptions): Promise<MockOidc>
 
   const pending = new Map<string, Pending>();
   let baseUrl = "";
+  let jwksFault: MockEndpointFault = null;
+  let tokenFault: MockEndpointFault = null;
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", baseUrl || "http://127.0.0.1");
@@ -69,6 +77,12 @@ export async function startMockOidc(options: MockOidcOptions): Promise<MockOidc>
     }
 
     if (url.pathname === "/jwks") {
+      if (jwksFault) {
+        res.statusCode = jwksFault.status;
+        res.setHeader("content-type", jwksFault.contentType ?? "application/json");
+        res.end(jwksFault.body);
+        return;
+      }
       json(res, { keys: [publicJwk] });
       return;
     }
@@ -109,6 +123,12 @@ export async function startMockOidc(options: MockOidcOptions): Promise<MockOidc>
     }
 
     if (url.pathname === "/token" && req.method === "POST") {
+      if (tokenFault) {
+        res.statusCode = tokenFault.status;
+        res.setHeader("content-type", tokenFault.contentType ?? "application/json");
+        res.end(tokenFault.body);
+        return;
+      }
       const body = await readBody(req);
       const params = new URLSearchParams(body);
       const code = params.get("code") ?? "";
@@ -225,6 +245,12 @@ export async function startMockOidc(options: MockOidcOptions): Promise<MockOidc>
         throw new Error("Unknown authorization code");
       }
       entry.claims = { ...claims };
+    },
+    setJwksFault(fault) {
+      jwksFault = fault;
+    },
+    setTokenFault(fault) {
+      tokenFault = fault;
     },
     async signToken(claims, overrides) {
       const now = Math.floor(Date.now() / 1000);

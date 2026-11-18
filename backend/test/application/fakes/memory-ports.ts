@@ -146,6 +146,7 @@ export class MemoryUserRepository implements UserRepository {
   }
 
   async create(input: CreateUserInput): Promise<void> {
+    maybeFault(this.fault, "memory user create failed");
     this.users.set(input.ownerId, {
       id: input.ownerId,
       email: input.email,
@@ -165,6 +166,7 @@ export class MemoryUserRepository implements UserRepository {
   }
 
   async updateAuthProfile(input: UpdateAuthProfileInput): Promise<void> {
+    maybeFault(this.fault, "memory user updateAuthProfile failed");
     const user = this.users.get(input.ownerId);
     if (!user) return;
     user.mfaEnrolled = input.mfaEnrolled;
@@ -174,6 +176,7 @@ export class MemoryUserRepository implements UserRepository {
   }
 
   async linkIdentityAndUpdate(input: LinkIdentityAndUpdateInput): Promise<void> {
+    maybeFault(this.fault, "memory user linkIdentityAndUpdate failed");
     if (this.identities) {
       await this.identities.link(input.ownerId, input.issuer, input.sub);
     }

@@ -34,16 +34,47 @@ export async function createOidcClient(config: OidcAuthConfig): Promise<OidcClie
   }
 }
 
-function isOidcClientProtocolError(err: unknown): boolean {
-  // openid-client / oauth4webapi surface ResponseBodyError, AuthorizationResponseError, etc.
-  if (!err || typeof err !== "object") return false;
-  const name = (err as { name?: string }).name ?? "";
-  return (
-    name.includes("AuthorizationResponse") ||
-    name.includes("ClientError") ||
-    name.includes("OperationProcessing") ||
-    name.includes("WWWAuthenticateChallenge")
-  );
+function httpStatusFromOidcError(err: unknown): number | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause && typeof cause === "object" && "status" in cause) {
+    const status = (cause as { status?: unknown }).status;
+    if (typeof status === "number") return status;
+  }
+  const direct = (err as { status?: unknown }).status;
+  return typeof direct === "number" ? direct : undefined;
+}
+
+function oidcErrorCode(err: unknown): string | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/**
+ * Token-endpoint / transport failures → InfrastructureError (5xx).
+ * Protocol / credential rejects (invalid_grant, bad state/nonce) → rethrow as-is → 400.
+ */
+export function isOidcTokenInfrastructureFailure(err: unknown): boolean {
+  if (err instanceof InfrastructureError) return true;
+  if (err instanceof TypeError) return true;
+  if (err instanceof Error && /fetch|network|econn|etimedout/i.test(err.message)) {
+    return true;
+  }
+
+  const code = oidcErrorCode(err);
+  // Non-JSON / unexpected content-type from the token endpoint.
+  if (code === "OAUTH_RESPONSE_IS_NOT_JSON") return true;
+
+  const status = httpStatusFromOidcError(err);
+  if (typeof status === "number" && status >= 500) return true;
+
+  // Conformity failures with an HTTP 5xx Response cause (openid-client ClientError).
+  if (code === "OAUTH_RESPONSE_IS_NOT_CONFORM" && typeof status === "number" && status >= 500) {
+    return true;
+  }
+
+  return false;
 }
 
 export class OpenIdClientOidcProvider implements OidcProvider {
@@ -92,15 +123,10 @@ export class OpenIdClientOidcProvider implements OidcProvider {
         expectedNonce: dance.nonce,
       });
     } catch (err) {
-      if (isOidcClientProtocolError(err)) throw err;
-      // Network / IdP down / 5xx from token endpoint → infrastructure.
-      if (
-        err instanceof TypeError ||
-        (err instanceof Error && /fetch|network|econn|etimedout/i.test(err.message))
-      ) {
+      if (isOidcTokenInfrastructureFailure(err)) {
         throw InfrastructureError.wrap(err, "OIDC token exchange failed");
       }
-      // Preserve main behaviour for remaining openid-client rejects (bad code/state/nonce) → 400.
+      // invalid_grant / invalid_client / state/nonce mismatches → protocol (400).
       throw err;
     }
 

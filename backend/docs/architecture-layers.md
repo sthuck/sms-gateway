@@ -57,11 +57,11 @@ undici, …). Negative proof lives in `test/architecture/`.
 
 ## Error classification (STH-46)
 
-| Outcome                                  | Representation                        | HTTP                                        |
-| ---------------------------------------- | ------------------------------------- | ------------------------------------------- |
-| Domain absence (not found)               | `null` from port lookups              | mapped by use case → 401/404 as appropriate |
-| Invalid credentials / MFA / CSRF         | `AuthError` (or device problem codes) | 401 / 403                                   |
-| Infrastructure (DB / JWKS / IdP network) | `InfrastructureError` (never `null`)  | 500 / 503 `retryable: true`                 |
+| Outcome                                       | Representation                        | HTTP                                        |
+| --------------------------------------------- | ------------------------------------- | ------------------------------------------- |
+| Domain absence (not found)                    | `null` from port lookups              | mapped by use case → 401/404 as appropriate |
+| Invalid credentials / MFA / CSRF              | `AuthError` (or device problem codes) | 401 / 403                                   |
+| Infrastructure (DB / JWKS / IdP HTTP+network) | `InfrastructureError` (never `null`)  | 500 / 503 `retryable: true`                 |
 
 Rules:
 
@@ -69,11 +69,13 @@ Rules:
 2. Use cases: never catch and convert `InfrastructureError` into `AuthError`.
 3. HTTP (`mapAuthError` / routes): rethrow non-`AuthError` so the global handler
    returns 500 `internal_error` retryable — never collapse into unauthorized.
-4. Enforced by `pnpm lint:auth-errors` (`scripts/check-auth-error-classification.mjs`)
-   plus port contract tests under `test/ports/` and HTTP matrix in
-   `test/auth/failure-modes.test.ts`.
+4. JWKS / IdP **HTTP status** failures (5xx, non-JSON) are infra (STH-48), not 401/400.
+5. **Primary regression guard:** HTTP matrix in `test/auth/failure-modes.test.ts`
+   (DB + JWKS HTTP + IdP `/token` HTTP + CSRF touch). Port contracts cover all
+   repository methods. `pnpm lint:auth-errors` is a tripwire only (see RCA).
 
-See `docs/rca/STH-46-infra-errors-as-auth-failures.md`.
+Readable path on this branch: `backend/docs/architecture-layers.md`.
+Full RCA: `backend/docs/rca/STH-46-infra-errors-as-auth-failures.md`.
 
 ## Logging
 

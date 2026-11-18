@@ -9,6 +9,7 @@ import { InfrastructureError } from "../../domain/errors.js";
 import type { JwtVerifier, VerifiedBearer } from "../../ports/outbound/jwt-verifier.js";
 import type { OidcAuthConfig } from "./oidc-config.js";
 
+/** Token/claim/signature failures → 401 (matches main for bad credentials). */
 function isJwtCredentialFailure(err: unknown): boolean {
   return (
     err instanceof joseErrors.JWTExpired ||
@@ -21,10 +22,24 @@ function isJwtCredentialFailure(err: unknown): boolean {
   );
 }
 
+/**
+ * JWKS fetch / transport / malformed JWKS document failures → InfrastructureError.
+ * Includes HTTP 500/503/404 and non-JSON 200 from the JWKS endpoint (jose surfaces
+ * these as JOSEError / JWKSInvalid, not TypeError).
+ */
 function isJwtInfraFailure(err: unknown): boolean {
   if (err instanceof InfrastructureError) return true;
+  if (isJwtCredentialFailure(err)) return false;
   if (err instanceof joseErrors.JWKSTimeout) return true;
+  if (err instanceof joseErrors.JWKSInvalid) return true;
   if (err instanceof TypeError) return true; // fetch failed / network
+  if (err instanceof joseErrors.JOSEError) {
+    const msg = err.message.toLowerCase();
+    // jose: "Expected 200 OK from the JSON Web Key Set HTTP response"
+    if (msg.includes("json web key set") || msg.includes("expected 200")) {
+      return true;
+    }
+  }
   if (err instanceof Error) {
     const msg = err.message.toLowerCase();
     if (
@@ -79,7 +94,7 @@ export function createJwtVerifier(
           iss: payload.iss,
         };
       } catch (err) {
-        if (isJwtInfraFailure(err) && !isJwtCredentialFailure(err)) {
+        if (isJwtInfraFailure(err)) {
           throw InfrastructureError.wrap(err, "JWKS or JWT infrastructure failure");
         }
         throw err;
