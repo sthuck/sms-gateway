@@ -223,11 +223,19 @@ DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms
 - **Existing DB:** if `pgmigrations` shows the legacy head and the Drizzle
   journal is empty, `migrate:stamp` records the baseline as applied **without**
   re-running DDL. `created_at` uses the journal entry's exact `when` (not
-  wall-clock — see drizzle-orm#5769). Before stamping, the wrapper compares the
-  live catalog to `drizzle/expected-catalog.json` (policies, ENABLE+FORCE
-  RLS, grants / default privileges, `sms_app` role attributes, function
-  `search_path`) and refuses with a listed diff on mismatch. Stamp is idempotent
-  when the baseline row is already present.
+  wall-clock — see drizzle-orm#5769). Before stamping, the wrapper asserts every
+  in-scope object is owned by the migrator role (`current_user` on
+  `MIGRATE_DATABASE_URL`), then compares the live catalog to
+  `drizzle/expected-catalog.json` (policies, ENABLE+FORCE RLS, grants / default
+  privileges, `sms_app` role attributes, function `search_path`) and refuses with
+  a listed diff on mismatch. Stamp is idempotent when the baseline row is already
+  present.
+- **Legacy `public` CREATE:** Postgres ≤14 (and some restored dumps) grant
+  `CREATE` on schema `public` to `PUBLIC`. Stamp refuses that ACL. Remedy:
+
+```sql
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+```
 - **Legacy mistaken `up`:** if `public.pgmigrations` exists and the Drizzle
   journal is empty, `migrate:up` fails with `legacy DB detected: run migrate:stamp`
   instead of a raw `CREATE SCHEMA app failed`.
@@ -245,7 +253,8 @@ DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms
   2. a catalog fingerprint diff covering table/function/schema/database ACLs
      (`aclexplode`), `pg_default_acl`, `sms_app` role flags (`rolcanlogin`,
      `rolbypassrls`, `rolsuper`, …), function `proconfig` (`search_path`),
-     `relrowsecurity` / `relforcerowsecurity`, and `pg_policies`.
+     `relrowsecurity` / `relforcerowsecurity`, `pg_policies`, and homogeneous
+     migrator ownership of tables / functions / types / schemas / database.
 
 ## RLS
 

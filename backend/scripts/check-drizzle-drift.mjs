@@ -10,13 +10,13 @@
  * Also supports:
  *   node scripts/check-drizzle-drift.mjs --assert-detects-drift <drizzleDir> <schemaTs>
  *     Run generate against a (mutated) drizzle tree + schema; exit 0 only if
- *     drift is detected (negative test helper).
+ *     real schema drift is detected (new 0001_*.sql after a loaded schema).
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const backendRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const repoRoot = path.dirname(backendRoot);
@@ -25,10 +25,50 @@ const metaDir = path.join(drizzleDir, "meta");
 const journalPath = path.join(metaDir, "_journal.json");
 const packageJsonPath = path.join(backendRoot, "package.json");
 const defaultSchemaPath = path.join(backendRoot, "src/adapters/db-postgres/schema.ts");
+const defaultOwnedTablesPath = path.join(backendRoot, "src/adapters/db-postgres/owned-tables.json");
 const kitBin = path.join(backendRoot, "node_modules/.bin/drizzle-kit");
+
+/** Resolve drizzle-kit from backend (pnpm may hoist to the workspace root). */
+const requireFromBackend = createRequire(path.join(backendRoot, "package.json"));
+const drizzleKitEntryHref = pathToFileURL(requireFromBackend.resolve("drizzle-kit")).href;
 
 const NO_CHANGES_RE = /No schema changes, nothing to migrate/i;
 const MALFORMED_RE = /\bmalformed\b/i;
+/** drizzle-kit prints this when it writes a new migration SQL file. */
+const MIGRATION_FILE_RE = /Your SQL migration file\s+➜\s+\S*0001_\S+\.sql/i;
+const TABLES_LOADED_RE = /\b([1-9]\d*)\s+tables\b/i;
+const NEW_MIGRATION_SQL_RE = /^0001_.+\.sql$/;
+
+/**
+ * Exact trimmed lines that may mention `drizzle-kit push` (forbid docs only).
+ * Substring matches like "push guard" / "no push script" are intentionally NOT
+ * accepted — `drizzle-kit push # push guard` must fail the guard.
+ */
+const ALLOWED_PUSH_DOC_LINES = new Set([
+  "* Never use `drizzle-kit push`.",
+  "* Never use `drizzle-kit push`. Apply via `pnpm migrate:up` only.",
+  "* Drizzle Kit config. NEVER use `drizzle-kit push` — only generate + migrate",
+  "- **Never** `drizzle-kit push`",
+  "- **Never** `drizzle-kit push` (no push script; CI greps for it). Apply only via",
+  "**Never** run `drizzle-kit push` — only `generate` (authors) and `pnpm migrate:up` (apply).",
+  "CI fails if a `push` script or non-doc `drizzle-kit push` usage appears.",
+  "restore a backup. Never use `drizzle-kit push` (CI guards against exposing it).",
+  "# Existing legacy DBs: pnpm migrate:stamp (no DDL re-run). Never drizzle-kit push.",
+  'it("package.json has no drizzle-kit push script", () => {',
+]);
+
+/** Paths whose content may contain an allowlisted forbid-doc line. */
+const ALLOWED_PUSH_DOC_PATHS = new Set([
+  path.join("backend", "README.md"),
+  path.join("backend", "drizzle", "README.md"),
+  path.join("backend", "drizzle.config.ts"),
+  path.join("backend", "scripts", "migrate.mjs"),
+  path.join("backend", "src", "adapters", "db-postgres", "schema.ts"),
+  path.join("backend", "test", "db", "migrations.test.ts"),
+  path.join("docs", "local-dev.md"),
+  path.join("docs", "schema.md"),
+  path.join("docker-compose.yml"),
+]);
 
 const assertDetectsDrift = process.argv[2] === "--assert-detects-drift";
 
@@ -42,7 +82,7 @@ if (assertDetectsDrift) {
   const detected = runGenerateExpectingDrift(probeDrizzleDir, probeSchema);
   if (!detected) {
     console.error(
-      "Negative drift test failed: generate reported no schema changes against a mutated tree",
+      "Negative drift test failed: generate did not produce a real 0001_*.sql migration against the mutated tree",
     );
     process.exit(1);
   }
@@ -84,41 +124,15 @@ function fail(msg) {
     }
   }
 
-  /** Whole-line docs/comments that forbid push (explicit allowlist). */
-  function isAllowlistedForbidDoc(line) {
+  /**
+   * @param {string} line
+   * @param {string} rel
+   */
+  function isAllowlistedForbidDoc(line, rel) {
+    if (rel === path.join("backend", "scripts", "check-drizzle-drift.mjs")) return true;
     const trimmed = line.trim();
-    if (
-      /^\*\*?Never\*\*?\s+`?drizzle-kit\s+push/i.test(trimmed) ||
-      /^-+\s*\*\*?Never\*\*?\s+`?drizzle-kit\s+push/i.test(trimmed) ||
-      /^#{1,6}\s+.*Never.*drizzle-kit\s+push/i.test(trimmed) ||
-      /^-\s+\*\*Never\*\*\s+`drizzle-kit push`/i.test(trimmed) ||
-      /^-\s+\*\*Never\*\*\s+`drizzle-kit push`/i.test(trimmed)
-    ) {
-      return true;
-    }
-    if (
-      /^\/\/.*\b(Never|never|do not|don't)\b.*drizzle-kit\s+push/i.test(trimmed) ||
-      /^\*\s+.*(Never|never|do not|don't)\b.*drizzle-kit\s+push/i.test(trimmed) ||
-      /^\/\*\*.*(Never|never).*drizzle-kit\s+push/i.test(trimmed)
-    ) {
-      return true;
-    }
-    if (
-      /No `?drizzle-kit push`? script/i.test(trimmed) ||
-      /has no drizzle-kit push/i.test(trimmed) ||
-      /push guard/i.test(trimmed) ||
-      /Forbidden drizzle-kit push/i.test(trimmed) ||
-      /fails if a .*push script/i.test(trimmed) ||
-      /CI fails if a `push`/i.test(trimmed) ||
-      /no push script/i.test(trimmed) ||
-      /Never use `drizzle-kit push`/i.test(trimmed) ||
-      /never use `drizzle-kit push`/i.test(trimmed) ||
-      /\*\*Never\*\* run `drizzle-kit push`/i.test(trimmed) ||
-      /Never `drizzle-kit push`/i.test(trimmed)
-    ) {
-      return true;
-    }
-    return false;
+    if (!ALLOWED_PUSH_DOC_PATHS.has(rel)) return false;
+    return ALLOWED_PUSH_DOC_LINES.has(trimmed);
   }
 
   const pushHits = [];
@@ -129,7 +143,8 @@ function fail(msg) {
       rel.startsWith("node_modules/") ||
       rel.includes(`${path.sep}node_modules${path.sep}`) ||
       rel.startsWith(`backend${path.sep}dist${path.sep}`) ||
-      rel.startsWith(`.git${path.sep}`)
+      rel.startsWith(`.git${path.sep}`) ||
+      rel.includes(`${path.sep}.drift-probe-`)
     ) {
       return;
     }
@@ -138,8 +153,7 @@ function fail(msg) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!/drizzle-kit\s+push/.test(line)) continue;
-      if (rel === `backend${path.sep}scripts${path.sep}check-drizzle-drift.mjs`) continue;
-      if (isAllowlistedForbidDoc(line)) continue;
+      if (isAllowlistedForbidDoc(line, rel)) continue;
       pushHits.push(`${rel}:${i + 1}:${line.trim()}`);
     }
   });
@@ -149,7 +163,7 @@ function fail(msg) {
   console.log("No drizzle-kit push script/usage OK.");
 }
 
-// --- drizzle-kit generate must be an explicit no-op ---
+// --- drizzle-kit generate must be an explicit no-op (on a temp copy) ---
 {
   for (const f of fs.readdirSync(metaDir)) {
     if (!f.endsWith(".json")) continue;
@@ -161,22 +175,55 @@ function fail(msg) {
     }
   }
 
-  const result = runGenerate(drizzleDir, defaultSchemaPath);
-  if (result.exitCode !== 0) {
-    fail(`drizzle-kit generate exited ${result.exitCode}:\n${result.combined}`);
-  } else if (MALFORMED_RE.test(result.combined)) {
-    fail(`drizzle-kit generate reported malformed meta JSON:\n${result.combined}`);
-  } else if (!NO_CHANGES_RE.test(result.combined)) {
+  const probe = withTempDrizzleTree(defaultSchemaPath, (drizzleCopy, schemaCopy) =>
+    runGenerate(drizzleCopy, schemaCopy),
+  );
+
+  if (probe.exitCode !== 0) {
+    fail(`drizzle-kit generate exited ${probe.exitCode}:\n${probe.combined}`);
+  } else if (MALFORMED_RE.test(probe.combined)) {
+    fail(`drizzle-kit generate reported malformed meta JSON:\n${probe.combined}`);
+  } else if (!NO_CHANGES_RE.test(probe.combined)) {
     fail(
-      `drizzle-kit generate did not print "No schema changes, nothing to migrate". Output:\n${result.combined}`,
+      `drizzle-kit generate did not print "No schema changes, nothing to migrate". Output:\n${probe.combined}`,
     );
-  } else if (result.newSql.length > 0 || result.newMeta.length > 0 || result.journalMutated) {
-    cleanupArtifacts(drizzleDir, result);
+  } else if (probe.newSql.length > 0 || probe.newMeta.length > 0 || probe.journalMutated) {
     fail(
-      `drizzle-kit generate produced artifacts despite no-op claim: sql=${result.newSql.join(",")} meta=${result.newMeta.join(",")}`,
+      `drizzle-kit generate produced artifacts despite no-op claim: sql=${probe.newSql.join(",")} meta=${probe.newMeta.join(",")}`,
     );
   } else {
     console.log('drizzle-kit generate no-op OK ("No schema changes, nothing to migrate").');
+  }
+}
+
+/**
+ * Copy drizzle/ + schema into a temp dir under backendRoot (drizzle-kit resolves
+ * `out` as cwd-relative and breaks on absolute /tmp paths), run fn, then delete.
+ * @template T
+ * @param {string} schemaPath
+ * @param {(drizzleCopy: string, schemaCopy: string) => T} fn
+ * @returns {T}
+ */
+function withTempDrizzleTree(schemaPath, fn) {
+  const tmp = fs.mkdtempSync(path.join(backendRoot, ".drift-probe-"));
+  try {
+    const drizzleCopy = path.join(tmp, "drizzle");
+    const schemaDir = path.join(tmp, "schema");
+    fs.mkdirSync(schemaDir, { recursive: true });
+    fs.cpSync(drizzleDir, drizzleCopy, { recursive: true });
+    const schemaCopy = path.join(schemaDir, "schema.ts");
+    fs.copyFileSync(schemaPath, schemaCopy);
+    // schema.ts imports ./owned-tables.json — keep it next to the copy.
+    const ownedSrc =
+      path.dirname(schemaPath) === path.dirname(defaultSchemaPath)
+        ? defaultOwnedTablesPath
+        : path.join(path.dirname(schemaPath), "owned-tables.json");
+    if (fs.existsSync(ownedSrc)) {
+      fs.copyFileSync(ownedSrc, path.join(schemaDir, "owned-tables.json"));
+    }
+    return fn(drizzleCopy, schemaCopy);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 
@@ -192,26 +239,23 @@ function runGenerate(targetDrizzleDir, schemaPath) {
   const journalBackup = fs.readFileSync(targetJournal, "utf8");
 
   const tmpName = `ci-drift-probe-${process.pid}`;
-  const useTempConfig =
-    path.resolve(targetDrizzleDir) !== path.resolve(drizzleDir) ||
-    path.resolve(schemaPath) !== path.resolve(defaultSchemaPath);
-
-  let configPath = path.join(backendRoot, "drizzle.config.ts");
-  let cleanupConfigDir = null;
-  if (useTempConfig) {
-    cleanupConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "sms-drizzle-cfg-"));
-    configPath = path.join(cleanupConfigDir, "drizzle.config.ts");
-    fs.writeFileSync(
-      configPath,
-      `import { defineConfig } from "drizzle-kit";\n` +
-        `export default defineConfig({\n` +
-        `  schema: ${JSON.stringify(schemaPath)},\n` +
-        `  out: ${JSON.stringify(targetDrizzleDir)},\n` +
-        `  dialect: "postgresql",\n` +
-        `  schemaFilter: ["public", "app"],\n` +
-        `});\n`,
-    );
-  }
+  // Always write a probe config that imports drizzle-kit via absolute file URL
+  // (temp dirs cannot resolve the package by bare specifier).
+  const cleanupConfigDir = fs.mkdtempSync(path.join(backendRoot, ".drift-cfg-"));
+  const configPath = path.join(cleanupConfigDir, "drizzle.config.ts");
+  // drizzle-kit joins `out` as `./${out}` — keep paths relative to backendRoot.
+  const outRel = toBackendRel(targetDrizzleDir);
+  const schemaRel = toBackendRel(schemaPath);
+  fs.writeFileSync(
+    configPath,
+    `import { defineConfig } from ${JSON.stringify(drizzleKitEntryHref)};\n` +
+      `export default defineConfig({\n` +
+      `  schema: ${JSON.stringify(schemaRel)},\n` +
+      `  out: ${JSON.stringify(outRel)},\n` +
+      `  dialect: "postgresql",\n` +
+      `  schemaFilter: ["public", "app"],\n` +
+      `});\n`,
+  );
 
   let stdout = "";
   let stderr = "";
@@ -227,9 +271,7 @@ function runGenerate(targetDrizzleDir, schemaPath) {
     stdout = String(err.stdout ?? "");
     stderr = String(err.stderr ?? "");
   } finally {
-    if (cleanupConfigDir) {
-      fs.rmSync(cleanupConfigDir, { recursive: true, force: true });
-    }
+    fs.rmSync(cleanupConfigDir, { recursive: true, force: true });
   }
 
   const afterSql = fs.readdirSync(targetDrizzleDir).filter((f) => f.endsWith(".sql"));
@@ -246,6 +288,17 @@ function runGenerate(targetDrizzleDir, schemaPath) {
     journalMutated: afterJournal !== journalBackup,
     journalBackup,
   };
+}
+
+/** @param {string} abs */
+function toBackendRel(abs) {
+  const rel = path.relative(backendRoot, abs);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(
+      `drizzle-kit probe paths must live under backend/ (got ${abs}). Use a temp copy under backendRoot.`,
+    );
+  }
+  return rel.split(path.sep).join("/");
 }
 
 function cleanupArtifacts(targetDrizzleDir, result) {
@@ -269,24 +322,62 @@ function cleanupArtifacts(targetDrizzleDir, result) {
 }
 
 /**
+ * Real drift only: schema loaded (≥1 table) and drizzle-kit wrote 0001_*.sql
+ * (or printed its migration-file line). Errors, empty schemas, and no-ops are
+ * not drift.
  * @param {string} targetDrizzleDir
  * @param {string} schemaPath
  * @returns {boolean}
  */
 function runGenerateExpectingDrift(targetDrizzleDir, schemaPath) {
-  const result = runGenerate(targetDrizzleDir, schemaPath);
-  cleanupArtifacts(targetDrizzleDir, result);
+  // Probe trees must live under backendRoot so drizzle-kit's ./out join works.
+  const absDrizzle = path.resolve(targetDrizzleDir);
+  const absSchema = path.resolve(schemaPath);
+  if (
+    !absDrizzle.startsWith(backendRoot + path.sep) ||
+    !absSchema.startsWith(backendRoot + path.sep)
+  ) {
+    // Copy into a backend-local temp tree, then evaluate.
+    const schemaDir = path.dirname(absSchema);
+    const owned = path.join(schemaDir, "owned-tables.json");
+    const tmp = fs.mkdtempSync(path.join(backendRoot, ".drift-probe-"));
+    try {
+      const drizzleCopy = path.join(tmp, "drizzle");
+      const schemaCopyDir = path.join(tmp, "schema");
+      fs.mkdirSync(schemaCopyDir, { recursive: true });
+      fs.cpSync(absDrizzle, drizzleCopy, { recursive: true });
+      const schemaCopy = path.join(schemaCopyDir, "schema.ts");
+      fs.copyFileSync(absSchema, schemaCopy);
+      if (fs.existsSync(owned)) {
+        fs.copyFileSync(owned, path.join(schemaCopyDir, "owned-tables.json"));
+      }
+      return runGenerateExpectingDrift(drizzleCopy, schemaCopy);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
 
-  if (MALFORMED_RE.test(result.combined)) return true;
-  if (result.newSql.length > 0 || result.newMeta.length > 0 || result.journalMutated) return true;
-  if (result.exitCode !== 0 && !NO_CHANGES_RE.test(result.combined)) return true;
-  if (!NO_CHANGES_RE.test(result.combined)) return true;
-  return false;
+  const result = runGenerate(targetDrizzleDir, schemaPath);
+  const hasNewMigrationSql = result.newSql.some((f) => NEW_MIGRATION_SQL_RE.test(f));
+  const tablesLoaded = TABLES_LOADED_RE.test(result.combined);
+  const driftMessage = MIGRATION_FILE_RE.test(result.combined);
+  const detected = tablesLoaded && (hasNewMigrationSql || driftMessage);
+
+  cleanupArtifacts(targetDrizzleDir, result);
+  return detected;
 }
 
 function walk(dir, onFile) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (ent.name === "node_modules" || ent.name === "dist" || ent.name === ".git") continue;
+    if (
+      ent.name === "node_modules" ||
+      ent.name === "dist" ||
+      ent.name === ".git" ||
+      ent.name.startsWith(".drift-probe-") ||
+      ent.name.startsWith(".drift-cfg-")
+    ) {
+      continue;
+    }
     const full = path.join(dir, ent.name);
     if (ent.isDirectory()) walk(full, onFile);
     else onFile(full);

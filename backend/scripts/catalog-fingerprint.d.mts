@@ -1,6 +1,7 @@
 /** Ambient types for catalog-fingerprint.mjs (imported from Vitest). */
 export const EXPECTED_CATALOG_PATH: string;
 export function captureCatalog(client: unknown): Promise<CatalogFingerprint>;
+export function assertMigratorOwnership(client: unknown): Promise<string[]>;
 export function stableStringify(catalog: CatalogFingerprint): string;
 export function diffCatalogs(
   left: CatalogFingerprint,

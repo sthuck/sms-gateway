@@ -3,7 +3,6 @@ import type { Pool } from "pg";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -15,6 +14,7 @@ import {
   runMigrations,
 } from "../helpers/pg.js";
 import {
+  assertMigratorOwnership,
   captureCatalog,
   diffAgainstExpected,
   diffCatalogs,
@@ -178,11 +178,113 @@ describe.skipIf(!migratorOk)("stamp refuses catalog drift", () => {
     it(`refuses stamp when: ${mut.name}`, async () => {
       await resetSchema(admin);
       await runLegacyMigrations("up");
-      await admin.query(mut.sql);
+      const client = await admin.connect();
+      try {
+        const before = await captureCatalog(client);
+        await client.query(mut.sql);
+        const after = await captureCatalog(client);
+        // Same catalog primitive schema-equivalence.mjs uses between the two paths.
+        const catalogDiffs = diffCatalogs(before, after, {
+          leftLabel: "before",
+          rightLabel: "mutated",
+        });
+        expect(catalogDiffs.length, `expected catalog diffs for ${mut.name}`).toBeGreaterThan(0);
+        expect(formatCatalogDiffs(catalogDiffs)).toMatch(mut.expectMatch);
+      } finally {
+        client.release();
+      }
       await expect(runMigrations("stamp")).rejects.toThrow(mut.expectMatch);
       await admin.query(`ALTER ROLE sms_app NOBYPASSRLS`).catch(() => undefined);
     }, 180_000);
   }
+
+  const OWNER_MUTATIONS: {
+    name: string;
+    prepare: (role: string) => string;
+    expectMatch: RegExp;
+  }[] = [
+    {
+      name: "OWNER TO other role on table messages",
+      prepare: (role) => `CREATE ROLE ${role} NOLOGIN; ALTER TABLE messages OWNER TO ${role}`,
+      expectMatch: /owner|messages|migrator/i,
+    },
+    {
+      name: "OWNER TO other role on SECURITY DEFINER app.lookup_session",
+      prepare: (role) =>
+        `CREATE ROLE ${role} NOLOGIN; ALTER FUNCTION app.lookup_session(text) OWNER TO ${role}`,
+      expectMatch: /owner|lookup_session|migrator/i,
+    },
+    {
+      name: "OWNER TO other role on schema app",
+      prepare: (role) => `CREATE ROLE ${role} NOLOGIN; ALTER SCHEMA app OWNER TO ${role}`,
+      expectMatch: /owner|schema app|migrator/i,
+    },
+  ];
+
+  for (const mut of OWNER_MUTATIONS) {
+    it(`refuses stamp when: ${mut.name}`, async () => {
+      const role = `evil_${process.pid}_${Date.now()}`.replace(/\W/g, "_").slice(0, 63);
+      await resetSchema(admin);
+      await runLegacyMigrations("up");
+      await admin.query(mut.prepare(role));
+      const client = await admin.connect();
+      try {
+        const ownerDiffs = await assertMigratorOwnership(client);
+        expect(ownerDiffs.length, `expected ownership diffs for ${mut.name}`).toBeGreaterThan(0);
+        expect(formatCatalogDiffs(ownerDiffs)).toMatch(mut.expectMatch);
+        expect(formatCatalogDiffs(ownerDiffs)).toContain(role);
+      } finally {
+        client.release();
+      }
+      await expect(runMigrations("stamp")).rejects.toThrow(mut.expectMatch);
+      // resetSchema drops owned objects so the role can be removed.
+      await resetSchema(admin);
+      await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+    }, 180_000);
+  }
+
+  it("refuses stamp when database OWNER TO another role", async () => {
+    const suffix = `${process.pid}_${Date.now()}`;
+    const evil = `evil_db_${suffix}`.slice(0, 63);
+    const db = `sms_own_${suffix}`.slice(0, 63);
+    const adminUrl = new URL(migrateDatabaseUrl());
+    const host = adminUrl.hostname || "127.0.0.1";
+    const port = adminUrl.port || "5432";
+    const user = decodeURIComponent(adminUrl.username || "sms");
+    const pass = decodeURIComponent(adminUrl.password || "sms");
+
+    await admin.query(`CREATE ROLE ${evil} NOLOGIN`);
+    await admin.query(`CREATE DATABASE ${db} OWNER ${user}`);
+    const dbUrl = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}/${db}`;
+    try {
+      await execFileAsync("node", ["scripts/legacy-migrate.mjs", "up"], {
+        cwd: backendRoot,
+        env: {
+          ...process.env,
+          MIGRATE_DATABASE_URL: dbUrl,
+          DATABASE_URL: dbUrl,
+          SMS_APP_PASSWORD: "sms_app",
+        },
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      await admin.query(`ALTER DATABASE ${db} OWNER TO ${evil}`);
+      await expect(
+        execFileAsync("node", ["scripts/migrate.mjs", "stamp"], {
+          cwd: backendRoot,
+          env: {
+            ...process.env,
+            MIGRATE_DATABASE_URL: dbUrl,
+            DATABASE_URL: dbUrl,
+            SMS_APP_PASSWORD: "sms_app",
+          },
+          maxBuffer: 10 * 1024 * 1024,
+        }),
+      ).rejects.toThrow(/owner|database|migrator|evil_db/i);
+    } finally {
+      await admin.query(`DROP DATABASE IF EXISTS ${db}`).catch(() => undefined);
+      await admin.query(`DROP ROLE IF EXISTS ${evil}`).catch(() => undefined);
+    }
+  }, 180_000);
 
   it("stamp is idempotent when already stamped", async () => {
     await resetSchema(admin);
@@ -232,7 +334,51 @@ describe.skipIf(!migratorOk)("stamp refuses catalog drift", () => {
 });
 
 describe("drizzle drift check (STH-45)", () => {
-  it("passes on the real tree with explicit no-op output", async () => {
+  function makeProbeTree(): { tmp: string; drizzleCopy: string; schemaCopy: string } {
+    // Must live under backendRoot — drizzle-kit joins out as cwd-relative.
+    const tmp = fs.mkdtempSync(path.join(backendRoot, ".drift-probe-"));
+    const drizzleCopy = path.join(tmp, "drizzle");
+    const schemaDir = path.join(tmp, "schema");
+    fs.mkdirSync(schemaDir, { recursive: true });
+    fs.cpSync(path.join(backendRoot, "drizzle"), drizzleCopy, { recursive: true });
+    const schemaCopy = path.join(schemaDir, "schema.ts");
+    fs.copyFileSync(path.join(backendRoot, "src/adapters/db-postgres/schema.ts"), schemaCopy);
+    fs.copyFileSync(
+      path.join(backendRoot, "src/adapters/db-postgres/owned-tables.json"),
+      path.join(schemaDir, "owned-tables.json"),
+    );
+    return { tmp, drizzleCopy, schemaCopy };
+  }
+
+  async function assertDetectsDrift(
+    drizzleCopy: string,
+    schemaCopy: string,
+  ): Promise<{ ok: boolean; output: string }> {
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        "node",
+        ["scripts/check-drizzle-drift.mjs", "--assert-detects-drift", drizzleCopy, schemaCopy],
+        {
+          cwd: backendRoot,
+          encoding: "utf8",
+          maxBuffer: 10 * 1024 * 1024,
+        },
+      );
+      return { ok: true, output: `${stdout}\n${stderr}` };
+    } catch (err) {
+      const e = err as { stdout?: string; stderr?: string; message?: string };
+      return { ok: false, output: `${e.stdout ?? ""}\n${e.stderr ?? ""}\n${e.message ?? ""}` };
+    }
+  }
+
+  it("passes on the real tree with explicit no-op output and no leftover artifacts", async () => {
+    const beforeSql = new Set(
+      fs.readdirSync(path.join(backendRoot, "drizzle")).filter((f) => f.endsWith(".sql")),
+    );
+    const journalBefore = fs.readFileSync(
+      path.join(backendRoot, "drizzle/meta/_journal.json"),
+      "utf8",
+    );
     const { stdout, stderr } = await execFileAsync("node", ["scripts/check-drizzle-drift.mjs"], {
       cwd: backendRoot,
       encoding: "utf8",
@@ -241,26 +387,54 @@ describe("drizzle drift check (STH-45)", () => {
     const out = `${stdout}\n${stderr}`;
     expect(out).toMatch(/No schema changes, nothing to migrate/i);
     expect(out).not.toMatch(/malformed/i);
+    const afterSql = fs
+      .readdirSync(path.join(backendRoot, "drizzle"))
+      .filter((f) => f.endsWith(".sql"));
+    expect(afterSql.filter((f) => !beforeSql.has(f))).toEqual([]);
+    expect(fs.readFileSync(path.join(backendRoot, "drizzle/meta/_journal.json"), "utf8")).toBe(
+      journalBefore,
+    );
   }, 60_000);
 
-  it("detects drift when schema.ts is mutated in a temp copy", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sms-drift-neg-"));
+  it("assert-detects-drift FAILS on an unmutated copy", async () => {
+    const { tmp, drizzleCopy, schemaCopy } = makeProbeTree();
     try {
-      const drizzleCopy = path.join(tmp, "drizzle");
-      const schemaCopy = path.join(tmp, "schema.ts");
-      fs.cpSync(path.join(backendRoot, "drizzle"), drizzleCopy, { recursive: true });
-      fs.copyFileSync(path.join(backendRoot, "src/adapters/db-postgres/schema.ts"), schemaCopy);
-      // Import JSON next to the copy so the mutated schema still loads.
-      fs.copyFileSync(
-        path.join(backendRoot, "src/adapters/db-postgres/owned-tables.json"),
-        path.join(tmp, "owned-tables.json"),
-      );
+      const result = await assertDetectsDrift(drizzleCopy, schemaCopy);
+      expect(result.ok, result.output).toBe(false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("assert-detects-drift FAILS on a copy with a broken JSON import", async () => {
+    const { tmp, drizzleCopy, schemaCopy } = makeProbeTree();
+    try {
+      const text = fs
+        .readFileSync(schemaCopy, "utf8")
+        .replace("owned-tables.json", "missing-owned-tables.json");
+      fs.writeFileSync(schemaCopy, text);
+      const result = await assertDetectsDrift(drizzleCopy, schemaCopy);
+      expect(result.ok, result.output).toBe(false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("assert-detects-drift FAILS on a garbage schema", async () => {
+    const { tmp, drizzleCopy, schemaCopy } = makeProbeTree();
+    try {
+      fs.writeFileSync(schemaCopy, "export const notADrizzleSchema = 1;\n");
+      const result = await assertDetectsDrift(drizzleCopy, schemaCopy);
+      expect(result.ok, result.output).toBe(false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("assert-detects-drift PASSES only for a real schema mutation", async () => {
+    const { tmp, drizzleCopy, schemaCopy } = makeProbeTree();
+    try {
       let schemaText = fs.readFileSync(schemaCopy, "utf8");
-      schemaText = schemaText.replace(
-        'from "./owned-tables.json" with { type: "json" };',
-        'from "./owned-tables.json" with { type: "json" };',
-      );
-      // Force a real schema drift drizzle-kit must see.
       if (!schemaText.includes('ownerId: uuid("owner_id")')) {
         throw new Error("unexpected schema.ts shape for drift mutation");
       }
@@ -270,15 +444,13 @@ describe("drizzle drift check (STH-45)", () => {
       );
       fs.writeFileSync(schemaCopy, schemaText);
 
-      await execFileAsync(
-        "node",
-        ["scripts/check-drizzle-drift.mjs", "--assert-detects-drift", drizzleCopy, schemaCopy],
-        {
-          cwd: backendRoot,
-          encoding: "utf8",
-          maxBuffer: 10 * 1024 * 1024,
-        },
-      );
+      const result = await assertDetectsDrift(drizzleCopy, schemaCopy);
+      expect(result.ok, result.output).toBe(true);
+      // Probe must not leave 0001_*.sql / mutated journal in the real tree.
+      const leftover = fs
+        .readdirSync(path.join(backendRoot, "drizzle"))
+        .filter((f) => /^0001_.+\.sql$/.test(f));
+      expect(leftover).toEqual([]);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
