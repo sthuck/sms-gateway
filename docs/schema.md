@@ -13,6 +13,7 @@ ciphertext only; envelope encryption / KMS wrapping is a later ticket
 ```mermaid
 erDiagram
   users ||--o{ user_identities : identities
+  users ||--o{ sessions : sessions
   users ||--o{ devices : owns
   users ||--o{ pairing_codes : issues
   users ||--o{ messages : owns
@@ -41,6 +42,15 @@ erDiagram
     uuid owner_id FK
     text issuer
     text sub
+  }
+
+  sessions {
+    uuid id PK
+    uuid owner_id FK
+    text session_id_hash
+    text csrf_token_hash
+    timestamptz expires_at
+    timestamptz revoked_at
   }
 
   devices {
@@ -144,6 +154,7 @@ erDiagram
 | --- | --- |
 | `users` | `owner_id` equals `id` (CHECK + BEFORE INSERT trigger). Not keyed by a single IdP subject. |
 | `user_identities` | Maps `(issuer, sub)` → `users.id`, UNIQUE `(issuer, sub)`. Lets Authentik / generic OIDC stay switchable (STH-9). |
+| `sessions` | Web UI server-side sessions (STH-9). Store only `session_id_hash` / `csrf_token_hash`; revoke on logout. |
 | `devices` | `status`: `active` \| `revoked`. |
 | `device_credentials` | One active credential row per device; ES256 SPKI public key per `docs/contracts/device-signing.md`. |
 | `pairing_codes` | Short-lived, single-use. **Store only `code_hash`**, never the plaintext code. |
@@ -229,6 +240,9 @@ pinned, `EXECUTE` granted only to `sms_app`):
 | --- | --- |
 | `app.lookup_device_for_auth(device_id)` | Returns `owner_id`, status, public key for signature verify. |
 | `app.lookup_pairing_code(code_hash)` | Returns `owner_id` for a non-expired, unused code. |
+| `app.lookup_user_identity(issuer, sub)` | Returns `owner_id` for an OIDC identity (STH-9). |
+| `app.lookup_session(session_id_hash)` | Returns session owner / CSRF hash / expiry (STH-9). |
+| `app.lookup_user_by_email(email)` | Optional email auto-link only (`AUTO_LINK_BY_EMAIL`). |
 
 Pattern:
 

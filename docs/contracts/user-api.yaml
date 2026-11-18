@@ -1,0 +1,224 @@
+openapi: 3.1.0
+info:
+  title: SMS Gateway User / Web API
+  summary: Browser session auth and owner-facing endpoints (STH-9 fragment)
+  description: |
+    User authentication for the web UI and bearer-JWT API access.
+
+    Login uses a generic OIDC provider (Authentik in production/homelab)
+    via authorization code + PKCE. The browser holds an httpOnly session
+    cookie; API clients may send `Authorization: Bearer` JWTs from the
+    same issuer.
+
+    Errors use RFC 9457 `application/problem+json` with `code` and
+    `retryable`, consistent with `docs/contracts/semantics.md`.
+  version: 0.1.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: https://sms.sthuck.info
+    description: Homelab production origin (HTTPS)
+  - url: http://127.0.0.1:8080
+    description: Local API
+
+tags:
+  - name: Auth
+    description: OIDC login, callback, logout, and session introspection
+
+paths:
+  /v1/auth/login:
+    get:
+      operationId: startLogin
+      tags: [Auth]
+      summary: Start OIDC authorization-code + PKCE login
+      description: |
+        Redirects the browser to the configured OIDC authorization endpoint.
+        Sets a short-lived httpOnly OAuth state cookie sealing PKCE verifier,
+        state, and nonce.
+      security: []
+      responses:
+        "302":
+          description: Redirect to the IdP authorization endpoint
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+
+  /v1/auth/callback:
+    get:
+      operationId: authCallback
+      tags: [Auth]
+      summary: OIDC redirect callback
+      description: |
+        Validates state/nonce/PKCE, exchanges the code, checks MFA claims,
+        provisions or reuses `(issuer, sub)` → `users.id`, and sets the
+        session + CSRF cookies.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Login succeeded; redirect to PUBLIC_BASE_URL
+          headers:
+            Set-Cookie:
+              description: Session and CSRF cookies
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/MfaRequired"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Revoke the server-side session and clear cookies
+      security:
+        - sessionCookie: []
+      responses:
+        "204":
+          description: Logged out
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+
+  /v1/auth/me:
+    get:
+      operationId: getMe
+      tags: [Auth]
+      summary: Current authenticated user
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      responses:
+        "200":
+          description: Authenticated user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: sms_session
+      description: Opaque session id (stored hashed server-side)
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from the OIDC provider (JWKS-verified)
+
+  schemas:
+    Me:
+      type: object
+      additionalProperties: false
+      required: [id, email, mfa_enrolled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        mfa_enrolled:
+          type: boolean
+        display_name:
+          type: [string, "null"]
+        last_auth_method:
+          type: [string, "null"]
+        auth_method:
+          type: [string, "null"]
+          enum: [session, bearer, null]
+
+    Problem:
+      type: object
+      additionalProperties: true
+      required: [type, title, status, code, retryable]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+          enum:
+            - invalid_request
+            - unauthorized
+            - mfa_required
+            - csrf_rejected
+            - auth_misconfigured
+            - internal_error
+            - service_unavailable
+        retryable:
+          type: boolean
+
+  responses:
+    Unauthorized:
+      description: Missing, expired, or invalid session/token
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            missing:
+              value:
+                type: https://sms-gateway.example/problems/unauthorized
+                title: Unauthorized
+                status: 401
+                detail: Missing or invalid access token
+                code: unauthorized
+                retryable: false
+    MfaRequired:
+      description: MFA required but not evidenced in amr/acr
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            mfa:
+              value:
+                type: https://sms-gateway.example/problems/mfa_required
+                title: Multi-factor authentication required
+                status: 401
+                detail: MFA required but amr/acr claims are missing
+                code: mfa_required
+                retryable: false
+    InvalidRequest:
+      description: Bad OAuth callback (state/nonce/code)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    AuthMisconfigured:
+      description: OIDC env not configured
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
