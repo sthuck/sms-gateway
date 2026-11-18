@@ -11,7 +11,7 @@ auth.
 | --- | --- | --- |
 | Language / runtime | TypeScript on Node.js | Strict TypeScript throughout |
 | HTTP API | Fastify | OpenAPI-first; contract under `docs/contracts/` |
-| Database | PostgreSQL | Row-level security for owner isolation (STH-8) |
+| Database | PostgreSQL | Row-level security for owner isolation — see `docs/schema.md` (STH-8) |
 | Queue | pg-boss | Postgres-backed; no separate broker |
 | Web UI | React | Placeholder under `web/` |
 | Agent interface | Official MCP TypeScript SDK | Separate process / Deployment |

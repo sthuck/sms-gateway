@@ -32,6 +32,26 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sms
+          POSTGRES_PASSWORD: sms
+          POSTGRES_DB: sms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sms -d sms"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: "true"
+      DATABASE_URL: postgres://sms:sms@localhost:5432/sms
+      MIGRATE_DATABASE_URL: postgres://sms:sms@localhost:5432/sms
+      APP_DATABASE_URL: postgres://sms_app:sms_app@localhost:5432/sms
+      SMS_APP_PASSWORD: sms_app
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -45,6 +65,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Migrate up / down / up
+        run: |
+          pnpm migrate:up
+          pnpm migrate:down
+          pnpm migrate:down
+          pnpm migrate:up
       - run: pnpm test
       - name: Build Docker image
         working-directory: ${{ github.workspace }}
