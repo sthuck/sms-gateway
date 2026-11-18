@@ -1,7 +1,7 @@
 import type { FastifyRequest } from "fastify";
 import type { Pool } from "pg";
 import type { DeviceAuthConfig } from "./config.js";
-import { isReplay, rememberReplay } from "./replay-cache.js";
+import { claimNonceAndSignature } from "./replay-cache.js";
 import {
   buildCanonicalString,
   parseContentSha256Header,
@@ -137,23 +137,6 @@ export async function verifyPairProofOfPossession(args: {
   const spkiDer = Buffer.from(publicKeyB64url, "base64url");
   const replayIdentity = sha256HexBytes(spkiDer);
 
-  if (await isReplay(pool, replayIdentity, "nonce", nonce)) {
-    return {
-      ok: false,
-      code: "replay_detected",
-      status: 401,
-      detail: "Nonce reused",
-    };
-  }
-  if (await isReplay(pool, replayIdentity, "signature", signature)) {
-    return {
-      ok: false,
-      code: "replay_detected",
-      status: 401,
-      detail: "Signature reused",
-    };
-  }
-
   const canonical = buildCanonicalString({
     method: request.method,
     path: requestPath(request),
@@ -174,8 +157,21 @@ export async function verifyPairProofOfPossession(args: {
     };
   }
 
-  await rememberReplay(pool, replayIdentity, "nonce", nonce, config.replayTtlSeconds);
-  await rememberReplay(pool, replayIdentity, "signature", signature, config.replayTtlSeconds);
+  const claimed = await claimNonceAndSignature(
+    pool,
+    replayIdentity,
+    nonce,
+    signature,
+    config.replayTtlSeconds,
+  );
+  if (claimed === "replay") {
+    return {
+      ok: false,
+      code: "replay_detected",
+      status: 401,
+      detail: "Nonce or signature reused",
+    };
+  }
 
   return {
     ok: true,

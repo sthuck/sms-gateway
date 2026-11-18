@@ -22,13 +22,35 @@ const envSchema = z.object({
   LLM_API_KEY: z.string().optional(),
   /** Comma-separated browser origins allowed for CORS (and CSRF Origin checks). */
   CORS_ALLOWED_ORIGINS: z.string().optional().default(""),
+  /**
+   * Fastify trustProxy: `false` (default), `true`, hop count, or comma-separated
+   * proxy IPs/CIDRs. When set, `request.ip` reflects the client behind those
+   * proxies. Never parse X-Forwarded-For by hand.
+   */
+  TRUST_PROXY: z.string().optional().default("false"),
 });
 
-export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS"> & {
+export type TrustProxyOption = boolean | number | string | string[];
+
+export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS" | "TRUST_PROXY"> & {
   corsAllowedOrigins: string[];
+  trustProxy: TrustProxyOption;
   oidc: OidcAuthConfig | null;
   deviceAuth: DeviceAuthConfig;
 };
+
+export function parseTrustProxy(raw: string | undefined): TrustProxyOption {
+  if (!raw || raw === "false" || raw === "0" || raw === "no") return false;
+  if (raw === "true" || raw === "1" || raw === "yes") return true;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return false;
+  if (parts.length === 1) return parts[0]!;
+  return parts;
+}
 
 export function parseCorsAllowedOrigins(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -47,7 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Invalid configuration: ${details}`);
   }
 
-  const { CORS_ALLOWED_ORIGINS: corsRaw, ...rest } = parsed.data;
+  const { CORS_ALLOWED_ORIGINS: corsRaw, TRUST_PROXY: trustProxyRaw, ...rest } = parsed.data;
   const corsAllowedOrigins = parseCorsAllowedOrigins(corsRaw);
   for (const origin of corsAllowedOrigins) {
     try {
@@ -70,6 +92,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     ...rest,
     corsAllowedOrigins,
+    trustProxy: parseTrustProxy(trustProxyRaw),
     oidc,
     deviceAuth,
   };

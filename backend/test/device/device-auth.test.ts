@@ -311,15 +311,50 @@ describe.skipIf(!migratorOk)("pairing + device auth (STH-14)", () => {
       deviceId: "",
       body: raw,
     });
+    // Use remoteAddress (not a client-spoofable X-Forwarded-For).
     const res = await app.inject({
       method: "POST",
       url: "/v1/devices/pair",
-      headers: { ...signed.headers, "x-forwarded-for": attackerIp },
+      headers: signed.headers,
       payload: raw,
+      remoteAddress: attackerIp,
     });
     expect(res.statusCode).toBe(429);
     expect(res.json()).toMatchObject({ code: "rate_limited", retryable: true });
     expect(res.headers["retry-after"]).toBeTruthy();
+  });
+
+  it("concurrent identical signed requests: exactly one succeeds (atomic replay)", async () => {
+    const code = await issueCode();
+    const { device_id } = await pairWithCode(code);
+    const body = testVector.request.body;
+    const nonce = freshNonce();
+    const signed = signDeviceRequest({
+      method: "POST",
+      path: "/v1/messages:batch",
+      host: HOST,
+      deviceId: device_id,
+      body,
+      nonce,
+    });
+
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        app.inject({
+          method: "POST",
+          url: "/v1/messages:batch",
+          headers: signed.headers,
+          payload: body,
+        }),
+      ),
+    );
+    const wins = results.filter((r) => r.statusCode === 200);
+    const replays = results.filter((r) => r.statusCode === 401);
+    expect(wins).toHaveLength(1);
+    expect(replays.length).toBe(7);
+    for (const r of replays) {
+      expect(r.json()).toMatchObject({ code: "replay_detected", retryable: true });
+    }
   });
 
   it("accepts a valid signature (shared test vector key) on ingestion path", async () => {

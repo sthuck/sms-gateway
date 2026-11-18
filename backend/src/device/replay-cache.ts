@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { REPLAY_TTL_SECONDS, sha256HexUtf8 } from "./signing.js";
 
 export type ReplayKind = "nonce" | "signature";
@@ -9,55 +9,88 @@ export type ReplayKind = "nonce" | "signature";
  * Keys: (identity, kind, sha256(value)) with TTL 360s per contract.
  * Identity is `device_id` or SHA-256 of the SPKI bytes (hex) at pairing.
  *
- * Justification: an in-memory Map would miss replays across replicas.
- * A short Postgres table with opportunistic TTL delete is enough for v1
- * (no Redis dependency). Stale rows are deleted on write and periodically
- * on read collisions.
+ * Claims are atomic (`INSERT … ON CONFLICT … WHERE expired`) so concurrent
+ * copies of the same signed request yield exactly one success.
  */
-export async function isReplay(
-  pool: Pool,
-  identity: string,
-  kind: ReplayKind,
-  value: string,
-): Promise<boolean> {
-  const valueHash = sha256HexUtf8(value);
-  await pool.query(`DELETE FROM app.device_replay_cache WHERE expires_at <= now()`);
-  const { rows } = await pool.query<{ exists: boolean }>(
-    `SELECT EXISTS(
-       SELECT 1 FROM app.device_replay_cache
-       WHERE identity = $1 AND kind = $2 AND value_hash = $3 AND expires_at > now()
-     ) AS exists`,
-    [identity, kind, valueHash],
-  );
-  return Boolean(rows[0]?.exists);
-}
-
-export async function rememberReplay(
+export async function claimReplay(
   pool: Pool,
   identity: string,
   kind: ReplayKind,
   value: string,
   ttlSeconds = REPLAY_TTL_SECONDS,
-): Promise<void> {
+): Promise<"ok" | "replay"> {
   const valueHash = sha256HexUtf8(value);
-  await pool.query(
+  const { rowCount } = await pool.query(
     `INSERT INTO app.device_replay_cache (identity, kind, value_hash, expires_at)
      VALUES ($1, $2, $3, now() + make_interval(secs => $4))
      ON CONFLICT (identity, kind, value_hash) DO UPDATE
-       SET expires_at = EXCLUDED.expires_at`,
+       SET expires_at = EXCLUDED.expires_at
+       WHERE app.device_replay_cache.expires_at <= now()
+     RETURNING 1`,
     [identity, kind, valueHash, ttlSeconds],
   );
+  return (rowCount ?? 0) > 0 ? "ok" : "replay";
 }
 
-export async function checkAndRememberReplay(
+/**
+ * Atomically claim both nonce and signature after signature verification.
+ * Uses a transaction so a lost race on either key rolls back both claims.
+ */
+export async function claimNonceAndSignature(
   pool: Pool,
   identity: string,
   nonce: string,
   signature: string,
+  ttlSeconds = REPLAY_TTL_SECONDS,
 ): Promise<"ok" | "replay"> {
-  if (await isReplay(pool, identity, "nonce", nonce)) return "replay";
-  if (await isReplay(pool, identity, "signature", signature)) return "replay";
-  await rememberReplay(pool, identity, "nonce", nonce);
-  await rememberReplay(pool, identity, "signature", signature);
-  return "ok";
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const nonceOk = await claimOnClient(client, identity, "nonce", nonce, ttlSeconds);
+    if (!nonceOk) {
+      await client.query("ROLLBACK");
+      return "replay";
+    }
+    const sigOk = await claimOnClient(client, identity, "signature", signature, ttlSeconds);
+    if (!sigOk) {
+      await client.query("ROLLBACK");
+      return "replay";
+    }
+    await client.query("COMMIT");
+    return "ok";
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // ignore
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function claimOnClient(
+  client: PoolClient,
+  identity: string,
+  kind: ReplayKind,
+  value: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  const valueHash = sha256HexUtf8(value);
+  const { rowCount } = await client.query(
+    `INSERT INTO app.device_replay_cache (identity, kind, value_hash, expires_at)
+     VALUES ($1, $2, $3, now() + make_interval(secs => $4))
+     ON CONFLICT (identity, kind, value_hash) DO UPDATE
+       SET expires_at = EXCLUDED.expires_at
+       WHERE app.device_replay_cache.expires_at <= now()
+     RETURNING 1`,
+    [identity, kind, valueHash, ttlSeconds],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** Best-effort cleanup of expired rows (not on the hot path of every request). */
+export async function purgeExpiredReplays(pool: Pool): Promise<void> {
+  await pool.query(`DELETE FROM app.device_replay_cache WHERE expires_at <= now()`);
 }
