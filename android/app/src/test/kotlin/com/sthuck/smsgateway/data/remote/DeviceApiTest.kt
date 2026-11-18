@@ -65,7 +65,8 @@ class DeviceApiTest {
         DeviceApiMock.enqueuePairCreated(server)
 
         val response = api.pair(
-            PairRequest(
+            url = server.url("/v1/devices/pair").toString(),
+            body = PairRequest(
                 pairingCode = "7K3M-9Q2P",
                 publicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyl6LQOh0Vol6Y7eUeYprtMPD_cB9oVwRFBAQ6BpcRbXZAXLl745jKd-uxX4bwUlHxH-jHsMc___m3WlOguxwRQ",
                 deviceInfo = DeviceInfo(
