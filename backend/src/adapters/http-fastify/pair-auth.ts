@@ -1,7 +1,7 @@
 import type { FastifyRequest } from "fastify";
-import type { Pool } from "pg";
-import type { DeviceAuthConfig } from "./config.js";
-import { claimNonceAndSignature } from "./replay-cache.js";
+import { DeviceError } from "../../domain/device/errors.js";
+import type { DeviceAuthConfig } from "../device-crypto/config.js";
+import { claimNonceAndSignature } from "../db-postgres/replay-cache.js";
 import {
   buildCanonicalString,
   parseContentSha256Header,
@@ -11,8 +11,9 @@ import {
   parsePublicKeySpkiB64url,
   sha256HexBytes,
   verifyEs256P1363,
-} from "./signing.js";
-import { headerString, requestPath, resolveHost } from "./plugin.js";
+} from "../device-crypto/signing.js";
+import { headerString, requestPath, resolveHost } from "./device-plugin.js";
+import type { Pool } from "pg";
 
 export type PairSignatureOk = {
   ok: true;
@@ -181,4 +182,13 @@ export async function verifyPairProofOfPossession(args: {
     contentSha,
     replayIdentity,
   };
+}
+
+/** Map pair PoP failure into a DeviceError for use-case consumption. */
+export function pairProofErrorToDeviceError(err: PairSignatureErr): DeviceError {
+  const opts: { retryable?: boolean; serverTime?: number } = {
+    retryable: err.code === "invalid_timestamp" || err.code === "replay_detected",
+  };
+  if (err.server_time !== undefined) opts.serverTime = err.server_time;
+  return new DeviceError(err.code, err.status, err.detail, opts);
 }

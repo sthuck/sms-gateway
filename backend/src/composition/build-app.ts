@@ -4,20 +4,27 @@ import type { Pool } from "pg";
 import { toFastifyTrustProxy, type Config } from "../config.js";
 import { buildLoggerOptions } from "../logger.js";
 import { healthRoutes } from "../routes/health.js";
-import { pairingCodeRoutes } from "../routes/pairing-codes.js";
-import { deviceRoutes } from "../routes/devices.js";
-import { devicePlugin } from "../device/plugin.js";
-import { rawBodyPlugin } from "../device/raw-body.js";
-import type { DeviceAuthConfig } from "../device/config.js";
 import { createPool } from "../adapters/db-postgres/pool.js";
-import { sendProblem } from "../adapters/http-fastify/problems.js";
-import { authPlugin, authRoutes, type AuthPluginOptions } from "../adapters/http-fastify/index.js";
+import {
+  authPlugin,
+  authRoutes,
+  devicePlugin,
+  deviceRoutes,
+  pairingCodeRoutes,
+  rawBodyPlugin,
+  sendProblem,
+  type AuthPluginOptions,
+  type DeviceUseCases,
+} from "../adapters/http-fastify/index.js";
+import type { DeviceAuthConfig } from "../adapters/device-crypto/config.js";
 import { buildAuthStack } from "./build-auth.js";
+import { buildDeviceStack } from "./build-device.js";
 
 export type BuildAppOptions = {
   pool?: Pool | null;
   auth?: Partial<AuthPluginOptions>;
   deviceAuth?: DeviceAuthConfig | null;
+  deviceUseCases?: DeviceUseCases | null;
 };
 
 export async function buildApp(
@@ -99,8 +106,12 @@ export async function buildApp(
     skipDiscovery: true,
   });
 
+  const deviceConfig = options.deviceAuth !== undefined ? options.deviceAuth : config.deviceAuth;
+  const deviceStack = buildDeviceStack({ config: deviceConfig, pool });
+
   await app.register(devicePlugin, {
-    config: options.deviceAuth !== undefined ? options.deviceAuth : config.deviceAuth,
+    config: deviceStack.config,
+    useCases: options.deviceUseCases !== undefined ? options.deviceUseCases : deviceStack.useCases,
   });
 
   app.setErrorHandler((err, request, reply) => {

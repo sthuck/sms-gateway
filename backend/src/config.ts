@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { loadOidcAuthConfig, type OidcAuthConfig } from "./adapters/auth-oidc/oidc-config.js";
-import { loadDeviceAuthConfig, type DeviceAuthConfig } from "./device/config.js";
+import { loadDeviceAuthConfig, type DeviceAuthConfig } from "./adapters/device-crypto/config.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),

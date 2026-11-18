@@ -1,8 +1,8 @@
 # Backend ports & adapters (hexagonal)
 
-PR B introduces package-by-layer layout for the **user-auth** slice.
-Behaviour is unchanged; later PRs (B2/C) migrate pairing/device, queue,
-and ingestion onto the same pattern.
+PR B introduced package-by-layer layout for the **user-auth** slice.
+PR **B2** migrates **pairing**, **device auth**, and the **queue** onto the
+same pattern. Behaviour is unchanged. Later PR **C** covers ingestion.
 
 ## Layers
 
@@ -21,7 +21,10 @@ must not import adapters, `src/config.ts`, `src/app.ts`, or any npm
 package (pg, fastify, openid-client, jose, drizzle-orm, pg-boss, pino,
 undici, …). Negative proof lives in `test/architecture/`.
 
-## Auth slice map
+Thin re-exports under `src/device/` and `src/queue/` remain for test
+import stability; new code should import from `src/adapters/*`.
+
+## Auth slice map (PR B)
 
 | Concern                                                                                        | Location                 |
 | ---------------------------------------------------------------------------------------------- | ------------------------ |
@@ -33,46 +36,62 @@ undici, …). Negative proof lives in `test/architecture/`.
 | openid-client, jose JWKS, OAuth state cookies, OIDC config                                     | `adapters/auth-oidc/`    |
 | `buildApp` / `buildAuthStack`                                                                  | `composition/`           |
 
+## Pairing / device / queue slice map (PR B2)
+
+| Concern                                                                                   | Location                      |
+| ----------------------------------------------------------------------------------------- | ----------------------------- |
+| Canonical string, pairing normalize/QR, `DeviceError`, device types                       | `domain/device/`              |
+| IssuePairingCode, PairDevice, RevokeDevice, GetDeviceMe, ResolveDeviceAuth                | `application/use-cases/`      |
+| DeviceAuthRepository, PairingCodeRepository, ReplayCache, PairRateLimiter, QueuePublisher | `ports/outbound/`             |
+| Device plugin/routes, pair PoP, raw-body                                                  | `adapters/http-fastify/`      |
+| Device/pairing repos, replay cache, rate-limit buckets (`withDbInfra`)                    | `adapters/db-postgres/`       |
+| ES256 signing, pairing-code CSPRNG/hash, device config                                    | `adapters/device-crypto/`     |
+| pg-boss boss/publish/worker/handlers, `PgBossQueuePublisher`                              | `adapters/queue-pgboss/`      |
+| `buildDeviceStack`                                                                        | `composition/build-device.ts` |
+
 ## How to add a use case
 
 1. Put pure rules in `domain/` (no I/O).
 2. Add or extend an outbound port under `ports/outbound/`.
 3. Implement the use case under `application/use-cases/` (constructor-injected ports only).
 4. Implement the port in the appropriate adapter.
-5. Wire in `composition/build-auth.ts` (or a new composition module).
+5. Wire in `composition/build-auth.ts` / `build-device.ts` (or a new composition module).
 6. Add `test/application` coverage with in-memory fakes; keep characterization tests green.
+7. Extend `test/ports/repository-contracts.test.ts` for every new port method (fake + Postgres).
 
 ## How to add an adapter
 
 - Inbound (HTTP): map protocol ↔ use-case DTOs in `adapters/http-fastify/`; never put Fastify types in use cases.
-- Outbound (DB/OIDC): implement the port interface; keep `withOwner` semantics
+- Outbound (DB/OIDC/queue): implement the port interface; keep `withOwner` semantics
   (`transaction` + `set_config('app.owner_id', $1, true)`, reject empty owner).
 - Do not change SECURITY DEFINER lookup SQL signatures.
+- Wrap DB/network calls with `withDbInfra` so failures throw `InfrastructureError`.
 
 ## Planned follow-ups
 
-- **B2** — migrate pairing/device auth and queue into adapters (`http-fastify`,
-  `db-postgres`, reserved `queue-pgboss/`).
 - **C** — redo STH-15 ingestion on the new structure (do not stack on draft #8).
 
-## Error classification (STH-46)
+## Error classification (STH-46 / STH-48 / STH-50)
 
-| Outcome                                       | Representation                        | HTTP                                        |
-| --------------------------------------------- | ------------------------------------- | ------------------------------------------- |
-| Domain absence (not found)                    | `null` from port lookups              | mapped by use case → 401/404 as appropriate |
-| Invalid credentials / MFA / CSRF              | `AuthError` (or device problem codes) | 401 / 403                                   |
-| Infrastructure (DB / JWKS / IdP HTTP+network) | `InfrastructureError` (never `null`)  | 500 / 503 `retryable: true`                 |
+| Outcome                                       | Representation                       | HTTP                                        |
+| --------------------------------------------- | ------------------------------------ | ------------------------------------------- |
+| Domain absence (not found)                    | `null` from port lookups             | mapped by use case → 401/404 as appropriate |
+| Invalid credentials / MFA / CSRF / device PoP | `AuthError` / `DeviceError`          | 401 / 403 / 400                             |
+| Infrastructure (DB / JWKS / IdP / pg-boss)    | `InfrastructureError` (never `null`) | 500 / 503 `retryable: true`                 |
 
 Rules:
 
 1. Ports: `null` means absence only; infra MUST throw `InfrastructureError`.
-2. Use cases: never catch and convert `InfrastructureError` into `AuthError`.
-3. HTTP (`mapAuthError` / routes): rethrow non-`AuthError` so the global handler
-   returns 500 `internal_error` retryable — never collapse into unauthorized.
+2. Use cases: never catch and convert `InfrastructureError` into `AuthError` / `DeviceError`.
+3. HTTP (`mapAuthError` / `mapDeviceError` / routes): rethrow non-domain errors so the
+   global handler returns 500 `internal_error` retryable — never collapse into unauthorized /
+   `device_unknown`.
 4. JWKS / IdP **HTTP status** failures (5xx, non-JSON) are infra (STH-48), not 401/400.
-5. **Primary regression guard:** HTTP matrix in `test/auth/failure-modes.test.ts`
-   (DB + JWKS HTTP + IdP `/token` HTTP + CSRF touch). Port contracts cover all
-   repository methods. `pnpm lint:auth-errors` is a tripwire only (see RCA).
+5. Classify third-party failures by **error class / code**, never message text
+   (STH-50: `JWKSMultipleMatchingKeys` → 401).
+6. **Primary regression guard:** HTTP matrix in `test/auth/failure-modes.test.ts`
+   plus `test/device/parity-matrix.test.ts`. Port contracts cover all repository
+   methods. `pnpm lint:auth-errors` is a tripwire only (see RCA).
 
 Readable path on this branch: `backend/docs/architecture-layers.md`.
 Full RCA: `backend/docs/rca/STH-46-infra-errors-as-auth-failures.md`.
@@ -81,4 +100,4 @@ Full RCA: `backend/docs/rca/STH-46-infra-errors-as-auth-failures.md`.
 
 Never log request bodies or tokens (pino redaction + request child logger
 strips body). Auth adapters must not log codes, ID tokens, or session ids
-in plaintext.
+in plaintext. Pairing routes must not log plaintext pairing codes.

@@ -7,6 +7,28 @@ export {
 } from "./auth-plugin.js";
 export { authRoutes } from "./auth-routes.js";
 export {
+  devicePlugin,
+  requireDeviceAuth,
+  deviceAuthPreHandler,
+  mapDeviceError,
+  headerString,
+  requestPath,
+  resolveHost,
+  type DevicePluginOptions,
+  type DeviceRequestContext,
+  type DeviceUseCases,
+  type RequireDeviceAuthOptions,
+} from "./device-plugin.js";
+export { deviceRoutes } from "./device-routes.js";
+export { pairingCodeRoutes } from "./pairing-code-routes.js";
+export { rawBodyPlugin } from "./raw-body.js";
+export {
+  verifyPairProofOfPossession,
+  pairProofErrorToDeviceError,
+  type PairSignatureOk,
+  type PairSignatureErr,
+} from "./pair-auth.js";
+export {
   buildProblem,
   problemType,
   sendProblem,

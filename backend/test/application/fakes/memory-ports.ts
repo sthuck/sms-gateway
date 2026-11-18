@@ -25,6 +25,19 @@ import type {
   UserByEmail,
   UserRepository,
 } from "../../../src/ports/outbound/user-repository.js";
+import type { DeviceAuthRepository } from "../../../src/ports/outbound/device-auth-repository.js";
+import type { PairingCodeRepository } from "../../../src/ports/outbound/pairing-code-repository.js";
+import type { ReplayCache } from "../../../src/ports/outbound/replay-cache.js";
+import type { PairRateLimiter } from "../../../src/ports/outbound/pair-rate-limiter.js";
+import type { QueuePublisher } from "../../../src/ports/outbound/queue-publisher.js";
+import type {
+  DeviceAuthRecord,
+  DeviceInfo,
+  DeviceMe,
+  PairedDevice,
+  PairingCodeRecord,
+  RateLimitDecision,
+} from "../../../src/domain/device/types.js";
 import { evaluateMfa, extractMfaClaims, mapClaims } from "../../../src/domain/auth/index.js";
 import type { MfaPolicy } from "../../../src/domain/auth/types.js";
 import { InfrastructureError } from "../../../src/domain/errors.js";
@@ -246,4 +259,164 @@ export function mapped(
     raw: {},
     ...partial,
   };
+}
+
+export class MemoryDeviceAuthRepository implements DeviceAuthRepository {
+  readonly byId = new Map<string, DeviceAuthRecord>();
+  fault: FaultSwitch = { throwInfra: false };
+
+  async lookupForAuth(deviceId: string): Promise<DeviceAuthRecord | null> {
+    maybeFault(this.fault, "memory device lookup failed");
+    return this.byId.get(deviceId) ?? null;
+  }
+
+  async pairWithBurnedCode(input: {
+    ownerId: string;
+    pairingCodeId: string;
+    displayName: string;
+    publicKey: string;
+    deviceInfo: DeviceInfo;
+    clientIp: string;
+  }): Promise<PairedDevice | null> {
+    maybeFault(this.fault, "memory device pair failed");
+    if (input.pairingCodeId === "lost-race") return null;
+    const id = `dev-${this.byId.size + 1}`;
+    this.byId.set(id, {
+      deviceId: id,
+      ownerId: input.ownerId,
+      status: "active",
+      publicKey: input.publicKey,
+      credentialRevokedAt: null,
+    });
+    return {
+      deviceId: id,
+      name: input.displayName,
+      status: "active",
+      pairedAt: new Date().toISOString(),
+    };
+  }
+
+  async findMe(ownerId: string, deviceId: string): Promise<DeviceMe | null> {
+    maybeFault(this.fault, "memory device me failed");
+    const row = this.byId.get(deviceId);
+    if (!row || row.ownerId !== ownerId) return null;
+    return {
+      deviceId: row.deviceId,
+      name: "mem",
+      status: row.status,
+      pairedAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      revokedAt: row.credentialRevokedAt?.toISOString() ?? null,
+    };
+  }
+
+  async revoke(ownerId: string, deviceId: string, _clientIp: string): Promise<"ok" | "missing"> {
+    maybeFault(this.fault, "memory device revoke failed");
+    const row = this.byId.get(deviceId);
+    if (!row || row.ownerId !== ownerId) return "missing";
+    row.status = "revoked";
+    row.credentialRevokedAt = new Date();
+    return "ok";
+  }
+}
+
+export class MemoryPairingCodeRepository implements PairingCodeRepository {
+  readonly byHash = new Map<string, PairingCodeRecord>();
+  fault: FaultSwitch = { throwInfra: false };
+
+  async lookupByHash(codeHash: string): Promise<PairingCodeRecord | null> {
+    maybeFault(this.fault, "memory pairing lookup failed");
+    return this.byHash.get(codeHash) ?? null;
+  }
+
+  async insert(input: {
+    ownerId: string;
+    codeHash: string;
+    ttlSeconds: number;
+  }): Promise<{ id: string; expiresAt: Date }> {
+    maybeFault(this.fault, "memory pairing insert failed");
+    const id = `pc-${this.byHash.size + 1}`;
+    const expiresAt = new Date(Date.now() + input.ttlSeconds * 1000);
+    this.byHash.set(input.codeHash, {
+      pairingCodeId: id,
+      ownerId: input.ownerId,
+      expiresAt,
+    });
+    return { id, expiresAt };
+  }
+
+  async burn(_ownerId: string, pairingCodeId: string): Promise<boolean> {
+    maybeFault(this.fault, "memory pairing burn failed");
+    for (const [hash, row] of this.byHash) {
+      if (row.pairingCodeId === pairingCodeId) {
+        this.byHash.delete(hash);
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+export class MemoryReplayCache implements ReplayCache {
+  readonly seen = new Set<string>();
+  fault: FaultSwitch = { throwInfra: false };
+
+  async claimNonceAndSignature(
+    identity: string,
+    nonce: string,
+    signature: string,
+    _ttlSeconds?: number,
+  ): Promise<"ok" | "replay"> {
+    maybeFault(this.fault, "memory replay claim failed");
+    const key = `${identity}:${nonce}:${signature}`;
+    if (this.seen.has(key)) return "replay";
+    this.seen.add(key);
+    return "ok";
+  }
+}
+
+export class MemoryPairRateLimiter implements PairRateLimiter {
+  fault: FaultSwitch = { throwInfra: false };
+  allow = true;
+
+  async checkIpAllowed(_ip: string): Promise<RateLimitDecision> {
+    maybeFault(this.fault, "memory rate limit ip failed");
+    return {
+      allowed: this.allow,
+      limit: 10,
+      remaining: this.allow ? 9 : 0,
+      resetSec: 60,
+      retryAfterSec: this.allow ? 0 : 60,
+    };
+  }
+
+  async checkGlobalInvalidAllowed(): Promise<RateLimitDecision> {
+    maybeFault(this.fault, "memory rate limit global failed");
+    return {
+      allowed: this.allow,
+      limit: 120,
+      remaining: this.allow ? 119 : 0,
+      resetSec: 60,
+      retryAfterSec: this.allow ? 0 : 60,
+    };
+  }
+
+  async noteInvalidCode(_ip: string): Promise<void> {
+    maybeFault(this.fault, "memory note invalid failed");
+  }
+}
+
+export class MemoryQueuePublisher implements QueuePublisher {
+  fault: FaultSwitch = { throwInfra: false };
+  published: unknown[] = [];
+
+  async publishInTx(
+    _tx: unknown,
+    event: { type: string; owner_id: string; [key: string]: unknown },
+    _options?: { singletonKey?: string; startAfter?: number },
+  ): Promise<string | null> {
+    maybeFault(this.fault, "memory queue publish failed");
+    this.published.push(event);
+    return `job-${this.published.length}`;
+  }
 }

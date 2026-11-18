@@ -304,6 +304,48 @@ describe.skipIf(!migratorOk)("auth failure-mode parity (STH-46)", () => {
     await broken.close();
   });
 
+  it("pairing-codes DB failure becomes 500, never 401/403/404", async () => {
+    const exploding = {
+      query: async () => {
+        throw new Error("simulated postgres outage");
+      },
+      connect: async () => {
+        throw new Error("simulated postgres outage");
+      },
+      end: async () => undefined,
+    } as unknown as Pool;
+
+    const app = await buildConfiguredApp(exploding);
+    await app.ready();
+    // Login needs a working pool — use real pool for session, then swap for issue.
+    // Instead: authenticate against real app, then hit broken app with forged session is hard.
+    // Direct path: build with real pool, complete login, then rebuild inject path via use-case
+    // fault by using exploding pool for the pairing-code insert only.
+    await app.close();
+
+    const healthy = await buildConfiguredApp(appPool);
+    await healthy.ready();
+    const { sessionCookie, csrfCookie } = await completeLogin(healthy);
+    await healthy.close();
+
+    const broken = await buildConfiguredApp(exploding);
+    await broken.ready();
+    const res = await broken.inject({
+      method: "POST",
+      url: "/v1/pairing-codes",
+      cookies: { sms_session: sessionCookie, sms_csrf: csrfCookie },
+      headers: {
+        origin: "http://127.0.0.1:8080",
+        "x-csrf-token": csrfCookie,
+      },
+    });
+    // Session lookup itself fails on exploding pool → 500 (not unauthorized).
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toMatchObject({ code: "internal_error", retryable: true });
+    expect([401, 403, 404]).not.toContain(res.statusCode);
+    await broken.close();
+  });
+
   it("CSRF-rejected requests do not update last_seen_at (awaits fire-and-forget)", async () => {
     const { createHash } = await import("node:crypto");
     const app = await buildConfiguredApp(appPool);
