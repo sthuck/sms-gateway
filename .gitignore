@@ -41,13 +41,21 @@ docker-compose.override.yml
 charts/*/charts/
 Chart.lock
 
-# Android (future)
+# Android
 android/.gradle/
 android/local.properties
 android/**/build/
+android/**/*.iml
+android/.idea/
+android/captures/
+android/.cxx/
+android/.kotlin/
 *.apk
 *.aab
 *.keystore
+# Keep the Gradle wrapper jar even if a broader *.jar rule is added later
+!android/gradle/wrapper/gradle-wrapper.jar
+
 
 # Misc
 tmp/

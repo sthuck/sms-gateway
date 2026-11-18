@@ -6,25 +6,33 @@ on:
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
+      - ".github/workflows/android-ci.yml"
+  # Same path filter as Android CI; push is main-only so PR branches do not
+  # get a duplicate workflow run alongside pull_request.
   pull_request:
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
+      - ".github/workflows/android-ci.yml"
 
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
 
+# Real assemble/lint/unit/instrumented work lives in android-ci.yml.
+# Keep this workflow as a path-filter-compatible no-op so older branch
+# protection rules that require "Android" still see a green check.
 jobs:
   android:
-    name: Placeholder
+    name: Deferred to Android CI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Skip until Android project exists
+      - name: Point at android-ci.yml
         run: |
-          if [ -f android/settings.gradle ] || [ -f android/settings.gradle.kts ]; then
-            echo "Android Gradle project present — replace this job with real build"
+          if [ ! -f android/settings.gradle.kts ]; then
+            echo "Expected android/settings.gradle.kts" >&2
             exit 1
           fi
-          echo "No Android project yet; placeholder OK"
+          echo "Android Gradle project present."
+          echo "Build, lint, unit tests, and emulator tests run in workflow 'Android CI' (.github/workflows/android-ci.yml)."
