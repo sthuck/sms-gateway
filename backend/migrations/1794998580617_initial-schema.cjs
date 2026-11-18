@@ -7,8 +7,9 @@ exports.shorthands = undefined;
  * @param {import('node-pg-migrate').MigrationBuilder} pgm
  */
 exports.up = async (pgm) => {
-  // Password is set by scripts/migrate.mjs via a parameterized ALTER ROLE
-  // so it never appears in migration SQL logs.
+  // Role created without a password here. scripts/migrate.mjs sets the
+  // password once on first create (SMS_APP_PASSWORD required). Later
+  // migrate:up runs never ALTER ROLE … PASSWORD — rotate manually.
   pgm.sql(`
     DO $role$
     BEGIN

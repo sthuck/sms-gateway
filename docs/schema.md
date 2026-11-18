@@ -166,14 +166,27 @@ stream row when desired.
 | Role | Purpose |
 | --- | --- |
 | **Migrator** (`sms` in local Compose / CI) | Owns tables, runs `node-pg-migrate`. Connect with `MIGRATE_DATABASE_URL`. May be a superuser locally; production should be a non-superuser table owner with rights to create objects. |
-| **`sms_app`** | Application / worker / MCP. `LOGIN`, **no** `BYPASSRLS`, **no** superuser. Connect with `DATABASE_URL`. Password from `SMS_APP_PASSWORD` (default `sms_app` for local only), applied by `scripts/migrate.mjs` via a parameterized `ALTER ROLE` after `migrate:up` so it never appears in migration SQL logs. |
+| **`sms_app`** | Application / worker / MCP. `LOGIN`, **no** `BYPASSRLS`, **no** superuser. Connect with `DATABASE_URL`. |
+
+### `sms_app` password
+
+- `SMS_APP_PASSWORD` is **required** for `migrate:up` (no hardcoded default in
+  `scripts/migrate.mjs`). Missing → fail fast.
+- On first create only, migrate sets the role password via a parameterized
+  `ALTER ROLE` (never interpolated into migration SQL logs).
+- Later `migrate:up` runs **do not** reset the password.
+- To rotate: run manually as the migrator role —
+
+```sql
+ALTER ROLE sms_app PASSWORD '<new-secret>';
+```
 
 Secrets: put `DATABASE_URL`, `MIGRATE_DATABASE_URL`, and `SMS_APP_PASSWORD`
-in the environment or a secret store — never commit them. Compose defaults
-are local-only.
+in the environment or a secret store — never commit them. Compose / CI /
+`.env.example` use the labelled **local-dev-only** value `sms_app`.
 
 ```bash
-# Migrate (privileged)
+# Migrate (privileged) — SMS_APP_PASSWORD required
 MIGRATE_DATABASE_URL=postgres://sms:sms@localhost:5432/sms \
 SMS_APP_PASSWORD=sms_app \
   pnpm --filter @sms-gateway/backend migrate:up
