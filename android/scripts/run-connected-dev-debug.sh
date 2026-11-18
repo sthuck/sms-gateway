@@ -2,6 +2,10 @@
 # Runs connectedDevDebugAndroidTest against a booted emulator and injects
 # SMS from the host via `adb emu sms send` while the tests poll the outbox.
 #
+# Also installs APKs and runs UiScreenshotTest via am instrument so CI always
+# produces PNGs under app/build/screenshots (Gradle's connected task has been
+# finishing in seconds without leaving a durable test install).
+#
 # Used by the GitHub Actions `instrumented` job. Locally, start an emulator
 # first, then run this script from android/ (or any cwd; it cds itself).
 set -euo pipefail
@@ -10,10 +14,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 PACKAGE="com.sthuck.smsgateway.dev"
+TEST_PACKAGE="${PACKAGE}.test"
+RUNNER="dagger.hilt.android.testing.HiltTestRunner"
 SINGLE_SENDER="+15551234567"
 MULTIPART_SENDER="+15559876543"
 TOKEN="${SMS_E2E_TOKEN:-${GITHUB_RUN_ID:-local}-$(date +%s)}"
 DEADLINE=$((SECONDS + 240))
+SCREENSHOT_HOST="$ROOT/app/build/screenshots"
+SCREENSHOT_DEVICE_APP="/sdcard/Android/data/${PACKAGE}/files/sms-gateway-screenshots"
+SCREENSHOT_DEVICE_DL="/sdcard/Download/sms-gateway-screenshots"
 
 log() { echo "[sms-e2e] $*"; }
 
@@ -65,9 +74,65 @@ send_sms_when_ready() {
   adb emu sms send "$MULTIPART_SENDER" "${long_body}[$TOKEN]"
 }
 
+pull_screenshots() {
+  mkdir -p "$SCREENSHOT_HOST"
+  log "Pulling screenshots from $SCREENSHOT_DEVICE_APP and $SCREENSHOT_DEVICE_DL"
+  adb pull "$SCREENSHOT_DEVICE_APP/." "$SCREENSHOT_HOST/" 2>/dev/null || true
+  adb pull "$SCREENSHOT_DEVICE_DL/." "$SCREENSHOT_HOST/" 2>/dev/null || true
+  find "$SCREENSHOT_HOST" -type f -name '*.png' | sort
+  ls -la "$SCREENSHOT_HOST" || true
+}
+
+png_count() {
+  find "$SCREENSHOT_HOST" -type f -name '*.png' 2>/dev/null | wc -l | tr -d ' '
+}
+
+run_ui_screenshots() {
+  log "Installing app + androidTest APKs for UiScreenshotTest"
+  ./gradlew installDevDebug installDevDebugAndroidTest --stacktrace
+
+  log "Installed instrumentations:"
+  mkdir -p "$ROOT/app/build/reports"
+  adb shell pm list instrumentation | tee "$ROOT/app/build/reports/instrumentation-list.txt" || true
+
+  local component
+  component="$(
+    adb shell pm list instrumentation \
+      | sed -n "s/^instrumentation:\(${TEST_PACKAGE}\/[^ ]*\).*/\1/p" \
+      | head -n 1 \
+      | tr -d '\r'
+  )"
+  if [ -z "$component" ]; then
+    component="${TEST_PACKAGE}/${RUNNER}"
+  fi
+  log "Running UiScreenshotTest via $component"
+  set +e
+  adb shell am instrument -w -r \
+    -e class com.sthuck.smsgateway.ui.UiScreenshotTest \
+    "$component" \
+    | tee "$ROOT/app/build/reports/ui-screenshot-instrument.txt"
+  local rc=${PIPESTATUS[0]}
+  set -e
+  pull_screenshots
+  local count
+  count="$(png_count)"
+  if (( count < 4 )); then
+    log "Expected at least 4 PNGs under $SCREENSHOT_HOST, found $count" >&2
+    return 1
+  fi
+  return "$rc"
+}
+
 log "E2E token: $TOKEN"
 adb wait-for-device
 adb shell setprop debug.smsgateway.e2e_token "$TOKEN"
+
+# Screenshots first: dedicated install + am instrument (does not depend on the
+# connected Gradle task leaving the test APK installed).
+set +e
+run_ui_screenshots
+SCREENSHOT_RC=$?
+set -e
 
 send_sms_when_ready &
 SENDER_PID=$!
@@ -80,34 +145,12 @@ set -e
 # Don't leave a stuck sender if gradle failed early.
 wait "$SENDER_PID" || true
 
-# Pull Compose UI screenshots written by UiScreenshotTest.
-SCREENSHOT_HOST="$ROOT/app/build/screenshots"
-SCREENSHOT_DEVICE_APP="/sdcard/Android/data/${PACKAGE}/files/sms-gateway-screenshots"
-SCREENSHOT_DEVICE_DL="/sdcard/Download/sms-gateway-screenshots"
-mkdir -p "$SCREENSHOT_HOST"
+# Prefer screenshots already captured; pull again in case connected suite wrote more.
+pull_screenshots || true
 
-# Re-run screenshot tests explicitly so a quiet/empty connected suite cannot
-# skip UI capture while still reporting BUILD SUCCESSFUL.
-if (( GRADLE_RC == 0 )); then
-  log "Re-running UiScreenshotTest via am instrument"
-  adb shell am instrument -w \
-    -e class com.sthuck.smsgateway.ui.UiScreenshotTest \
-    "${PACKAGE}.test/dagger.hilt.android.testing.HiltTestRunner" \
-    | tee "$ROOT/app/build/reports/ui-screenshot-instrument.txt"
-fi
-
-log "Pulling screenshots from $SCREENSHOT_DEVICE_APP and $SCREENSHOT_DEVICE_DL"
-adb pull "$SCREENSHOT_DEVICE_APP/." "$SCREENSHOT_HOST/" 2>/dev/null || true
-adb pull "$SCREENSHOT_DEVICE_DL/." "$SCREENSHOT_HOST/" 2>/dev/null || true
-PNG_COUNT="$(find "$SCREENSHOT_HOST" -type f -name '*.png' | wc -l | tr -d ' ')"
-ls -la "$SCREENSHOT_HOST" || true
-if (( PNG_COUNT < 4 )); then
-  log "Expected at least 4 PNGs under $SCREENSHOT_HOST, found $PNG_COUNT" >&2
-  # Do not fail the whole instrumented job on screenshot pull alone when the
-  # suite itself failed; when the suite passed, missing screenshots are an error.
-  if (( GRADLE_RC == 0 )); then
-    exit 1
-  fi
+if (( SCREENSHOT_RC != 0 )); then
+  log "UiScreenshotTest / screenshot pull failed (rc=$SCREENSHOT_RC)" >&2
+  exit "$SCREENSHOT_RC"
 fi
 
 exit "$GRADLE_RC"
