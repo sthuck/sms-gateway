@@ -65,3 +65,34 @@ Entries are appended by the reviewer. HIGH-severity findings are tracked in Line
 | 2026-11-18 | Backend | catalog-equivalence.test.ts | low | The stamp mutation cases never drive schema-equivalence.mjs itself. | Run the real script against each mutated DB. |
 | 2026-11-18 | Backend | docs/schema.md | low | A legacy DB whose public schema grants PUBLIC CREATE (PG14-era) is refused by stamp, but the docs give no remedy. | Document `REVOKE CREATE ON SCHEMA public FROM PUBLIC`. |
 | 2026-11-18 | Backend | catalog-fingerprint.mjs default-ACL capture | low | It only covers current_user; fine for a single migrator but undocumented. | Add a comment. |
+
+## 2026-11-18 — PR #15, PR #16 and PR #13 minor items
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-18 | Backend | owner-role tests | low | Owner tests do not cover sms_app on schema public, types, sequences and views. | Add owner/privilege assertions for those object kinds. |
+| 2026-11-18 | Backend | push-allowlist failure message | low | The failure message for the push allowlist is unclear. | Name the offending object and the fix. |
+| 2026-11-18 | Backend | 'connect as the owning role' refusal text | low | The refusal text is misleading. | Reword to say which role to use. |
+| 2026-11-18 | Backend | leftover probe dirs | low | Leftover probe directories remain from the investigation. | Delete them. |
+| 2026-11-18 | Backend | drizzle schema/function/foreign-table owner coverage | low | Pre-existing: owner coverage does not extend to drizzle schema, functions or foreign tables. | Extend the owner check. |
+| 2026-11-18 | Backend | backend/docs/architecture-layers.md | low | Says infra errors map to '500 / 503' but only 500 occurs; 503 is only the not-configured case. | Say 500 (503 only for not-configured). |
+| 2026-11-18 | Backend | backend/docs/architecture-layers.md | low | Lists CSRF rejection under AuthError, but it is a direct 403 problem response. | Move CSRF to the direct-403 note. |
+| 2026-11-18 | Backend | backend/docs/architecture-layers.md | low | Mentions a reserved queue-pgboss/ directory that does not exist. | Remove the mention or create it. |
+| 2026-11-18 | Backend | backend/docs/architecture-layers.md Logging section; request logging of /v1/auth/callback | low | Doc says OAuth codes must not be logged, but request logging records the code= and state= query on /v1/auth/callback (pre-existing on main; code is single-use and PKCE-bound). | Redact those query params in the request logger. |
+| 2026-11-18 | Backend | IdP /token error handling (oidc-provider.ts) | low | Inconsistent mapping: 401 with JSON body -> 400, 401 with empty body -> 500, 429 stays 400. | Define one explicit mapping for 4xx statuses. |
+| 2026-11-18 | Backend | PgSessionRepository.touch and ResolveSession touch path | low | Dead code. | Remove it or wire it in. |
+| 2026-11-18 | Backend | session expiresAt pass-through | low | No test reads the session expiresAt that is passed through. | Add an assertion. |
+| 2026-11-18 | Backend | lint:auth-errors script | low | Tripwire does not catch: catch->sendProblem with 400 or reply.status(400); `catch { return null }` and `.catch(() => undefined/false)`; a comment containing `throw err`; files named rate-limit.ts or replay-cache.ts are skipped anywhere; directories outside the five scanned ones (composition, domain, src/ root) are not scanned. | Widen patterns and scanned dirs, or document the limits. |
+| 2026-11-18 | Backend | HTTP matrix test (JWKS/IdP) | low | Does not cover JWKS 404 or hang, IdP /token 500/502. | Add those cases. |
+| 2026-11-18 | Android | UploadScheduler.kt:28 and IncomingSmsEnqueuer.kt:39 | medium | Default ExistingWorkPolicy.APPEND_OR_REPLACE; enqueueUpload() is called with delay 0. After a 5xx, delayed unique work can sit up to 15 min and a newly received SMS appends behind it. | Use REPLACE (or cancel-then-enqueue) when initialDelayMs == 0 and ready rows exist; keep append/delay only for the wake-up. |
+| 2026-11-18 | Android | IncomingSmsEnqueuer.kt:25 (M2) | medium | countByContentKey runs after the row is deleted, so dedup fails after upload. | Keep a tombstone or keep uploaded rows until a TTL. |
+| 2026-11-18 | Android | outbox storage (M5) | medium | No outbox TTL/cap; plaintext SMS bodies at rest (documented). | Add TTL and a size cap. |
+| 2026-11-18 | Android | OutboxUploader.kt:275-278 retryAfterDelayMs | low | Parses only delta-seconds Retry-After; HTTP-date and RateLimit-Reset are ignored. | Parse HTTP-date and RateLimit-Reset. |
+| 2026-11-18 | Android | PairingRepositoryTest.kt:290 | low | FakeQueuedDao.unparkAll is a no-op, so dropping unpark-on-successful-pair would not fail the test; unparkAllMakesRowsReadyAgain only exercises the fake DAO, not Room SQL. | Test against in-memory Room. |
+| 2026-11-18 | Android | SmsGatewayApplication.kt:45-50 | low | Restore of the preferred key alias and enqueue run in appScope.launch; a delayed worker could start before the alias is restored. | Run restore before enqueue, sequentially. |
+| 2026-11-18 | Android | IncomingSmsMapper.kt:84-85 | low | mapSimSlot does not cap at 9. | Cap per contract. |
+| 2026-11-18 | Android | IncomingSmsMapper.kt:109,118 | low | sender is not clipped to 64 characters. | Clip per contract. |
+| 2026-11-18 | Android | OutboxUploader.kt:57 | low | Body cap uses String.length (UTF-16 units) vs the contract's 32768 Unicode characters. | Count code points. |
+| 2026-11-18 | Android | AndroidManifest.xml:59-65, BootUploadReceiver.kt:16-22 | low | BootUploadReceiver is exported + directBootAware but credential-encrypted storage may be unavailable at locked boot. | Drop directBootAware or handle locked state. |
+| 2026-11-18 | Android | OutboxUploader.kt:27 | low | Unused UploadPassResult.Failed. | Remove. |
+| 2026-11-18 | Android | BatchPacker.kt:34-35 | low | Comment says body_too_large for a single oversized item, but the uploader parks it as payload_too_large. | Fix the comment. |
