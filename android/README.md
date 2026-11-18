@@ -59,7 +59,10 @@ Package: `com.sthuck.smsgateway`
 
 - `sms` — permission state, `SmsReceiver`, PDU reassembly, `device_msg_id` mapping
 - `data/remote` — `DeviceApi` and DTOs aligned with the STH-5 device contract
-- `data/local` — Room outbox (`queued_messages`) and enqueue helper
+- `data/local` — Room outbox (`queued_messages`) and enqueue helper.
+  Schema JSON is exported to `app/schemas/` (committed). Release builds
+  never use destructive migration; bump `AppDatabase` version only with
+  an explicit Migration / AutoMigration and a `MigrationTestHelper` case.
 - `di` — Hilt modules for network and database
 - `ui` — status screen, permission rationale, and theme
 

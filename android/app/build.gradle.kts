@@ -73,12 +73,18 @@ android {
         }
         getByName("androidTest") {
             kotlin.directories.add("src/sharedTest/kotlin")
+            // Room MigrationTestHelper reads exported schemas from assets.
+            assets.directories.add("$projectDir/schemas")
         }
     }
 
     testOptions {
         unitTests.isIncludeAndroidResources = false
     }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -102,6 +108,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    androidTestImplementation(libs.androidx.room.testing)
 
     implementation(libs.androidx.work.runtime.ktx)
 

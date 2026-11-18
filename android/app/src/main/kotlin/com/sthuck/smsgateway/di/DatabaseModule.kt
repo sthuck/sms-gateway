@@ -2,6 +2,7 @@ package com.sthuck.smsgateway.di
 
 import android.content.Context
 import androidx.room.Room
+import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.data.local.AppDatabase
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import dagger.Module
@@ -17,10 +18,20 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun appDatabase(@ApplicationContext context: Context): AppDatabase =
-        Room.databaseBuilder(context, AppDatabase::class.java, "sms-gateway.db")
-            .fallbackToDestructiveMigration(dropAllTables = true)
-            .build()
+    fun appDatabase(@ApplicationContext context: Context): AppDatabase {
+        val builder = Room.databaseBuilder(
+            context,
+            AppDatabase::class.java,
+            "sms-gateway.db",
+        )
+        // Destructive fallback is debug-only. Release must fail closed on an
+        // unknown schema bump so unsent outbox rows are never silently wiped
+        // (STH-41). Future bumps need an explicit Migration / AutoMigration.
+        if (BuildConfig.DEBUG) {
+            builder.fallbackToDestructiveMigration(dropAllTables = true)
+        }
+        return builder.build()
+    }
 
     @Provides
     fun queuedMessageDao(db: AppDatabase): QueuedMessageDao = db.queuedMessageDao()
