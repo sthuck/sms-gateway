@@ -71,10 +71,13 @@ export async function runLegacyMigrations(direction: "up" | "down" = "up"): Prom
 }
 
 export async function resetSchema(admin: Pool): Promise<void> {
+  // Match Postgres 15+ CREATE DATABASE defaults: PUBLIC gets USAGE on public,
+  // not CREATE (stamp catalog fingerprint refuses GRANT CREATE … TO PUBLIC).
   await admin.query(`
     DROP SCHEMA IF EXISTS public CASCADE;
     CREATE SCHEMA public;
-    GRANT ALL ON SCHEMA public TO PUBLIC;
+    GRANT USAGE ON SCHEMA public TO PUBLIC;
+    GRANT ALL ON SCHEMA public TO CURRENT_USER;
     DROP SCHEMA IF EXISTS app CASCADE;
     DROP SCHEMA IF EXISTS pgboss CASCADE;
     DROP SCHEMA IF EXISTS drizzle CASCADE;

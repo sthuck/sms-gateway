@@ -27,9 +27,10 @@ pnpm drizzle:check                # snapshot drift + journal when + push guard
   - `SECURITY DEFINER` lookups + `REVOKE`/`GRANT EXECUTE` + `SET search_path`
 
 `meta/0000_snapshot.json` must stay in sync with `schema.ts` (`pnpm drizzle:check`).
-`meta/expected-catalog.json` is the privilege/role/policy fingerprint used by
-`migrate:stamp` and catalog equivalence — regenerate with `pnpm catalog:write`
-after a clean `migrate:up` when baseline grants/roles change.
+`expected-catalog.json` (next to the baseline SQL, **not** under `meta/` —
+drizzle-kit treats every `meta/*.json` as a snapshot) is the privilege/role/policy
+fingerprint used by `migrate:stamp` and catalog equivalence. Regenerate with
+`pnpm catalog:write` after a clean `migrate:up` when baseline grants/roles change.
 
 ## Down migrations
 

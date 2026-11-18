@@ -28,6 +28,10 @@ import { captureCatalog, diffAgainstExpected, formatCatalogDiffs } from "./catal
 import ownedTablesJson from "../src/adapters/db-postgres/owned-tables.json" with { type: "json" };
 
 const backendRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+if (process.env.DRIZZLE_MIGRATIONS_FOLDER && process.env.NODE_ENV === "production") {
+  console.error("DRIZZLE_MIGRATIONS_FOLDER is not allowed when NODE_ENV=production");
+  process.exit(1);
+}
 const drizzleFolder = process.env.DRIZZLE_MIGRATIONS_FOLDER
   ? path.resolve(process.env.DRIZZLE_MIGRATIONS_FOLDER)
   : path.join(backendRoot, "drizzle");

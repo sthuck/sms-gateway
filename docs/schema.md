@@ -224,7 +224,7 @@ DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms
   journal is empty, `migrate:stamp` records the baseline as applied **without**
   re-running DDL. `created_at` uses the journal entry's exact `when` (not
   wall-clock — see drizzle-orm#5769). Before stamping, the wrapper compares the
-  live catalog to `drizzle/meta/expected-catalog.json` (policies, ENABLE+FORCE
+  live catalog to `drizzle/expected-catalog.json` (policies, ENABLE+FORCE
   RLS, grants / default privileges, `sms_app` role attributes, function
   `search_path`) and refuses with a listed diff on mismatch. Stamp is idempotent
   when the baseline row is already present.
