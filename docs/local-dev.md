@@ -11,28 +11,22 @@
 From the repository root:
 
 ```bash
-# Start Postgres + API + worker
+# Start Postgres + backend API
 docker compose up --build
 
 # Or with the OpenAPI mock server as well
 docker compose --profile mock up --build
-
-# Scale workers locally (SKIP LOCKED; handlers idempotent)
-docker compose up --build --scale worker=2
 ```
 
-Migrate once before the first API/worker start (creates `sms_app` + `pgboss`):
-
-```bash
-MIGRATE_DATABASE_URL=postgres://sms:sms@localhost:5432/sms \
-SMS_APP_PASSWORD=sms_app \
-  pnpm --filter @sms-gateway/backend migrate:up
-```
+Worker service (STH-12) is included in Compose; scale with
+`docker compose up --build --scale worker=2`. Metrics: `http://localhost:9090/metrics`.
+Migrate once first (`SMS_APP_PASSWORD` required) so `sms_app` + `pgboss` exist —
+see Migrations below and `docs/queue.md`.
 
 | Service | Host port | Emulator URL | Notes |
 | --- | --- | --- | --- |
 | Backend API | **8080** | `http://10.0.2.2:8080` | Fastify; listens on `0.0.0.0` |
-| Worker | **9090** | n/a | Metrics at `/metrics`; Compose `stop_grace_period: 30s` |
+| Worker | **9090** | n/a | pg-boss consumer; metrics at `/metrics` |
 | Postgres | **5432** | n/a (internal) | User/db/password: `sms` / `sms` / `sms` (local only) |
 | Device API mock (Prism) | **4010** | `http://10.0.2.2:4010` | Profile `mock`; see below |
 
@@ -52,14 +46,12 @@ cp .env.example .env   # edit DATABASE_URL if needed
 pnpm dev               # API on 0.0.0.0:8080
 ```
 
-Separate processes:
+Separate stubs:
 
 ```bash
 pnpm worker   # pg-boss consumer (needs migrate:up first)
 pnpm mcp      # MCP server stub
 ```
-
-Queue details: `docs/queue.md`. Worker metrics (optional): `http://localhost:9090/metrics`.
 
 Tests and lint:
 
@@ -131,11 +123,11 @@ pnpm migrate:up
 ```
 
 This creates role `sms_app` (password set only on first create), tables,
-RLS, lookup functions, and bootstraps the `pgboss` queue schema (grants
-to `sms_app`). The API and worker should then use
+RLS, and lookup functions. The API should then use
 `DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms`.
-See `docs/schema.md` and `docs/queue.md`. To rotate the app role password
-later: `ALTER ROLE sms_app PASSWORD '…'` (not migrate).
+See `docs/schema.md` for the ER diagram and roles model. To rotate the
+app role password later: `ALTER ROLE sms_app PASSWORD '…'` (not migrate).
+It also bootstraps the `pgboss` queue schema (see `docs/queue.md`).
 
 Integration tests expect the same URLs (or `APP_DATABASE_URL` for the app
 role) and an explicit `SMS_APP_PASSWORD`. They run against a real Postgres
