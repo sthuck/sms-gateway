@@ -37,6 +37,10 @@ Postgres table `app.rate_limit_buckets` (shared across instances).
 | Global invalid codes | 120 / 60 s | `PAIR_GLOBAL_INVALID_LIMIT`, `PAIR_GLOBAL_INVALID_WINDOW_SEC` |
 | IP lock after invalids | 20 fails → 900 s lock | `PAIR_IP_INVALID_LOCK_THRESHOLD`, `PAIR_IP_INVALID_LOCK_SEC` |
 
+Client IP comes from Fastify `request.ip` with `TRUST_PROXY` configured for
+known reverse-proxy hops/CIDRs. **X-Forwarded-For is never parsed by hand**
+(spoofing would bypass per-IP limits).
+
 **Why Postgres, not in-memory:** an in-memory Fastify rate-limit store
 would not enforce correctly with multiple API replicas. No Redis in the
 stack yet; a small shared table is enough for v1.
@@ -49,8 +53,10 @@ sets `Retry-After`.
 Table `app.device_replay_cache` stores `(identity, kind, value_hash)` for
 **360 seconds** (`DEVICE_REPLAY_TTL_SECONDS`). Identity is the device UUID,
 or SHA-256 of the SPKI DER at pairing. Both **nonce** and **signature**
-are remembered. Shared across instances for the same reason as rate
-limits.
+are claimed **atomically after signature verification**
+(`INSERT … ON CONFLICT … WHERE expired RETURNING`) so concurrent copies of
+the same signed request yield exactly one success. Shared across instances
+for the same reason as rate limits.
 
 ## Device auth middleware
 

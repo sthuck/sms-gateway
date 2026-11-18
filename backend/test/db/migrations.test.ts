@@ -38,11 +38,14 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
     );
     expect(Number(afterUp.rows[0]?.count)).toBeGreaterThan(0);
 
-    // One `down` per applied migration (device-auth, auth-sessions, rls, initial).
-    await runMigrations("down");
-    await runMigrations("down");
-    await runMigrations("down");
-    await runMigrations("down");
+    // Drain every applied migration (count varies as stacked PRs land).
+    for (let i = 0; i < 20; i++) {
+      const { rows } = await admin.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM pgmigrations`,
+      );
+      if (Number(rows[0]?.count ?? 0) === 0) break;
+      await runMigrations("down");
+    }
 
     tables = await listOwnedTables(admin);
     expect(tables).toHaveLength(0);

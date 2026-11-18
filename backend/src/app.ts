@@ -28,6 +28,10 @@ export async function buildApp(
     logger: buildLoggerOptions(config.LOG_LEVEL),
     requestIdHeader: "x-request-id",
     bodyLimit: 1_048_576,
+    // Only trust XFF from configured proxy hops; request.ip is then safe
+    // for rate limits and audit (STH-38). Cast: Fastify overloads exclude
+    // `number` hop-count from the narrowest signature under exactOptional.
+    trustProxy: config.trustProxy as boolean | string | string[],
   });
 
   // Extra guard: never attach raw bodies to request logs.

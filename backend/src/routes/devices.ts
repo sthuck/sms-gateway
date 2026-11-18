@@ -318,12 +318,17 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
+/**
+ * Client IP for rate limits and audit. Relies on Fastify `trustProxy`
+ * (configured from TRUST_PROXY); never parses X-Forwarded-For by hand.
+ */
 function clientIp(request: FastifyRequest): string {
-  const forwarded = request.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    return forwarded.split(",")[0]!.trim();
+  const ip = request.ip || "127.0.0.1";
+  // Guard audit_log inet cast against anything unexpected.
+  if (!/^[0-9a-fA-F:.]+$/.test(ip)) {
+    return "127.0.0.1";
   }
-  return request.ip || "127.0.0.1";
+  return ip;
 }
 
 function applyRateLimitHeaders(

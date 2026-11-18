@@ -5,7 +5,7 @@ import { withOwner } from "../db/with-owner.js";
 import { sendProblem } from "../http/problems.js";
 import type { DeviceAuthConfig } from "./config.js";
 import { lookupDeviceForAuth } from "./lookup.js";
-import { isReplay, rememberReplay } from "./replay-cache.js";
+import { claimNonceAndSignature } from "./replay-cache.js";
 import {
   buildCanonicalString,
   parseContentSha256Header,
@@ -173,21 +173,6 @@ export async function requireDeviceAuth(
     return;
   }
 
-  if (await isReplay(pool, device.deviceId, "nonce", nonce)) {
-    sendProblem(reply, "replay_detected", 401, "Nonce reused", {
-      instance: requestPath(request),
-      retryable: true,
-    });
-    return;
-  }
-  if (await isReplay(pool, device.deviceId, "signature", signature)) {
-    sendProblem(reply, "replay_detected", 401, "Signature reused", {
-      instance: requestPath(request),
-      retryable: true,
-    });
-    return;
-  }
-
   const publicKey = parsePublicKeySpkiB64url(device.publicKey);
   if (!publicKey) {
     sendProblem(reply, "invalid_signature", 401, "Stored public key is invalid", {
@@ -226,8 +211,21 @@ export async function requireDeviceAuth(
     return;
   }
 
-  await rememberReplay(pool, device.deviceId, "nonce", nonce, config.replayTtlSeconds);
-  await rememberReplay(pool, device.deviceId, "signature", signature, config.replayTtlSeconds);
+  // Atomic claim after verify — concurrent identical requests: exactly one wins.
+  const claimed = await claimNonceAndSignature(
+    pool,
+    device.deviceId,
+    nonce,
+    signature,
+    config.replayTtlSeconds,
+  );
+  if (claimed === "replay") {
+    sendProblem(reply, "replay_detected", 401, "Nonce or signature reused", {
+      instance: requestPath(request),
+      retryable: true,
+    });
+    return;
+  }
 
   bindDevice(request, pool, {
     deviceId: device.deviceId,
