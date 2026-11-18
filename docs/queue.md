@@ -26,8 +26,10 @@ outbox table would only be needed if the broker were external.
 | `public` | App tables + `queue_processed_jobs` | Migrator (`sms`) via `node-pg-migrate` | `sms_app` (RLS) |
 | `pgboss` | pg-boss tables (not owner-scoped) | Migrator via `scripts/bootstrap-pgboss.mjs` after `migrate:up` | `sms_app` (DML only) |
 
-**Bootstrap (privileged):** `pnpm migrate:up` runs migrations, sets the
-`sms_app` password, then `bootstrap-pgboss.mjs`, which:
+**Bootstrap (privileged):** `SMS_APP_PASSWORD` is **required** for
+`migrate:up` (no script default). Password is applied only when `sms_app`
+is first created; later ups do not reset it. After migrations,
+`bootstrap-pgboss.mjs`:
 
 1. Starts pg-boss with `createSchema` / `migrate` enabled as the migrator
 2. Creates event queues and per-event dead-letter queues
@@ -43,6 +45,10 @@ bodies or senders — only validated ID payloads (see below).
 Re-run bootstrap after upgrades that change the pg-boss schema:
 
 ```bash
+MIGRATE_DATABASE_URL=postgres://sms:sms@localhost:5432/sms \
+SMS_APP_PASSWORD=sms_app \
+  pnpm --filter @sms-gateway/backend migrate:up
+# Or re-run queue schema only:
 MIGRATE_DATABASE_URL=postgres://sms:sms@localhost:5432/sms \
   pnpm --filter @sms-gateway/backend queue:bootstrap
 ```

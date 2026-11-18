@@ -34,11 +34,19 @@ export function createAppPool(): Pool {
   return createPool({ connectionString: appDatabaseUrl() });
 }
 
+/**
+ * Local-dev-only password for tests / Compose / CI.
+ * migrate.mjs has no hardcoded default — callers must set SMS_APP_PASSWORD.
+ */
+export const LOCAL_DEV_SMS_APP_PASSWORD = "sms_app";
+
 export async function runMigrations(direction: "up" | "down" = "up"): Promise<void> {
   const env = {
     ...process.env,
     DATABASE_URL: migrateDatabaseUrl(),
-    SMS_APP_PASSWORD: process.env.SMS_APP_PASSWORD ?? "sms_app",
+    MIGRATE_DATABASE_URL: migrateDatabaseUrl(),
+    // Explicit local-dev value for tests; never rely on a migrate.mjs fallback.
+    SMS_APP_PASSWORD: process.env.SMS_APP_PASSWORD ?? LOCAL_DEV_SMS_APP_PASSWORD,
   };
   await execFileAsync("node", ["scripts/migrate.mjs", direction], {
     cwd: backendRoot,
