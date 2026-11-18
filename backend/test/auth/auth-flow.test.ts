@@ -17,6 +17,7 @@ import {
   runMigrations,
 } from "../helpers/pg.js";
 import { startMockOidc, type MockOidc } from "../helpers/mock-oidc.js";
+import { expectAuthProblem, expectMe, loadUserApi, type OpenApiDoc } from "../helpers/openapi.js";
 
 const migratorOk = await canConnect(migrateDatabaseUrl());
 if (!migratorOk && process.env.CI === "true") {
@@ -31,8 +32,10 @@ describe.skipIf(!migratorOk)("OIDC auth flow (mock provider)", () => {
   let mock: MockOidc;
   let app: FastifyInstance;
   let messageB: string;
+  let userApi: OpenApiDoc;
 
   beforeAll(async () => {
+    userApi = await loadUserApi();
     admin = createAdminPool();
     await resetSchema(admin);
     await runMigrations("up");
@@ -175,8 +178,7 @@ describe.skipIf(!migratorOk)("OIDC auth flow (mock provider)", () => {
       url: "/v1/auth/me",
       cookies: { sms_session: sessionCookie },
     });
-    expect(me.statusCode).toBe(200);
-    const body = me.json() as { id: string; email: string; mfa_enrolled: boolean };
+    const body = expectMe(userApi, me) as { id: string; email: string; mfa_enrolled: boolean };
     expect(body.email).toBe("alice@example.com");
     expect(body.mfa_enrolled).toBe(true);
 
@@ -225,8 +227,7 @@ describe.skipIf(!migratorOk)("OIDC auth flow (mock provider)", () => {
       url: cb.pathname + cb.search,
       cookies: { sms_oauth: oauthCookie },
     });
-    expect(callback.statusCode).toBe(400);
-    expect(String(callback.headers["content-type"])).toMatch(/problem\+json/);
+    expectAuthProblem(userApi, "/v1/auth/callback", "get", callback, 400);
   });
 
   it("rejects MFA-required login when amr/acr absent", async () => {
@@ -257,8 +258,7 @@ describe.skipIf(!migratorOk)("OIDC auth flow (mock provider)", () => {
     );
 
     const missing = await app.inject({ method: "GET", url: "/v1/auth/me" });
-    expect(missing.statusCode).toBe(401);
-    expect(String(missing.headers["content-type"])).toMatch(/problem\+json/);
+    expectAuthProblem(userApi, "/v1/auth/me", "get", missing, 401);
 
     const expired = await mock.signToken(
       { sub: "sub-alice", email: "alice@example.com", amr: ["pwd", "otp"] },

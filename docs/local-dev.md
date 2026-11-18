@@ -135,12 +135,20 @@ export SMS_APP_PASSWORD=sms_app
 pnpm migrate:up
 ```
 
-This creates role `sms_app` (password set only on first create), tables,
-RLS, and lookup functions. The API should then use
-`DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms`.
-See `docs/schema.md` for the ER diagram and roles model. To rotate the
-app role password later: `ALTER ROLE sms_app PASSWORD '…'` (not migrate).
-It also bootstraps the `pgboss` queue schema (see `docs/queue.md`).
+This applies the Drizzle baseline (`backend/drizzle/`), creates role
+`sms_app` (password set only on first create), tables, RLS, lookup
+functions, and bootstraps `pgboss` (see `docs/queue.md`). The API should
+then use `DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms`.
+See `docs/schema.md` and `backend/drizzle/README.md`.
+
+**Existing local DB** that already ran the old node-pg-migrate CJS files:
+
+```bash
+pnpm migrate:stamp   # marks baseline applied; does not re-run DDL
+```
+
+There is **no** `migrate:down` (Drizzle has no down). Recreate the DB or
+restore a backup. Never use `drizzle-kit push`.
 
 Integration tests expect the same URLs (or `APP_DATABASE_URL` for the app
 role) and an explicit `SMS_APP_PASSWORD`. They run against a real Postgres

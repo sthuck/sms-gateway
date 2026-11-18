@@ -4,7 +4,15 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "coverage/**", "migrations/**", "test/fixtures/**"],
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "coverage/**",
+      "migrations/**",
+      "migrations-legacy/**",
+      "drizzle/**",
+      "test/fixtures/**",
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
@@ -34,6 +42,10 @@ export default tseslint.config(
       globals: {
         console: "readonly",
         process: "readonly",
+        URL: "readonly",
+        Buffer: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
       },
     },
   },

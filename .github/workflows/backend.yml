@@ -69,15 +69,10 @@ jobs:
         run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: Migrate up / down / up
-        run: |
-          pnpm migrate:up
-          pnpm migrate:down
-          pnpm migrate:down
-          pnpm migrate:down
-          pnpm migrate:down
-          pnpm migrate:down
-          pnpm migrate:up
+      - name: Migrate up (Drizzle baseline)
+        run: pnpm migrate:up
+      - name: Schema equivalence (legacy+stamp ≡ drizzle baseline)
+        run: pnpm schema:equivalence
       - run: pnpm test
       - name: Build Docker image
         working-directory: ${{ github.workspace }}
