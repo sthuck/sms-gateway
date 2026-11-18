@@ -7,6 +7,8 @@ export { PgDeviceAuthRepository } from "./device-repository.js";
 export { PgPairingCodeRepository } from "./pairing-code-repository.js";
 export { PgReplayCache } from "./pg-replay-cache.js";
 export { PgPairRateLimiter } from "./pg-pair-rate-limiter.js";
+export { PgIngestRateLimiter } from "./pg-ingest-rate-limiter.js";
+export { PgMessageRepository } from "./message-repository.js";
 export {
   lookupDeviceForAuth,
   lookupPairingCode,

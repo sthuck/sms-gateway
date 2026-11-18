@@ -20,6 +20,7 @@ export {
   type RequireDeviceAuthOptions,
 } from "./device-plugin.js";
 export { deviceRoutes } from "./device-routes.js";
+export { messageRoutes } from "./message-routes.js";
 export { pairingCodeRoutes } from "./pairing-code-routes.js";
 export { rawBodyPlugin } from "./raw-body.js";
 export {
