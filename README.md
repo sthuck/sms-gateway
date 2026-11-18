@@ -7,7 +7,7 @@ views). AI agents read streams via REST or an MCP server with scoped auth.
 ## Layout
 
 ```
-android/                 # Android client (placeholder README)
+android/                 # Android client (Kotlin/Compose; see android/README.md)
 backend/                 # Fastify API + worker + MCP stubs (TypeScript)
 web/                     # React UI (placeholder README)
 deploy/helm/sms-gateway/ # Helm chart (API / worker / MCP Deployments)
@@ -67,7 +67,7 @@ to a homelab Kubernetes cluster with Helm. Details in `docs/architecture.md`.
 
 ## Status
 
-Skeleton only (Linear **STH-6**). No business logic, schema, or auth yet.
-Schema/RLS is **STH-8**. The throwaway signing key in
-`docs/contracts/examples/` is intentional and labelled — never use it in
-production.
+Backend skeleton (Linear **STH-6**); Android skeleton + SMS receiver
+(**STH-7**, **STH-10**). No schema/auth yet — schema/RLS is **STH-8**. The
+throwaway signing key in `docs/contracts/examples/` is intentional and
+labelled — never use it in production.
