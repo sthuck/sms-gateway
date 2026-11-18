@@ -10,6 +10,7 @@ export {
   type ValidatedMessage,
 } from "./types.js";
 export {
+  containsNul,
   looksLikePhoneNumber,
   normaliseDirection,
   normaliseReceivedAt,

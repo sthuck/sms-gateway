@@ -3,6 +3,13 @@ import type { FormatPhoneSender, MessageDirection } from "./types.js";
 const RECEIVED_AT_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?Z$/;
 
 const MAX_FUTURE_SKEW_MS = 24 * 60 * 60 * 1000;
+/** Reject timestamps Postgres would refuse (e.g. year 0000) or that are absurdly old. */
+const MIN_RECEIVED_AT_MS = Date.UTC(1970, 0, 1);
+
+/** True when the string contains a U+0000 that Postgres varchar/text rejects. */
+export function containsNul(value: string): boolean {
+  return value.includes("\u0000");
+}
 
 export type NormaliseSenderResult =
   | { ok: true; sender: string }
@@ -30,6 +37,9 @@ export function normaliseSender(
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
     return { ok: false, code: "missing_field", detail: "sender is required" };
+  }
+  if (containsNul(trimmed)) {
+    return { ok: false, code: "invalid_field", detail: "sender must not contain NUL" };
   }
   if (trimmed.length > 64) {
     return { ok: false, code: "invalid_field", detail: "sender exceeds 64 characters" };
@@ -79,6 +89,14 @@ export function normaliseReceivedAt(
   const ms = Date.parse(raw);
   if (Number.isNaN(ms)) {
     return { ok: false, code: "invalid_field", detail: "received_at is not a valid timestamp" };
+  }
+
+  if (ms < MIN_RECEIVED_AT_MS) {
+    return {
+      ok: false,
+      code: "invalid_field",
+      detail: "received_at must be on or after 1970-01-01T00:00:00Z",
+    };
   }
 
   if (ms - now.getTime() > MAX_FUTURE_SKEW_MS) {
