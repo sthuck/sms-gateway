@@ -22,7 +22,6 @@ spec:
         {{- include "sms-gateway.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
     spec:
-      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds | default 30 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -39,12 +38,6 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
             {{- include "sms-gateway.env" . | nindent 12 }}
-          {{- if .Values.worker.metrics.enabled }}
-          ports:
-            - name: metrics
-              containerPort: {{ .Values.worker.metrics.port }}
-              protocol: TCP
-          {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

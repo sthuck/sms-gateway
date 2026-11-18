@@ -11,13 +11,3 @@ data:
   LOG_LEVEL: {{ .Values.config.LOG_LEVEL | quote }}
   LLM_BASE_URL: {{ .Values.config.LLM_BASE_URL | quote }}
   LLM_MODEL: {{ .Values.config.LLM_MODEL | quote }}
-  QUEUE_SCHEMA: {{ .Values.queue.schema | quote }}
-  QUEUE_RETRY_LIMIT: {{ .Values.queue.retryLimit | quote }}
-  QUEUE_RETRY_DELAY_SECONDS: {{ .Values.queue.retryDelaySeconds | quote }}
-  QUEUE_RETRY_BACKOFF: {{ .Values.queue.retryBackoff | quote }}
-  QUEUE_RETRY_DELAY_MAX_SECONDS: {{ .Values.queue.retryDelayMaxSeconds | quote }}
-  QUEUE_POLLING_INTERVAL_SECONDS: {{ .Values.queue.pollingIntervalSeconds | quote }}
-  QUEUE_LOCAL_CONCURRENCY: {{ .Values.queue.localConcurrency | quote }}
-  QUEUE_SHUTDOWN_TIMEOUT_MS: {{ .Values.queue.shutdownTimeoutMs | quote }}
-  QUEUE_METRICS_PORT: {{ .Values.queue.metricsPort | quote }}
-  QUEUE_METRICS_HOST: {{ .Values.queue.metricsHost | quote }}

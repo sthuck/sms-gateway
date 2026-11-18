@@ -11,16 +11,28 @@
 From the repository root:
 
 ```bash
-# Start Postgres + backend API
+# Start Postgres + API + worker
 docker compose up --build
 
 # Or with the OpenAPI mock server as well
 docker compose --profile mock up --build
+
+# Scale workers locally (SKIP LOCKED; handlers idempotent)
+docker compose up --build --scale worker=2
+```
+
+Migrate once before the first API/worker start (creates `sms_app` + `pgboss`):
+
+```bash
+MIGRATE_DATABASE_URL=postgres://sms:sms@localhost:5432/sms \
+SMS_APP_PASSWORD=sms_app \
+  pnpm --filter @sms-gateway/backend migrate:up
 ```
 
 | Service | Host port | Emulator URL | Notes |
 | --- | --- | --- | --- |
 | Backend API | **8080** | `http://10.0.2.2:8080` | Fastify; listens on `0.0.0.0` |
+| Worker | **9090** | n/a | Metrics at `/metrics`; Compose `stop_grace_period: 30s` |
 | Postgres | **5432** | n/a (internal) | User/db/password: `sms` / `sms` / `sms` (local only) |
 | Device API mock (Prism) | **4010** | `http://10.0.2.2:4010` | Profile `mock`; see below |
 

@@ -55,26 +55,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ .Values.config.LLM_BASE_URL | quote }}
 - name: LLM_MODEL
   value: {{ .Values.config.LLM_MODEL | quote }}
-- name: QUEUE_SCHEMA
-  value: {{ .Values.queue.schema | quote }}
-- name: QUEUE_RETRY_LIMIT
-  value: {{ .Values.queue.retryLimit | quote }}
-- name: QUEUE_RETRY_DELAY_SECONDS
-  value: {{ .Values.queue.retryDelaySeconds | quote }}
-- name: QUEUE_RETRY_BACKOFF
-  value: {{ .Values.queue.retryBackoff | quote }}
-- name: QUEUE_RETRY_DELAY_MAX_SECONDS
-  value: {{ .Values.queue.retryDelayMaxSeconds | quote }}
-- name: QUEUE_POLLING_INTERVAL_SECONDS
-  value: {{ .Values.queue.pollingIntervalSeconds | quote }}
-- name: QUEUE_LOCAL_CONCURRENCY
-  value: {{ .Values.queue.localConcurrency | quote }}
-- name: QUEUE_SHUTDOWN_TIMEOUT_MS
-  value: {{ .Values.queue.shutdownTimeoutMs | quote }}
-- name: QUEUE_METRICS_PORT
-  value: {{ .Values.queue.metricsPort | quote }}
-- name: QUEUE_METRICS_HOST
-  value: {{ .Values.queue.metricsHost | quote }}
 - name: DATABASE_URL
   valueFrom:
     secretKeyRef:

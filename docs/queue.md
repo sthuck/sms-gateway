@@ -1,8 +1,13 @@
 # Queue and worker (pg-boss)
 
 Companion to Linear **STH-12**. The API publishes jobs; the `worker`
-Deployment consumes them. Jobs live in the **same Postgres database** as
+process consumes them. Jobs live in the **same Postgres database** as
 application data (no Redis / RabbitMQ).
+
+Local focus for this ticket: **docker compose** + integration tests.
+Homelab Helm wiring (replicas, queue values, chart graceful-stop) is
+postponed to later in the project; the worker process still handles
+`SIGTERM` / `SIGINT` gracefully in code.
 
 ## Why pg-boss (not a separate outbox)
 
@@ -131,9 +136,11 @@ the dead-lettered counter (visible in logs/metrics). Redrive is operational
 
 ## Scaling
 
-Multiple worker replicas are safe: pg-boss fetch uses `SKIP LOCKED`. Pair
-with Helm `worker.replicaCount` and `QUEUE_LOCAL_CONCURRENCY`. Side effects
-remain single-effect via `claimProcessed` / `singletonKey`.
+Multiple worker processes are safe: pg-boss fetch uses `SKIP LOCKED`.
+Locally, scale with Compose (`docker compose up --scale worker=N`) or run
+several `pnpm worker` processes against the same DB. Side effects stay
+single-effect via `claimProcessed` / `singletonKey`. Kubernetes replica
+knobs land with later homelab deployment work.
 
 ## How to add an event
 

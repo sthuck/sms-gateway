@@ -18,19 +18,6 @@ config:
   LLM_BASE_URL: ""
   LLM_MODEL: ""
 
-# pg-boss queue settings (API publisher + worker consumer). See docs/queue.md.
-queue:
-  schema: pgboss
-  retryLimit: "5"
-  retryDelaySeconds: "1"
-  retryBackoff: "true"
-  retryDelayMaxSeconds: "300"
-  pollingIntervalSeconds: "1"
-  localConcurrency: "1"
-  shutdownTimeoutMs: "25000"
-  metricsPort: "9090"
-  metricsHost: "0.0.0.0"
-
 # Secret-backed references. Create these Secrets out-of-band; nothing is generated.
 secrets:
   # Expected keys: DATABASE_URL
@@ -69,14 +56,8 @@ api:
 
 worker:
   enabled: true
-  # Scale freely: pg-boss uses SKIP LOCKED; handlers are idempotent.
   replicaCount: 1
   command: ["node", "dist/worker.js"]
-  # Must exceed QUEUE_SHUTDOWN_TIMEOUT_MS so in-flight jobs can finish.
-  terminationGracePeriodSeconds: 30
-  metrics:
-    enabled: true
-    port: 9090
   resources:
     requests:
       cpu: 50m
