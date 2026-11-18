@@ -39,12 +39,9 @@ class MessageUploadWorker @AssistedInject constructor(
                 is UploadPassResult.StopForRePair -> {
                     return Result.failure()
                 }
-                is UploadPassResult.Failed -> {
-                    return Result.failure()
-                }
             }
         }
-        // Still pending after many batches — chain another unique run.
+        // Still pending after many batches — chain another unique run (REPLACE).
         uploadScheduler.enqueueUpload()
         return Result.success()
     }
@@ -55,7 +52,7 @@ class MessageUploadWorker @AssistedInject constructor(
         if (next > now) {
             uploadScheduler.enqueueDelayedUntil(next)
         } else {
-            // Ready rows remain (e.g. raced with insert) — run ASAP.
+            // Ready rows remain (e.g. raced with insert) — run ASAP via REPLACE.
             uploadScheduler.enqueueUpload()
         }
     }

@@ -172,6 +172,29 @@ jobs:
           ls -l /dev/kvm
           id -nG
 
+      - name: Preinstall emulator package (retry flaky zip downloads)
+        run: |
+          set -eux
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK" -path '*cmdline-tools*' -name sdkmanager -type f | head -n 1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          # The emulator-runner step sometimes fails with
+          # "Error on ZipFile unknown archive" when sdkmanager downloads a
+          # truncated emulator zip; retry a few times before launching AVD.
+          for attempt in 1 2 3; do
+            if "$SDKMANAGER" --install emulator --channel=0; then
+              echo "Emulator package installed on attempt $attempt"
+              exit 0
+            fi
+            echo "Emulator install attempt $attempt failed; retrying..." >&2
+            sleep 5
+          done
+          echo "Failed to install emulator package after retries" >&2
+          exit 1
+
       - name: Cache AVD
         uses: actions/cache@v4
         id: avd-cache
@@ -179,7 +202,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-api34-google-apis-x86_64-disk4g-v2
+          key: avd-api34-google-apis-x86_64-disk4g-v3
 
       - name: Generate AVD snapshot
         if: steps.avd-cache.outputs.cache-hit != 'true'
@@ -214,6 +237,14 @@ jobs:
           disable-animations: true
           working-directory: android
           script: ./scripts/run-connected-dev-debug.sh
+
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-screenshots
+          path: android/app/build/screenshots/**
+          if-no-files-found: warn
 
       - name: Upload instrumented test reports
         if: failure()

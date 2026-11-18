@@ -5,6 +5,8 @@ import com.sthuck.smsgateway.crypto.DeviceKeyStore
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.pairing.PairingCredentialsReader
 import com.sthuck.smsgateway.pairing.PairingStateAccess
+import com.sthuck.smsgateway.upload.UploadScheduler
+import com.sthuck.smsgateway.upload.UploadWorkScheduler
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -25,4 +27,8 @@ abstract class PairingModule {
     @Binds
     @Singleton
     abstract fun deviceKeyAccess(store: DeviceKeyStore): DeviceKeyAccess
+
+    @Binds
+    @Singleton
+    abstract fun uploadWorkScheduler(scheduler: UploadScheduler): UploadWorkScheduler
 }

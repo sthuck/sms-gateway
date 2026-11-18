@@ -7,12 +7,14 @@ import androidx.work.Configuration
 import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
+import com.sthuck.smsgateway.upload.OutboxHousekeeping
 import com.sthuck.smsgateway.upload.UploadScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -33,6 +35,9 @@ class SmsGatewayApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var deviceKeyStore: DeviceKeyAccess
 
+    @Inject
+    lateinit var housekeeping: OutboxHousekeeping
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val workManagerConfiguration: Configuration
@@ -42,11 +47,15 @@ class SmsGatewayApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-        appScope.launch {
+        // Restore the preferred Keystore alias before any already-scheduled
+        // worker can run (closes the restore/enqueue race).
+        runBlocking {
             val creds = credentialStore.current()
             deviceKeyStore.restorePreferredActiveAlias(creds.activeKeyAlias)
-            // Unpark on app update so rows stuck by older park rules can drain (STH-49).
+        }
+        appScope.launch {
             maybeUnparkAfterUpgrade()
+            housekeeping.enforceLimits()
             uploadScheduler.enqueueUpload()
         }
     }

@@ -32,7 +32,7 @@ object BatchPacker {
             if (bytes > maxBodyBytes) {
                 if (chosen.isEmpty()) {
                     // Single oversized item: still return it so the uploader can park
-                    // (body_too_large) rather than stall the queue.
+                    // (payload_too_large) rather than stall the queue.
                     return PackResult(
                         rows = listOf(row),
                         request = request,

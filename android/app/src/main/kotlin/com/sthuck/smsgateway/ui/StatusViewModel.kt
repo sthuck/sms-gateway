@@ -6,6 +6,7 @@ import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.pairing.PairingRepository
+import com.sthuck.smsgateway.upload.UploadDefaults
 import com.sthuck.smsgateway.upload.UploadScheduler
 import androidx.work.ExistingWorkPolicy
 import com.sthuck.smsgateway.sms.SmsPermissionSnapshot
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import java.util.concurrent.TimeUnit
 
 data class QueuedMessagePreview(
     val deviceMsgId: String,
@@ -40,6 +42,8 @@ data class StatusUiState(
     val recentQueued: List<QueuedMessagePreview> = emptyList(),
     val recentParked: List<QueuedMessagePreview> = emptyList(),
     val unpairConfirmVisible: Boolean = false,
+    val outboxMaxRows: Int = UploadDefaults.MAX_OUTBOX_ROWS,
+    val outboxTtlDays: Int = TimeUnit.MILLISECONDS.toDays(UploadDefaults.OUTBOX_TTL_MS).toInt(),
 )
 
 @HiltViewModel

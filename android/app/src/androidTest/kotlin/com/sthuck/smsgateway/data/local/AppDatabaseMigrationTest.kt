@@ -63,6 +63,39 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrateV3ToV4AddsContentKeyCountersAndSeedsFromOutbox() {
+        helper.createDatabase(TEST_DB_V3, 3).apply {
+            execSQL(
+                """
+                INSERT INTO queued_messages
+                (deviceMsgId, contentKey, sender, body, receivedAt, direction, simSlot,
+                 createdAtEpochMs, attemptCount, nextAttemptAtEpochMs, lastError, parked)
+                VALUES
+                ('sms-abc-0', 'abc', '+15551234567', 'hello', '2026-11-18T09:45:12Z', 'inbound', 0,
+                 1000, 0, 0, NULL, 0),
+                ('sms-abc-1', 'abc', '+15551234567', 'hello', '2026-11-18T09:45:12Z', 'inbound', 0,
+                 1001, 0, 0, NULL, 0)
+                """.trimIndent(),
+            )
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(
+            TEST_DB_V3,
+            4,
+            true,
+            AppDatabase.MIGRATION_3_4,
+        )
+        migrated.query("SELECT contentKey, nextOrdinal FROM content_key_counters").use { cursor ->
+            assertEquals(1, cursor.count)
+            cursor.moveToFirst()
+            assertEquals("abc", cursor.getString(0))
+            assertEquals(2, cursor.getInt(1))
+        }
+        migrated.close()
+    }
+
+    @Test
     fun exportedSchemaMatchesCurrentVersion() {
         helper.createDatabase(TEST_DB_CURRENT, APP_DATABASE_VERSION).close()
         helper.runMigrationsAndValidate(
@@ -75,6 +108,7 @@ class AppDatabaseMigrationTest {
 
     companion object {
         private const val TEST_DB = "migration-test-v2-v3"
+        private const val TEST_DB_V3 = "migration-test-v3-v4"
         private const val TEST_DB_CURRENT = "migration-test-current"
     }
 }

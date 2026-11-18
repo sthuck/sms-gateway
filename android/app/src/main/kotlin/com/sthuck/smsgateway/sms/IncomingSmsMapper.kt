@@ -1,5 +1,6 @@
 package com.sthuck.smsgateway.sms
 
+import com.sthuck.smsgateway.upload.UploadDefaults
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.time.Instant
@@ -79,11 +80,34 @@ object IncomingSmsMapper {
     ): String = deviceMsgId(contentKey(direction, sender, timestampSeconds, body), ordinal)
 
     /**
-     * Contract `sim_slot`: zero-based slot index, or null if unknown / -1.
+     * Contract `sim_slot`: zero-based slot index 0..9, or null if unknown / out of range.
      */
     fun mapSimSlot(slotIndex: Int?): Int? =
-        if (slotIndex == null || slotIndex < 0) null else slotIndex
+        if (slotIndex == null || slotIndex < 0 || slotIndex > UploadDefaults.MAX_SIM_SLOT) {
+            null
+        } else {
+            slotIndex
+        }
 
+    /** Clip sender to the contract's 64 Unicode code-point cap. */
+    fun clipSender(sender: String): String =
+        takeCodePoints(sender, UploadDefaults.MAX_SENDER_CHARS)
+
+    /** Unicode code-point length (not UTF-16 `String.length`). */
+    fun unicodeLength(value: String): Int = value.codePointCount(0, value.length)
+
+    fun takeCodePoints(value: String, maxCodePoints: Int): String {
+        if (maxCodePoints <= 0) return ""
+        if (unicodeLength(value) <= maxCodePoints) return value
+        var i = 0
+        var count = 0
+        while (i < value.length && count < maxCodePoints) {
+            val cp = value.codePointAt(i)
+            i += Character.charCount(cp)
+            count++
+        }
+        return value.substring(0, i)
+    }
     /**
      * SMSC timestamp as UTC ISO 8601 with a `Z` suffix. Fractional seconds
      * are included when the millisecond value is not a whole second.
@@ -110,9 +134,10 @@ object IncomingSmsMapper {
             if (sender.isEmpty()) continue
             groups.getOrPut(sender) { mutableListOf() }.add(part)
         }
-        return groups.map { (sender, group) ->
+        return groups.map { (rawSender, group) ->
             val first = group.first()
             val body = group.joinToString(separator = "") { it.body }
+            val sender = clipSender(rawSender)
             val seconds = timestampSeconds(first.timestampMillis)
             AssembledSms(
                 sender = sender,
@@ -120,6 +145,7 @@ object IncomingSmsMapper {
                 receivedAt = formatReceivedAt(first.timestampMillis),
                 timestampSeconds = seconds,
                 simSlot = slot,
+                // Hash the clipped sender so device_msg_id stays stable with wire form.
                 contentKey = contentKey(DIRECTION_INBOUND, sender, seconds, body),
                 direction = DIRECTION_INBOUND,
             )

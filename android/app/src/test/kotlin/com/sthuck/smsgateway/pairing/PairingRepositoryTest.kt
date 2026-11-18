@@ -3,6 +3,7 @@ package com.sthuck.smsgateway.pairing
 import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.crypto.DeviceSigner
 import com.sthuck.smsgateway.crypto.PrivateKeyDeviceSigner
+import com.sthuck.smsgateway.data.local.ContentKeyCounterEntity
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.data.local.QueuedMessageEntity
 import com.sthuck.smsgateway.data.remote.DeviceApi
@@ -134,6 +135,8 @@ class PairingRepositoryTest {
         assertTrue("commit before save: $events", commitIdx >= 0 && saveIdx > commitIdx)
         assertTrue("delete previous after save: $events", deleteIdx > saveIdx)
         assertEquals(listOf("alias_a"), keys.deletedAliases)
+        assertEquals(1, dao.unparkCount.get())
+        assertTrue(dao.parkedIds.isEmpty())
     }
 
     @Test
@@ -257,20 +260,29 @@ class PairingRepositoryTest {
     private class FakeQueuedDao : QueuedMessageDao {
         val rows = AtomicInteger(0)
         val deleteAllCount = AtomicInteger(0)
+        val unparkCount = AtomicInteger(0)
+        val parkedIds = mutableSetOf<String>()
 
         override suspend fun getAll(): List<QueuedMessageEntity> = emptyList()
+        override suspend fun countPending(): Int = rows.get() - parkedIds.size
+        override suspend fun countAll(): Int = rows.get()
         override fun observePendingCount(): Flow<Int> = flowOf(rows.get())
-        override fun observeParkedCount(): Flow<Int> = flowOf(0)
+        override fun observeParkedCount(): Flow<Int> = flowOf(parkedIds.size)
         override fun observePendingRecent(limit: Int): Flow<List<QueuedMessageEntity>> =
             flowOf(emptyList())
         override fun observeParkedRecent(limit: Int): Flow<List<QueuedMessageEntity>> =
             flowOf(emptyList())
         override suspend fun countByContentKey(contentKey: String): Int = 0
+        override suspend fun getNextOrdinal(contentKey: String): Int? = null
+        override suspend fun upsertContentKeyCounter(counter: ContentKeyCounterEntity) = Unit
         override suspend fun getReadyForUpload(
             nowEpochMs: Long,
             limit: Int,
         ): List<QueuedMessageEntity> = emptyList()
         override suspend fun earliestPendingAttemptAtEpochMs(): Long? = null
+        override suspend fun getExpiredPending(cutoffEpochMs: Long): List<QueuedMessageEntity> =
+            emptyList()
+        override suspend fun getOldestPending(limit: Int): List<QueuedMessageEntity> = emptyList()
         override suspend fun insert(message: QueuedMessageEntity): Long {
             rows.incrementAndGet()
             return 1L
@@ -280,13 +292,19 @@ class PairingRepositoryTest {
         override suspend fun deleteAll() {
             deleteAllCount.incrementAndGet()
             rows.set(0)
+            parkedIds.clear()
         }
-        override suspend fun park(deviceMsgId: String, error: String, nowEpochMs: Long) = Unit
+        override suspend fun park(deviceMsgId: String, error: String, nowEpochMs: Long) {
+            parkedIds += deviceMsgId
+        }
         override suspend fun markRetry(
             deviceMsgIds: List<String>,
             nextAttemptAtEpochMs: Long,
             error: String?,
         ) = Unit
-        override suspend fun unparkAll(nowEpochMs: Long) = Unit
+        override suspend fun unparkAll(nowEpochMs: Long) {
+            unparkCount.incrementAndGet()
+            parkedIds.clear()
+        }
     }
 }

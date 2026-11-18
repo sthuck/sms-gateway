@@ -19,6 +19,7 @@
     </plurals>
     <string name="status_parked_recent">Recent parked messages</string>
     <string name="status_parked_retry">Retry parked messages</string>
+    <string name="status_outbox_retention">Outbox keeps up to %1$d messages for %2$d days. Older or over-cap rows are parked (not deleted) so you can review them here. Bodies are stored in plaintext on device for now.</string>
 
     <string name="sms_rationale_title">Allow SMS access</string>
     <string name="sms_rationale_body">SMS Gateway reads incoming text messages on this phone so it can forward them to your gateway. It does not send SMS. Receive SMS is used for live delivery; Read SMS is used so the same messages can later be backfilled from the device inbox.</string>
