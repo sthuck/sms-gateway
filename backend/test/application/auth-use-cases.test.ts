@@ -122,6 +122,68 @@ describe("CompleteLogin", () => {
     expect(result.ownerId).toBe("existing-owner");
     expect(ctx.identities.rows[0]?.sub).toBe("sub-1");
   });
+
+  it("does not auto-link when disabled even if email matches", async () => {
+    const ctx = buildCompleteLogin({ autoLinkByEmail: false });
+    ctx.users.users.set("existing-owner", {
+      id: "existing-owner",
+      email: "a@example.com",
+      mfaEnrolled: false,
+      displayName: "Old",
+      lastAuthMethod: null,
+    });
+    const result = await ctx.useCase.execute({
+      callbackUrl: new URL("https://app.example/cb"),
+      sealedState: "s",
+    });
+    expect(result.ownerId).not.toBe("existing-owner");
+    expect(ctx.users.users.size).toBe(2);
+  });
+
+  it("honours session TTL from config via the clock", async () => {
+    const ctx = buildCompleteLogin();
+    const result = await ctx.useCase.execute({
+      callbackUrl: new URL("https://app.example/cb"),
+      sealedState: "s",
+    });
+    const stored = ctx.sessions.byHash.get(ctx.hasher.hash(result.sessionId))!;
+    expect(stored.expiresAt.getTime() - ctx.clock.now().getTime()).toBe(3600_000);
+  });
+
+  it("stores hashed session id and CSRF token, not raw values", async () => {
+    const ctx = buildCompleteLogin();
+    const result = await ctx.useCase.execute({
+      callbackUrl: new URL("https://app.example/cb"),
+      sealedState: "s",
+    });
+    const keys = [...ctx.sessions.byHash.keys()];
+    expect(keys).toEqual([ctx.hasher.hash(result.sessionId)]);
+    expect(ctx.sessions.byHash.get(keys[0]!)!.csrfTokenHash).toBe(
+      ctx.hasher.hash(result.csrfToken),
+    );
+    expect(keys[0]).not.toBe(result.sessionId);
+  });
+
+  it("updates profile on existing identity login", async () => {
+    const ctx = buildCompleteLogin();
+    await ctx.useCase.execute({
+      callbackUrl: new URL("https://app.example/cb"),
+      sealedState: "s",
+    });
+    ctx.oidc.setClaims({
+      sub: "sub-1",
+      email: "renamed@example.com",
+      name: "Ada Lovelace",
+      amr: ["pwd", "otp"],
+    });
+    const second = await ctx.useCase.execute({
+      callbackUrl: new URL("https://app.example/cb"),
+      sealedState: "s",
+    });
+    const user = ctx.users.users.get(second.ownerId)!;
+    expect(user.email).toBe("renamed@example.com");
+    expect(user.displayName).toBe("Ada Lovelace");
+  });
 });
 
 describe("Logout", () => {
@@ -177,12 +239,30 @@ describe("ResolveSession", () => {
     const resolve = new ResolveSession({ sessions, hasher, clock });
     const ok = await resolve.execute({ sessionId: "sid" });
     expect(ok.ownerId).toBe("o1");
-    expect(sessions.touched).toContain(ok.sessionRowId);
+    expect(ok.expiresAt).toEqual(new Date(clock.now().getTime() + 60_000));
+    // Touch must not happen here (CSRF runs first in the HTTP adapter).
+    expect(sessions.touched).toEqual([]);
 
     clock.advanceMs(120_000);
     await expect(resolve.execute({ sessionId: "sid" })).rejects.toMatchObject({
       code: "unauthorized",
     });
+  });
+
+  it("rejects revoked sessions", async () => {
+    const sessions = new MemorySessionRepository();
+    const hasher = new MemoryTokenHasher();
+    const clock = new MemoryClock();
+    await sessions.insert({
+      ownerId: "o1",
+      sessionIdHash: hasher.hash("sid"),
+      csrfTokenHash: hasher.hash("csrf"),
+      expiresAt: new Date(clock.now().getTime() + 60_000),
+    });
+    await sessions.revokeBySessionIdHash("o1", hasher.hash("sid"));
+    await expect(
+      new ResolveSession({ sessions, hasher, clock }).execute({ sessionId: "sid" }),
+    ).rejects.toMatchObject({ code: "unauthorized" });
   });
 });
 
@@ -213,5 +293,22 @@ describe("ResolveBearer", () => {
     jwt.fail = new Error("bad");
     jwt.next = null;
     await expect(resolve.execute({ token: "t" })).rejects.toMatchObject({ code: "unauthorized" });
+  });
+
+  it("rejects unknown issuer/sub", async () => {
+    const identities = new MemoryIdentityRepository();
+    const jwt = new StubJwtVerifier();
+    jwt.next = {
+      payload: { sub: "unknown", amr: ["pwd", "otp"] },
+      sub: "unknown",
+      iss: "https://idp.example",
+    };
+    await expect(
+      new ResolveBearer({
+        jwt,
+        identities,
+        mfa: { requireMfa: true, claimsMissing: "deny" },
+      }).execute({ token: "t" }),
+    ).rejects.toMatchObject({ code: "unauthorized", message: "Unknown identity" });
   });
 });

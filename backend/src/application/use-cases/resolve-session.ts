@@ -21,13 +21,13 @@ export class ResolveSession {
       throw new AuthError("unauthorized", "Session expired or revoked");
     }
 
-    // Best-effort last_seen update; ignore failures at the adapter call site.
-    void this.deps.sessions.touch(session.ownerId, session.sessionRowId).catch(() => undefined);
-
+    // Do not touch last_seen_at here — CSRF/origin must pass first (STH-46).
     return {
       ownerId: session.ownerId,
       sessionRowId: session.sessionRowId,
       csrfTokenHash: session.csrfTokenHash,
+      expiresAt: session.expiresAt,
+      revokedAt: session.revokedAt,
     };
   }
 }

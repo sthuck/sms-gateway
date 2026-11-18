@@ -39,6 +39,8 @@ export type ResolveSessionResult = {
   ownerId: string;
   sessionRowId: string;
   csrfTokenHash: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
 };
 
 export type ResolveBearerInput = {

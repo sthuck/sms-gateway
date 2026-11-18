@@ -2,8 +2,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
 import cookie from "@fastify/cookie";
 import type { Pool, PoolClient } from "pg";
-import type { ResolveBearer } from "../../application/use-cases/resolve-bearer.js";
-import type { ResolveSession } from "../../application/use-cases/resolve-session.js";
+import type {
+  CompleteLogin,
+  GetMe,
+  Logout,
+  ResolveBearer,
+  ResolveSession,
+  StartLogin,
+} from "../../application/use-cases/index.js";
 import { AuthError } from "../../domain/auth/errors.js";
 import type { Session } from "../../domain/auth/types.js";
 import type { JwtVerifier } from "../../ports/outbound/jwt-verifier.js";
@@ -12,12 +18,6 @@ import type { OidcAuthConfig } from "../auth-oidc/oidc-config.js";
 import { withOwner } from "../db-postgres/with-owner.js";
 import { allowedOriginsFromConfig, csrfTokensMatch, isSafeMethod, originAllowed } from "./csrf.js";
 import { sendProblem } from "./problems.js";
-import type {
-  CompleteLogin,
-  GetMe,
-  Logout,
-  StartLogin,
-} from "../../application/use-cases/index.js";
 
 export type AuthRequestContext = {
   ownerId: string;
@@ -26,12 +26,12 @@ export type AuthRequestContext = {
 };
 
 export type AuthUseCases = {
-  startLogin: StartLogin;
-  completeLogin: CompleteLogin;
-  logout: Logout;
-  getMe: GetMe;
-  resolveSession: ResolveSession;
-  resolveBearer: ResolveBearer;
+  startLogin: StartLogin | null;
+  completeLogin: CompleteLogin | null;
+  logout: Logout | null;
+  getMe: GetMe | null;
+  resolveSession: ResolveSession | null;
+  resolveBearer: ResolveBearer | null;
 };
 
 declare module "fastify" {
@@ -57,22 +57,20 @@ declare module "fastify" {
 export type AuthPluginOptions = {
   config: OidcAuthConfig | null;
   pool: Pool | null;
+  /** Inject a pre-built JWT verifier (tests). */
   jwtVerifier?: JwtVerifier | null | undefined;
+  /** Inject a pre-built OIDC provider (tests). */
   oidcProvider?: OidcProvider | null | undefined;
   useCases?: AuthUseCases | null | undefined;
-  /** @deprecated tests may still pass oidcClient; prefer oidcProvider */
-  oidcClient?: OidcProvider | null | undefined;
   skipDiscovery?: boolean | undefined;
 };
 
 async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Promise<void> {
   await app.register(cookie);
 
-  const oidcProvider = opts.oidcProvider ?? opts.oidcClient ?? null;
-
   app.decorate("authConfig", opts.config);
   app.decorate("dbPool", opts.pool);
-  app.decorate("oidcProvider", oidcProvider);
+  app.decorate("oidcProvider", opts.oidcProvider ?? null);
   app.decorate("jwtVerifier", opts.jwtVerifier ?? null);
   app.decorate("authUseCases", opts.useCases ?? null);
 
@@ -112,16 +110,15 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
     return;
   }
 
-  if (!useCases) {
-    sendProblem(reply, "auth_misconfigured", 503, "Auth use cases are not configured", {
-      retryable: true,
-      instance: request.url,
-    });
-    return;
-  }
-
   const bearer = extractBearer(request.headers.authorization);
   if (bearer) {
+    if (!useCases?.resolveBearer) {
+      // Match main: missing config/verifier → 401, not 503 (STH-46).
+      sendProblem(reply, "unauthorized", 401, "Missing or invalid access token", {
+        instance: request.url,
+      });
+      return;
+    }
     try {
       const resolved = await useCases.resolveBearer.execute({ token: bearer });
       bindAuth(request, pool, {
@@ -130,7 +127,7 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
         session: null,
       });
     } catch (err) {
-      mapAuthError(reply, request, err, "Missing or invalid access token");
+      mapAuthError(reply, request, err);
     }
     return;
   }
@@ -150,11 +147,18 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
     return;
   }
 
+  if (!useCases?.resolveSession) {
+    sendProblem(reply, "unauthorized", 401, "Missing or invalid access token", {
+      instance: request.url,
+    });
+    return;
+  }
+
   let resolved;
   try {
     resolved = await useCases.resolveSession.execute({ sessionId });
   } catch (err) {
-    mapAuthError(reply, request, err, "Session expired or revoked");
+    mapAuthError(reply, request, err);
     return;
   }
 
@@ -191,27 +195,29 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
       sessionRowId: resolved.sessionRowId,
       ownerId: resolved.ownerId,
       csrfTokenHash: resolved.csrfTokenHash,
-      expiresAt: new Date(0),
-      revokedAt: null,
+      expiresAt: resolved.expiresAt,
+      revokedAt: resolved.revokedAt,
     },
   });
+
+  // Best-effort last_seen update after CSRF/origin succeed (STH-46).
+  void withOwner(pool, resolved.ownerId, async (client) => {
+    await client.query(`UPDATE sessions SET last_seen_at = now() WHERE id = $1`, [
+      resolved.sessionRowId,
+    ]);
+  }).catch(() => undefined);
 }
 
-function mapAuthError(
-  reply: FastifyReply,
-  request: FastifyRequest,
-  err: unknown,
-  fallbackDetail: string,
-): void {
-  if (err instanceof AuthError) {
-    if (err.code === "mfa_required") {
-      sendProblem(reply, "mfa_required", 401, err.message, { instance: request.url });
-      return;
-    }
-    sendProblem(reply, "unauthorized", 401, err.message, { instance: request.url });
+function mapAuthError(reply: FastifyReply, request: FastifyRequest, err: unknown): void {
+  if (!(err instanceof AuthError)) {
+    // Infra errors (e.g. Postgres down) must surface as 500 like main (STH-46).
+    throw err;
+  }
+  if (err.code === "mfa_required") {
+    sendProblem(reply, "mfa_required", 401, err.message, { instance: request.url });
     return;
   }
-  sendProblem(reply, "unauthorized", 401, fallbackDetail, { instance: request.url });
+  sendProblem(reply, "unauthorized", 401, err.message, { instance: request.url });
 }
 
 function bindAuth(request: FastifyRequest, pool: Pool, auth: AuthRequestContext): void {

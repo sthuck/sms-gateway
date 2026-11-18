@@ -6,20 +6,20 @@ and ingestion onto the same pattern.
 
 ## Layers
 
-| Layer       | Path                                  | May depend on                          |
+| Layer       | Path                                  | May depend on (allow-list)             |
 | ----------- | ------------------------------------- | -------------------------------------- |
-| Domain      | `src/domain/`                         | Nothing outside domain (pure TS)       |
-| Ports       | `src/ports/`                          | Domain types only                      |
-| Application | `src/application/use-cases/`          | Domain + ports                         |
+| Domain      | `src/domain/`                         | `src/domain` only (pure TS)            |
+| Ports       | `src/ports/`                          | `src/domain` + other ports             |
+| Application | `src/application/use-cases/`          | `src/domain` + `src/ports` (+ self)    |
 | Adapters    | `src/adapters/*`                      | Domain, ports, application, frameworks |
 | Composition | `src/composition/`                    | Everything (wiring only)               |
 | Entrypoints | `src/index.ts`, `worker.ts`, `mcp.ts` | Composition + thin bootstrap           |
 
-Dependency rule: **inward only**. Domain and application never import
-Fastify, `pg`, `drizzle-orm`, `openid-client`, `jose`, or adapter modules.
-
-Enforced by `dependency-cruiser` (`pnpm lint:arch`) and a negative proof
-in `test/architecture/`.
+Dependency rule: **inward only**, enforced as allow-lists in
+`.dependency-cruiser.cjs` (`pnpm lint:arch`). Domain/application/ports
+must not import adapters, `src/config.ts`, `src/app.ts`, or any npm
+package (pg, fastify, openid-client, jose, drizzle-orm, pg-boss, pino,
+undici, …). Negative proof lives in `test/architecture/`.
 
 ## Auth slice map
 

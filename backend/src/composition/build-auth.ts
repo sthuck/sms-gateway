@@ -46,9 +46,9 @@ export type AuthStack = {
 
 export async function buildAuthStack(options: BuildAuthStackOptions): Promise<AuthStack> {
   const { config, pool } = options;
-  if (!config || !pool) {
+  if (!config) {
     return {
-      config,
+      config: null,
       oidcProvider: null,
       jwtVerifier: null,
       useCases: null,
@@ -69,13 +69,22 @@ export async function buildAuthStack(options: BuildAuthStackOptions): Promise<Au
     }
   }
 
-  if (!oidcProvider || !jwtVerifier) {
-    // Partially configured (e.g. tests with skipDiscovery but missing stubs).
+  // Login only needs OIDC (main: 302 with config+oidc even when pool is null).
+  const startLogin = oidcProvider ? new StartLogin({ oidc: oidcProvider }) : null;
+
+  if (!pool || !oidcProvider || !jwtVerifier) {
     return {
       config,
       oidcProvider,
       jwtVerifier,
-      useCases: null,
+      useCases: {
+        startLogin,
+        completeLogin: null,
+        logout: null,
+        getMe: null,
+        resolveSession: null,
+        resolveBearer: null,
+      },
     };
   }
 
@@ -87,7 +96,7 @@ export async function buildAuthStack(options: BuildAuthStackOptions): Promise<Au
   const clock = systemClock;
 
   const useCases: AuthUseCases = {
-    startLogin: new StartLogin({ oidc: oidcProvider }),
+    startLogin,
     completeLogin: new CompleteLogin({
       oidc: oidcProvider,
       identities,

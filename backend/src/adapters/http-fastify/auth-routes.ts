@@ -16,8 +16,9 @@ function secureCookies(nodeEnv: string): boolean {
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/auth/login", async (request, reply) => {
     const config = app.authConfig;
-    const useCases = app.authUseCases;
-    if (!config || !useCases) {
+    // Match main: login needs config + OIDC client, not a DB pool (STH-46).
+    const startLogin = app.authUseCases?.startLogin ?? null;
+    if (!config || !startLogin) {
       return sendProblem(
         reply,
         "auth_misconfigured",
@@ -28,7 +29,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const { redirectUrl, sealedState } = await useCases.startLogin.execute();
+      const { redirectUrl, sealedState } = await startLogin.execute();
       reply.setCookie(config.oauthStateCookieName, sealedState, {
         ...cookieBase,
         secure: secureCookies(configAsNodeEnv()),
@@ -46,9 +47,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/v1/auth/callback", async (request, reply) => {
     const config = app.authConfig;
-    const useCases = app.authUseCases;
+    const completeLogin = app.authUseCases?.completeLogin ?? null;
+    const pool = app.dbPool;
 
-    if (!config || !useCases) {
+    // Match main: callback needs config + oidc + pool.
+    if (!config || !completeLogin || !pool) {
       return sendProblem(reply, "auth_misconfigured", 503, "OIDC is not configured", {
         retryable: true,
         instance: request.url,
@@ -76,7 +79,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await useCases.completeLogin.execute({ callbackUrl, sealedState });
+      const result = await completeLogin.execute({ callbackUrl, sealedState });
       const secure = secureCookies(configAsNodeEnv());
 
       reply.setCookie(config.sessionCookieName, result.sessionId, {
@@ -121,8 +124,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/v1/auth/logout", async (request, reply) => {
     const config = app.authConfig;
-    const useCases = app.authUseCases;
-    if (!config || !useCases) {
+    const logout = app.authUseCases?.logout ?? null;
+    const pool = app.dbPool;
+    if (!config || !logout || !pool) {
       return sendProblem(reply, "auth_misconfigured", 503, "OIDC is not configured", {
         retryable: true,
         instance: request.url,
@@ -130,7 +134,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const sessionId = request.cookies[config.sessionCookieName];
-    await useCases.logout.execute({ sessionId });
+    await logout.execute({ sessionId });
 
     reply.clearCookie(config.sessionCookieName, { path: "/" });
     reply.clearCookie(config.csrfCookieName, { path: "/" });
@@ -142,15 +146,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     "/v1/auth/me",
     { preHandler: requireUserAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const useCases = app.authUseCases;
-      if (!request.ownerId || !request.auth || !useCases) {
+      const getMe = app.authUseCases?.getMe ?? null;
+      if (!request.ownerId || !request.auth || !getMe) {
         return sendProblem(reply, "unauthorized", 401, "Missing or invalid access token", {
           instance: request.url,
         });
       }
 
       try {
-        const me = await useCases.getMe.execute({
+        const me = await getMe.execute({
           ownerId: request.ownerId,
           authMethod: request.auth.authMethod,
         });

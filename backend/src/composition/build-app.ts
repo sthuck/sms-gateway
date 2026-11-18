@@ -79,7 +79,7 @@ export async function buildApp(
       config: authConfig,
       pool,
       jwtVerifier: options.auth?.jwtVerifier,
-      oidcProvider: options.auth?.oidcProvider ?? options.auth?.oidcClient,
+      oidcProvider: options.auth?.oidcProvider,
       skipDiscovery: options.auth?.skipDiscovery ?? false,
     });
   } catch (err) {

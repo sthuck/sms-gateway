@@ -2,49 +2,32 @@
 module.exports = {
   forbidden: [
     {
-      name: "domain-no-adapters",
-      comment: "Domain must stay pure — no adapters or frameworks.",
+      name: "domain-allowlist",
+      comment: "Domain may only import other domain modules (pure TS).",
       severity: "error",
       from: { path: "^src/domain" },
-      to: {
-        path: "^src/adapters|^src/composition|^src/device|^src/queue|^src/routes",
-      },
+      to: { pathNot: "^src/domain" },
     },
     {
-      name: "domain-no-frameworks",
-      comment: "Domain must not import Fastify, pg, drizzle, openid-client, or jose.",
-      severity: "error",
-      from: { path: "^src/domain" },
-      to: {
-        path: "node_modules/(fastify|@fastify|pg|drizzle-orm|openid-client|jose)/",
-        pathNot: "node_modules/dependency-cruiser",
-      },
-    },
-    {
-      name: "application-no-adapters",
-      comment: "Application use cases depend only on ports/domain.",
+      name: "application-allowlist",
+      comment: "Application may only import domain, ports, and other application modules.",
       severity: "error",
       from: { path: "^src/application" },
-      to: {
-        path: "^src/adapters|^src/composition|^src/device|^src/queue|^src/routes",
-      },
+      to: { pathNot: "^src/(domain|application|ports)" },
     },
     {
-      name: "application-no-frameworks",
-      comment: "Application must not import Fastify, pg, drizzle, openid-client, or jose.",
-      severity: "error",
-      from: { path: "^src/application" },
-      to: {
-        path: "node_modules/(fastify|@fastify|pg|drizzle-orm|openid-client|jose)/",
-      },
-    },
-    {
-      name: "ports-no-adapters",
+      name: "ports-allowlist",
+      comment: "Ports may only import domain types and other ports.",
       severity: "error",
       from: { path: "^src/ports" },
-      to: {
-        path: "^src/adapters|^src/composition|^src/application|^src/device|^src/queue",
-      },
+      to: { pathNot: "^src/(domain|ports)" },
+    },
+    {
+      name: "application-no-config-shim",
+      comment: "Application must not import src/config.ts or src/app.ts.",
+      severity: "error",
+      from: { path: "^src/application" },
+      to: { path: "^src/(config|app)\\." },
     },
   ],
   options: {

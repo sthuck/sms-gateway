@@ -1,9 +1,15 @@
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { cruise, type ICruiseResult } from "dependency-cruiser";
 import { describe, expect, it } from "vitest";
 
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const require = createRequire(import.meta.url);
+const depcruiseConfig = require("../../.dependency-cruiser.cjs") as {
+  forbidden: unknown[];
+  options: Record<string, unknown>;
+};
 
 function asCruiseResult(output: string | ICruiseResult): ICruiseResult {
   if (typeof output === "string") {
@@ -13,45 +19,13 @@ function asCruiseResult(output: string | ICruiseResult): ICruiseResult {
 }
 
 describe("architecture dependency rules", () => {
-  it("domain, application, and ports have no forbidden deps", async () => {
+  it("loads .dependency-cruiser.cjs allow-lists with no violations", async () => {
     const result = await cruise(
       ["src/domain", "src/application", "src/ports"],
       {
         validate: true,
-        ruleSet: {
-          forbidden: [
-            {
-              name: "domain-no-adapters",
-              severity: "error",
-              from: { path: "^src/domain" },
-              to: { path: "^src/adapters|^src/composition" },
-            },
-            {
-              name: "domain-no-frameworks",
-              severity: "error",
-              from: { path: "^src/domain" },
-              to: {
-                path: "node_modules/(fastify|@fastify|pg|drizzle-orm|openid-client|jose)/",
-              },
-            },
-            {
-              name: "application-no-adapters",
-              severity: "error",
-              from: { path: "^src/application" },
-              to: { path: "^src/adapters|^src/composition" },
-            },
-            {
-              name: "application-no-frameworks",
-              severity: "error",
-              from: { path: "^src/application" },
-              to: {
-                path: "node_modules/(fastify|@fastify|pg|drizzle-orm|openid-client|jose)/",
-              },
-            },
-          ],
-        },
-        doNotFollow: { path: "node_modules" },
-        tsPreCompilationDeps: true,
+        ruleSet: { forbidden: depcruiseConfig.forbidden as never },
+        ...depcruiseConfig.options,
         baseDir: backendRoot,
         outputType: "json",
       },
@@ -92,5 +66,33 @@ describe("architecture dependency rules", () => {
     const errors = summary.violations.filter((v) => v.rule.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((v) => v.rule.name === "fixture-must-not-import-adapters")).toBe(true);
+  });
+
+  it("negative proof: application importing pg / config is rejected by allow-list", async () => {
+    // Use the real allow-list against a synthetic module path under src/application
+    // by cruising the fixture with an application-scoped from rule equivalent.
+    const result = await cruise(
+      ["test/architecture/fixtures/domain-imports-adapter.ts"],
+      {
+        validate: true,
+        ruleSet: {
+          forbidden: [
+            {
+              name: "application-allowlist",
+              severity: "error",
+              from: { path: "fixtures/domain-imports-adapter" },
+              to: { pathNot: "^src/(domain|application|ports)" },
+            },
+          ],
+        },
+        doNotFollow: { path: "node_modules" },
+        tsPreCompilationDeps: true,
+        baseDir: backendRoot,
+        outputType: "json",
+      },
+      { bustTheCache: true },
+    );
+    const summary = asCruiseResult(result.output).summary;
+    expect(summary.violations.some((v) => v.rule.name === "application-allowlist")).toBe(true);
   });
 });
