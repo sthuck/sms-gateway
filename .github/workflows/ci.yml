@@ -102,6 +102,7 @@ jobs:
           pnpm migrate:down
           pnpm migrate:down
           pnpm migrate:down
+          pnpm migrate:down
           pnpm migrate:up
       - name: Test
         run: pnpm test

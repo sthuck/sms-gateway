@@ -244,6 +244,11 @@ pinned, `EXECUTE` granted only to `sms_app`):
 | `app.lookup_session(session_id_hash)` | Returns session owner / CSRF hash / expiry (STH-9). |
 | `app.lookup_user_by_email(email)` | Optional email auto-link only (`AUTO_LINK_BY_EMAIL`). |
 
+Shared (non-RLS) support tables in schema `app` for multi-instance device auth
+(STH-14): `app.device_replay_cache` (nonce/signature TTL 360 s) and
+`app.rate_limit_buckets` (pair IP / global invalid counters). See
+`docs/pairing.md`.
+
 Pattern:
 
 1. Call the lookup function (no `app.owner_id` yet).

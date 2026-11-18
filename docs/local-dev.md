@@ -83,23 +83,36 @@ npx @stoplight/prism-cli mock docs/contracts/device-api.yaml -h 0.0.0.0 -p 4010
 The contract documents a cleartext-HTTP exception for this emulator
 mock only. Production remains HTTPS.
 
-### Signature verification is not enforced
+### Signature verification is not enforced on the Prism mock
 
 Prism (and any pure OpenAPI mock) validates request **shape** against the
 schema. It does **not** verify ECDSA request signatures, timestamps,
 nonces, or content hashes described in `docs/contracts/device-signing.md`.
-Treat mock responses as contract scaffolding only. Real signature
-verification belongs in the backend (future work).
+Treat mock responses as contract scaffolding only.
+
+The real backend (`:8080`) implements pairing, device registration, and
+signed-request verification (STH-14). Prefer it for end-to-end pairing
+from the emulator. See `docs/pairing.md`.
 
 ## Android emulator networking
 
 The Android emulator reaches the host machine at `10.0.2.2`. Point the
 app at:
 
-- Real local API: `http://10.0.2.2:8080`
-- Contract mock: `http://10.0.2.2:4010`
+- Real local API (pairing + signatures): `http://10.0.2.2:8080`
+- Contract mock (shape only): `http://10.0.2.2:4010`
 
 Both Compose services bind `0.0.0.0` so the emulator can connect.
+
+To pair against the real backend from the emulator:
+
+1. Start Compose (`docker compose up --build`) and run migrations.
+2. Configure OIDC (or use a session from the web UI) and issue a code via
+   `POST /v1/pairing-codes`.
+3. Set `DEVICE_API_PUBLIC_URL=http://10.0.2.2:8080` so the QR `server`
+   parameter matches the host the app will call.
+4. Ensure `DEVICE_ALLOWED_HOSTS` includes `10.0.2.2:8080` (local default).
+5. Scan the QR / enter the code in the Android `dev` flavour.
 
 ## Signing test vector
 

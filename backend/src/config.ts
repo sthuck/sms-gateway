@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { loadOidcAuthConfig, type OidcAuthConfig } from "./auth/oidc-config.js";
+import { loadDeviceAuthConfig, type DeviceAuthConfig } from "./device/config.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -21,12 +22,93 @@ const envSchema = z.object({
   LLM_API_KEY: z.string().optional(),
   /** Comma-separated browser origins allowed for CORS (and CSRF Origin checks). */
   CORS_ALLOWED_ORIGINS: z.string().optional().default(""),
+  /**
+   * Fastify trustProxy for request.ip (rate limits / audit).
+   * - `false` (default) / empty: trust nothing
+   * - `true`: trust every hop (unsafe; prefer CIDR; warns in production)
+   * - digits: hop count (`0` = none, `1` = one hop)
+   * - comma-separated proxy IPs/CIDRs: trust those peers only
+   * Never parse X-Forwarded-For by hand.
+   */
+  TRUST_PROXY: z.string().optional().default("false"),
 });
 
-export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS"> & {
+export type TrustProxyOption = boolean | number | string | string[];
+
+/** Fastify's typed trustProxy shape (types omit hop-count numbers). */
+export type FastifyTrustProxy =
+  boolean | string | string[] | ((address: string, hop: number) => boolean);
+
+export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS" | "TRUST_PROXY"> & {
   corsAllowedOrigins: string[];
+  trustProxy: TrustProxyOption;
   oidc: OidcAuthConfig | null;
+  deviceAuth: DeviceAuthConfig;
 };
+
+/** Loose IPv4 / IPv6 / CIDR check for TRUST_PROXY list entries. */
+export function isProxyAddress(entry: string): boolean {
+  if (/^(?:\d{1,3}\.){3}\d{1,3}(?:\/(?:3[0-2]|[12]?\d))?$/.test(entry)) {
+    const [ip] = entry.split("/");
+    return ip!
+      .split(".")
+      .map(Number)
+      .every((o) => o <= 255);
+  }
+  if (entry.includes(":")) {
+    const [addr, prefix] = entry.split("/");
+    if (prefix !== undefined && !/^(?:12[0-8]|1[01]\d|[1-9]?\d)$/.test(prefix)) {
+      return false;
+    }
+    return /^[0-9a-fA-F:]+$/.test(addr!) && (addr!.match(/:/g)?.length ?? 0) >= 1;
+  }
+  return false;
+}
+
+/**
+ * Parse TRUST_PROXY (STH-38/42).
+ *
+ * Only the words `true` / `false` are booleans. All-digit values are hop
+ * counts (`0` = none, `1` = one hop) — never boolean. Anything else must be
+ * an explicit proxy IP/CIDR list. Prefer CIDRs in production; `true` trusts
+ * every hop and lets clients spoof X-Forwarded-For.
+ */
+export function parseTrustProxy(raw: string | undefined): TrustProxyOption {
+  if (raw === undefined) return false;
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed === "false") return false;
+  if (trimmed === "true") return true;
+  if (/^\d+$/.test(trimmed)) {
+    const hops = Number(trimmed);
+    return hops === 0 ? false : hops;
+  }
+  const parts = trimmed
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return false;
+  for (const part of parts) {
+    if (!isProxyAddress(part)) {
+      throw new Error(
+        `Invalid TRUST_PROXY entry "${part}": use false, true, a hop count, or IP/CIDR list`,
+      );
+    }
+  }
+  if (parts.length === 1) return parts[0]!;
+  return parts;
+}
+
+/**
+ * Map our TrustProxyOption onto Fastify's typed trustProxy.
+ * Hop counts become `(address, hop) => hop < n` (same as proxy-addr).
+ */
+export function toFastifyTrustProxy(opt: TrustProxyOption): FastifyTrustProxy {
+  if (typeof opt === "number") {
+    const hops = opt;
+    return (_address, hop) => hop < hops;
+  }
+  return opt;
+}
 
 export function parseCorsAllowedOrigins(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -45,7 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Invalid configuration: ${details}`);
   }
 
-  const { CORS_ALLOWED_ORIGINS: corsRaw, ...rest } = parsed.data;
+  const { CORS_ALLOWED_ORIGINS: corsRaw, TRUST_PROXY: trustProxyRaw, ...rest } = parsed.data;
   const corsAllowedOrigins = parseCorsAllowedOrigins(corsRaw);
   for (const origin of corsAllowedOrigins) {
     try {
@@ -56,14 +138,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     }
   }
 
+  let trustProxy: TrustProxyOption;
+  try {
+    trustProxy = parseTrustProxy(trustProxyRaw);
+  } catch (err) {
+    throw new Error(`Invalid configuration: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (trustProxy === true && rest.NODE_ENV === "production") {
+    // Bare true trusts every XFF hop (client-controlled). Prefer CIDR/IP list.
+    console.warn(
+      "[config] TRUST_PROXY=true trusts every forwarded hop; prefer an explicit proxy IP/CIDR list",
+    );
+  }
+
   const oidc = loadOidcAuthConfig(env, { nodeEnv: rest.NODE_ENV });
   if (oidc && corsAllowedOrigins.length > 0) {
     oidc.corsAllowedOrigins = corsAllowedOrigins;
   }
 
+  const deviceAuth = loadDeviceAuthConfig(env, {
+    publicBaseUrl: oidc?.publicBaseUrl ?? null,
+  });
+
   return {
     ...rest,
     corsAllowedOrigins,
+    trustProxy,
     oidc,
+    deviceAuth,
   };
 }

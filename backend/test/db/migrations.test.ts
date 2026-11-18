@@ -38,10 +38,14 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
     );
     expect(Number(afterUp.rows[0]?.count)).toBeGreaterThan(0);
 
-    await runMigrations("down"); // queue-processed-jobs
-    await runMigrations("down"); // auth-sessions
-    await runMigrations("down"); // rls-policies
-    await runMigrations("down"); // initial-schema
+    // Drain every applied migration (initial, rls, auth, queue, device-auth).
+    for (let i = 0; i < 20; i++) {
+      const { rows } = await admin.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM pgmigrations`,
+      );
+      if (Number(rows[0]?.count ?? 0) === 0) break;
+      await runMigrations("down");
+    }
 
     tables = await listOwnedTables(admin);
     expect(tables).toHaveLength(0);
@@ -70,5 +74,20 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
         AND (NOT cls.relrowsecurity OR NOT cls.relforcerowsecurity)
     `);
     expect(rows[0]?.missing_force).toBe(0);
+  }, 180_000);
+
+  it("orders queue migration before device-auth (STH-40 / #5+#6)", async () => {
+    await resetSchema(admin);
+    await runMigrations("up");
+
+    const { rows } = await admin.query<{ name: string }>(
+      `SELECT name FROM pgmigrations ORDER BY name`,
+    );
+    const names = rows.map((r) => r.name);
+    expect(names).toContain("1795001000000_queue-processed-jobs");
+    expect(names).toContain("1795002000000_device-auth-support");
+    expect(names.indexOf("1795001000000_queue-processed-jobs")).toBeLessThan(
+      names.indexOf("1795002000000_device-auth-support"),
+    );
   }, 180_000);
 });
