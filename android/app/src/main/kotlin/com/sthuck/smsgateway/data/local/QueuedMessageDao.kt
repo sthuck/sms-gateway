@@ -25,4 +25,7 @@ interface QueuedMessageDao {
 
     @Query("DELETE FROM queued_messages WHERE deviceMsgId = :deviceMsgId")
     suspend fun deleteById(deviceMsgId: String)
+
+    @Query("DELETE FROM queued_messages")
+    suspend fun deleteAll()
 }

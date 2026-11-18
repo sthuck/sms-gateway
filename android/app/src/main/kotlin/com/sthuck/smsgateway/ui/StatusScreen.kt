@@ -34,6 +34,9 @@ fun StatusScreen(
     state: StatusUiState,
     onGrantSmsClick: () -> Unit,
     onOpenSettingsClick: () -> Unit,
+    onUnpairClick: () -> Unit = {},
+    onConfirmUnpair: () -> Unit = {},
+    onDismissUnpair: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -59,6 +62,24 @@ fun StatusScreen(
             StatusRow(stringResource(R.string.status_backend), state.backendUrl)
             StatusRow(stringResource(R.string.status_version), state.versionName)
             StatusRow(stringResource(R.string.status_pairing), state.pairingStatus)
+            if (state.deviceId != null) {
+                if (state.unpairConfirmVisible) {
+                    Text(
+                        text = stringResource(R.string.unpair_confirm_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Button(onClick = onConfirmUnpair, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.unpair_confirm))
+                    }
+                    OutlinedButton(onClick = onDismissUnpair, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.unpair_cancel))
+                    }
+                } else {
+                    OutlinedButton(onClick = onUnpairClick, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.unpair_action))
+                    }
+                }
+            }
             StatusRow(
                 stringResource(R.string.status_queue),
                 pluralStringResource(R.plurals.status_queue_count, state.queuedCount, state.queuedCount),

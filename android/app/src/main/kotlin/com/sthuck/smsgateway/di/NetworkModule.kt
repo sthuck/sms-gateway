@@ -1,7 +1,11 @@
 package com.sthuck.smsgateway.di
 
 import com.sthuck.smsgateway.BuildConfig
+import com.sthuck.smsgateway.crypto.DeviceKeyStore
+import com.sthuck.smsgateway.crypto.DeviceSigner
+import com.sthuck.smsgateway.data.remote.BackendUrlInterceptor
 import com.sthuck.smsgateway.data.remote.DeviceApi
+import com.sthuck.smsgateway.data.remote.RequestSigningInterceptor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -29,9 +33,17 @@ object NetworkModule {
     }
 
     @Provides
+    fun deviceSigner(deviceKeyStore: DeviceKeyStore): DeviceSigner = deviceKeyStore.signer()
+
+    @Provides
     @Singleton
-    fun okHttpClient(): OkHttpClient {
+    fun okHttpClient(
+        backendUrlInterceptor: BackendUrlInterceptor,
+        requestSigningInterceptor: RequestSigningInterceptor,
+    ): OkHttpClient {
         val builder = OkHttpClient.Builder()
+            .addInterceptor(backendUrlInterceptor)
+            .addInterceptor(requestSigningInterceptor)
         if (BuildConfig.DEBUG) {
             // BASIC only: message bodies, pairing codes, and signatures must not be logged.
             builder.addInterceptor(
@@ -47,8 +59,9 @@ object NetworkModule {
     @Singleton
     fun retrofit(client: OkHttpClient, json: Json): Retrofit {
         val contentType = "application/json".toMediaType()
+        // Placeholder; BackendUrlInterceptor rewrites host/scheme/port.
         return Retrofit.Builder()
-            .baseUrl(trailingSlash(BuildConfig.BACKEND_URL))
+            .baseUrl("http://localhost/")
             .client(client)
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
@@ -57,6 +70,4 @@ object NetworkModule {
     @Provides
     @Singleton
     fun deviceApi(retrofit: Retrofit): DeviceApi = retrofit.create(DeviceApi::class.java)
-
-    private fun trailingSlash(url: String): String = if (url.endsWith("/")) url else "$url/"
 }
