@@ -99,3 +99,27 @@ Entries are appended by the reviewer. HIGH-severity findings are tracked in Line
 | 2026-11-18 | Android | AndroidManifest.xml:59-65, BootUploadReceiver.kt:16-22 | low | BootUploadReceiver is exported + directBootAware but credential-encrypted storage may be unavailable at locked boot. | Drop directBootAware or handle locked state. |
 | 2026-11-18 | Android | OutboxUploader.kt:27 | low | Unused UploadPassResult.Failed. | Remove. |
 | 2026-11-18 | Android | BatchPacker.kt:34-35 | low | Comment says body_too_large for a single oversized item, but the uploader parks it as payload_too_large. | Fix the comment. |
+
+## 2026-11-18 — PR #18 (Android outbox follow-ups) and PR #19 (Backend device/queue hexagonal move)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-18 | Android | OutboxUploader.kt:54, StatusViewModel.kt:133-134 | medium | retryParked() unparks, then runOnce runs enforceLimits first and re-parks expired_ttl rows, so Retry cannot upload unsent SMS older than 7 days (rows stay visible, not deleted). | Skip the TTL re-park on an explicit Retry, or add a grace flag. |
+| 2026-11-18 | Android | AppDatabase.kt:58-59 (MIGRATION_3_4 seed) | medium | Seed uses COUNT(*), wrong when earlier ordinals were already deleted (should be max(ordinal)+1); fully drained pre-upgrade contentKeys get no counter, so a later same-key SMS can reuse ordinal 0 and hit backend duplicate. Migration test covers only the dense in-outbox case. | Seed with max(ordinal)+1 and add a drained-case migration test. |
+| 2026-11-18 | Android | UploadScheduler.kt:83-87 | medium | delay-0 REPLACE can cancel an in-flight drain; no data loss given duplicate->delete, but bursts can thrash the worker. UploadSchedulerPolicyTest only asserts the helper. | REPLACE only when existing work is delayed; APPEND_OR_REPLACE when it is running. |
+| 2026-11-18 | Android | retryAfterDelayMs | low | RateLimit-Reset still ignored. | Parse it. |
+| 2026-11-18 | Android | status screen/docs | low | 'up to 2 000 messages for 7 days' understates unbounded parked plaintext rows. | Reword the retention copy. |
+| 2026-11-18 | Android | SmsGatewayApplication.kt:52-55 | low | runBlocking on the main thread for alias restore (race fixed; small ANR risk). | Restore off the main thread but before enqueue. |
+| 2026-11-18 | Android | content_key_counters | low | No TTL on counters. | Add cleanup. |
+| 2026-11-18 | Android | housekeeping tests | low | Omit the unpark-then-enforceLimits case. | Add it. |
+| 2026-11-18 | Backend | backend/test/device/parity-matrix.test.ts | medium | Static table asserting against its own constants; never calls the app. | Drive the real app or remove. |
+| 2026-11-18 | Backend | backend/test/auth/failure-modes.test.ts ('pairing-codes DB failure') | medium | Fails the session lookup first so it never reaches the pairing_codes insert. | Use a healthy session with a fault on just that insert. |
+| 2026-11-18 | Backend | HTTP-level tests | medium | No infra-failure tests for pair, /v1/devices/me, revoke, replay claim; no unit tests for the five new use cases (repository-contract tests do cover all new Postgres port methods). | Add them. |
+| 2026-11-18 | Backend | backend/src/adapters/http-fastify/device-routes.ts (pair catch) | low | A DB error in the rate-limit check, noteInvalidCode or the proof-of-possession replay claim returns 500 'Failed to pair device' (main: 500 'Unexpected error'); status/code/retryable same but RateLimit headers no longer set on that 500. | Keep headers or accept. |
+| 2026-11-18 | Backend | adapters/http-fastify/pair-auth.ts, device-routes.ts | low | pair-auth.ts calls db-postgres/replay-cache directly instead of the ReplayCache port and duplicates header/skew/hash checks owned by ResolveDeviceAuth; device-routes.ts imports rateLimitHeaders from db-postgres. | Add a PairProofOfPossession use case later. |
+| 2026-11-18 | Backend | device-routes.ts revoke handler | low | Now checks not-configured (503) before UUID validity (400); the 400's instance drops the query string. | Restore main's order. |
+| 2026-11-18 | Backend | the five new device use cases | low | Wrap any non-DeviceError as InfrastructureError('... failed'), so programmer bugs are labelled infra in logs (500 is the same as main). | Only wrap known infra errors. |
+| 2026-11-18 | Backend | QueuePublisher / PgBossQueuePublisher | low | Not wired into buildDeviceStack or any route yet (groundwork for PR C). | None, note only. |
+| 2026-11-18 | Backend | lint:auth-errors | low | No longer scans src/routes, src/device, src/queue; nothing there catches errors today. | Re-add if error handling appears there. |
+| 2026-11-18 | Backend | domain isTimestampInWindow | low | Lost its default skewSec. | Restore default or confirm callers pass it. |
+| 2026-11-18 | Backend | src/device/*, src/queue/* | low | Thin re-exports and @deprecated DeviceAuthRow/PairingCodeRow aliases remain. | Remove once callers migrate. |
