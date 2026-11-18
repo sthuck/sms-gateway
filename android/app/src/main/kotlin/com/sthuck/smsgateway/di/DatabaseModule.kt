@@ -23,10 +23,10 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "sms-gateway.db",
-        )
+        ).addMigrations(*AppDatabase.MIGRATIONS)
         // Destructive fallback is debug-only. Release must fail closed on an
         // unknown schema bump so unsent outbox rows are never silently wiped
-        // (STH-41). Future bumps need an explicit Migration / AutoMigration.
+        // (STH-41). Future bumps need an entry in AppDatabase.MIGRATIONS.
         if (BuildConfig.DEBUG) {
             builder.fallbackToDestructiveMigration(dropAllTables = true)
         }

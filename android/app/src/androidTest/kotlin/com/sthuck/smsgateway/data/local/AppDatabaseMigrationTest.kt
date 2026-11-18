@@ -10,8 +10,8 @@ import org.junit.runner.RunWith
 
 /**
  * Guards the outbox schema. When [AppDatabase] version bumps, add an
- * explicit Migration / AutoMigration and extend this test so release
- * builds never rely on destructive fallback (STH-41).
+ * explicit Migration to [AppDatabase.MIGRATIONS] and extend this test so
+ * release builds never rely on destructive fallback (STH-41).
  */
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseMigrationTest {
@@ -26,10 +26,16 @@ class AppDatabaseMigrationTest {
 
     @Test
     fun exportedSchemaMatchesCurrentVersion() {
-        // Creates DB at v2 from the committed schema JSON and validates it
-        // against the entities Room would open today (no migrations yet).
-        helper.createDatabase(TEST_DB, 2).close()
-        helper.runMigrationsAndValidate(TEST_DB, 2, true)
+        // Creates DB at the committed current schema and validates it against
+        // the entities Room would open today (MIGRATIONS is empty until the
+        // next bump).
+        helper.createDatabase(TEST_DB, AppDatabase.CURRENT_VERSION).close()
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            AppDatabase.CURRENT_VERSION,
+            true,
+            *AppDatabase.MIGRATIONS,
+        )
     }
 
     companion object {
