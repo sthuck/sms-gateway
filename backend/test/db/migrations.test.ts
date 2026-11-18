@@ -1,7 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { copyFile, unlink } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Pool } from "pg";
 import {
   canConnect,
@@ -17,11 +14,6 @@ if (!migratorOk && process.env.CI === "true") {
   throw new Error(`Postgres migrator unreachable at ${migrateDatabaseUrl()}`);
 }
 
-const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const migrationsDir = path.join(backendRoot, "migrations");
-const sth12Fixture = path.join(backendRoot, "test/fixtures/1795001000000_queue-processed-jobs.cjs");
-const sth12Live = path.join(migrationsDir, "1795001000000_queue-processed-jobs.cjs");
-
 describe.skipIf(!migratorOk)("migrations up/down/up", () => {
   let admin: Pool;
 
@@ -30,7 +22,6 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
   });
 
   afterAll(async () => {
-    await unlink(sth12Live).catch(() => undefined);
     await admin?.end().catch(() => undefined);
   });
 
@@ -47,7 +38,7 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
     );
     expect(Number(afterUp.rows[0]?.count)).toBeGreaterThan(0);
 
-    // Drain every applied migration (count varies as stacked PRs land).
+    // Drain every applied migration (initial, rls, auth, queue, device-auth).
     for (let i = 0; i < 20; i++) {
       const { rows } = await admin.query<{ count: string }>(
         `SELECT count(*)::text AS count FROM pgmigrations`,
@@ -63,8 +54,14 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
     await runMigrations("up"); // idempotent no-op when already at head
 
     tables = await listOwnedTables(admin);
-    expect(tables.length).toBeGreaterThanOrEqual(13);
+    expect(tables.length).toBeGreaterThanOrEqual(14);
     expect(tables).toContain("sessions");
+    expect(tables).toContain("queue_processed_jobs");
+
+    const pgboss = await admin.query<{ n: string }>(
+      `SELECT nspname AS n FROM pg_namespace WHERE nspname = 'pgboss'`,
+    );
+    expect(pgboss.rows).toHaveLength(1);
 
     const { rows } = await admin.query<{ missing_force: number }>(`
       SELECT count(*)::int AS missing_force
@@ -79,43 +76,18 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
     expect(rows[0]?.missing_force).toBe(0);
   }, 180_000);
 
-  it("coexists with STH-12 queue migration ID (STH-40 / #5)", async () => {
-    // Simulate merge with #5: both migration files present, either order of merge.
-    await copyFile(sth12Fixture, sth12Live);
-    try {
-      await resetSchema(admin);
-      await runMigrations("up");
+  it("orders queue migration before device-auth (STH-40 / #5+#6)", async () => {
+    await resetSchema(admin);
+    await runMigrations("up");
 
-      const { rows } = await admin.query<{ name: string }>(
-        `SELECT name FROM pgmigrations ORDER BY name`,
-      );
-      const names = rows.map((r) => r.name);
-      expect(names).toContain("1795001000000_queue-processed-jobs");
-      expect(names).toContain("1795002000000_device-auth-support");
-      expect(names.indexOf("1795001000000_queue-processed-jobs")).toBeLessThan(
-        names.indexOf("1795002000000_device-auth-support"),
-      );
-
-      // Simulate DB that already ran #5 first, then pulls #6: remaining up is fine.
-      for (let i = 0; i < 20; i++) {
-        const { rows: left } = await admin.query<{ count: string }>(
-          `SELECT count(*)::text AS count FROM pgmigrations`,
-        );
-        if (Number(left[0]?.count ?? 0) === 0) break;
-        await runMigrations("down");
-      }
-      await runMigrations("up");
-      const again = await admin.query<{ name: string }>(
-        `SELECT name FROM pgmigrations ORDER BY name`,
-      );
-      expect(again.rows.map((r) => r.name)).toEqual(
-        expect.arrayContaining([
-          "1795001000000_queue-processed-jobs",
-          "1795002000000_device-auth-support",
-        ]),
-      );
-    } finally {
-      await unlink(sth12Live).catch(() => undefined);
-    }
+    const { rows } = await admin.query<{ name: string }>(
+      `SELECT name FROM pgmigrations ORDER BY name`,
+    );
+    const names = rows.map((r) => r.name);
+    expect(names).toContain("1795001000000_queue-processed-jobs");
+    expect(names).toContain("1795002000000_device-auth-support");
+    expect(names.indexOf("1795001000000_queue-processed-jobs")).toBeLessThan(
+      names.indexOf("1795002000000_device-auth-support"),
+    );
   }, 180_000);
 });

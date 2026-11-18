@@ -9,6 +9,7 @@
  * - The sms_app password is set only when the role is newly created.
  *   Later ups never ALTER ROLE … PASSWORD. Rotate manually when needed:
  *     ALTER ROLE sms_app PASSWORD '…';
+ * - Then bootstraps the pg-boss schema (STH-12) via bootstrap-pgboss.mjs.
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -61,6 +62,15 @@ async function main() {
     }
   }
 
+  if (direction === "up") {
+    try {
+      await bootstrapPgBoss();
+    } catch (err) {
+      console.error("pg-boss bootstrap failed:", err.message);
+      process.exit(1);
+    }
+  }
+
   process.exit(0);
 }
 
@@ -83,6 +93,27 @@ function runMigrate(migrateArgs, url) {
         return;
       }
       resolve(code ?? 1);
+    });
+  });
+}
+
+function bootstrapPgBoss() {
+  return new Promise((resolve, reject) => {
+    const boot = spawn("node", ["scripts/bootstrap-pgboss.mjs"], {
+      cwd: backendRoot,
+      stdio: "inherit",
+      env: process.env,
+    });
+    boot.on("exit", (bootCode, bootSignal) => {
+      if (bootSignal) {
+        reject(new Error(`pg-boss bootstrap killed by ${bootSignal}`));
+        return;
+      }
+      if (bootCode !== 0) {
+        reject(new Error(`pg-boss bootstrap exited ${bootCode ?? 1}`));
+        return;
+      }
+      resolve();
     });
   });
 }
