@@ -13,6 +13,7 @@ import {
   seedTwoOwners,
   type SeededOwners,
 } from "../helpers/pg.js";
+import { OWNED_TABLE_FORCE_RLS_FLOOR } from "../../src/adapters/db-postgres/schema.js";
 
 // sms_app may not exist until migrations run; check migrator first.
 const migratorOk = await canConnect(migrateDatabaseUrl());
@@ -48,7 +49,7 @@ describe.skipIf(!migratorOk)("RLS owner isolation", () => {
   });
 
   it("discovers owned tables from the catalog (owner_id column)", () => {
-    expect(ownedTables.length).toBeGreaterThanOrEqual(14);
+    expect(ownedTables.length).toBeGreaterThanOrEqual(OWNED_TABLE_FORCE_RLS_FLOOR);
     expect(ownedTables).toEqual(
       expect.arrayContaining([
         "users",

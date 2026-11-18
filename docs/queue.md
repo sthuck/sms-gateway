@@ -23,7 +23,7 @@ outbox table would only be needed if the broker were external.
 
 | Schema | Contents | Owner / installer | Runtime role |
 | --- | --- | --- | --- |
-| `public` | App tables + `queue_processed_jobs` | Migrator (`sms`) via `node-pg-migrate` | `sms_app` (RLS) |
+| `public` | App tables + `queue_processed_jobs` | Migrator (`sms`) via Drizzle (`pnpm migrate:up`) | `sms_app` (RLS) |
 | `pgboss` | pg-boss tables (not owner-scoped) | Migrator via `scripts/bootstrap-pgboss.mjs` after `migrate:up` | `sms_app` (DML only) |
 
 **Bootstrap (privileged):** `SMS_APP_PASSWORD` is **required** for

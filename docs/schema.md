@@ -1,8 +1,11 @@
 # Postgres schema and RLS
 
 Companion to Linear **STH-8**. The live source of truth is
-`backend/migrations/`; this document explains the model, roles, and
-isolation pattern.
+`backend/src/adapters/db-postgres/schema.ts` plus the hand-reviewed Drizzle
+baseline in `backend/drizzle/` (custom SQL for FORCE RLS, role, functions).
+Legacy node-pg-migrate CJS files remain under `backend/migrations-legacy/`
+as history only. This document explains the model, roles, and isolation
+pattern.
 
 Message bodies are stored as `body_ciphertext` (`bytea`). Columns hold
 ciphertext only; envelope encryption / KMS wrapping is a later ticket
@@ -180,7 +183,7 @@ by `scripts/bootstrap-pgboss.mjs` after migrations; see `docs/queue.md`.
 
 | Role | Purpose |
 | --- | --- |
-| **Migrator** (`sms` in local Compose / CI) | Owns tables, runs `node-pg-migrate`. Connect with `MIGRATE_DATABASE_URL`. May be a superuser locally; production should be a non-superuser table owner with rights to create objects. |
+| **Migrator** (`sms` in local Compose / CI) | Owns tables, runs Drizzle migrations via `scripts/migrate.mjs`. Connect with `MIGRATE_DATABASE_URL`. May be a superuser locally; production should be a non-superuser table owner with rights to create objects. |
 | **`sms_app`** | Application / worker / MCP. `LOGIN`, **no** `BYPASSRLS`, **no** superuser. Connect with `DATABASE_URL`. |
 
 ### `sms_app` password
@@ -206,9 +209,43 @@ MIGRATE_DATABASE_URL=postgres://sms:sms@localhost:5432/sms \
 SMS_APP_PASSWORD=sms_app \
   pnpm --filter @sms-gateway/backend migrate:up
 
+# Existing local DB that already ran legacy CJS migrations:
+pnpm --filter @sms-gateway/backend migrate:stamp
+
 # App (RLS-enforced)
 DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms
 ```
+
+### Migrator notes
+
+- **Fresh DB:** `migrate:up` applies the Drizzle baseline only (do not also run
+  `migrations-legacy/*.cjs`).
+- **Existing DB:** if `pgmigrations` shows the legacy head and the Drizzle
+  journal is empty, `migrate:stamp` records the baseline as applied **without**
+  re-running DDL. `created_at` uses the journal entry's exact `when` (not
+  wall-clock — see drizzle-orm#5769). Before stamping, the wrapper compares the
+  live catalog to `drizzle/expected-catalog.json` (policies, ENABLE+FORCE
+  RLS, grants / default privileges, `sms_app` role attributes, function
+  `search_path`) and refuses with a listed diff on mismatch. Stamp is idempotent
+  when the baseline row is already present.
+- **Legacy mistaken `up`:** if `public.pgmigrations` exists and the Drizzle
+  journal is empty, `migrate:up` fails with `legacy DB detected: run migrate:stamp`
+  instead of a raw `CREATE SCHEMA app failed`.
+- **Down:** Drizzle has no down migrations. There is no `migrate:down` script —
+  restore a backup or recreate the database.
+- **Never** `drizzle-kit push` (no push script; CI greps for it). Apply only via
+  `pnpm migrate:up` / `migrate:stamp`. Authors use `drizzle-kit generate`; CI
+  runs `pnpm drizzle:check` so generate is a no-op against the committed snapshot
+  and journal `when` values strictly increase.
+- **Concurrency:** `migrate:up` / `stamp` take a Postgres advisory lock so
+  concurrent runs serialize.
+- CI `pnpm schema:equivalence` asserts legacy+stamp ≡ drizzle baseline via:
+  1. normalized `pg_dump --schema-only --no-privileges` (ignoring
+     `pgmigrations`, `drizzle.__drizzle_migrations`, and `pgboss`), **and**
+  2. a catalog fingerprint diff covering table/function/schema/database ACLs
+     (`aclexplode`), `pg_default_acl`, `sms_app` role flags (`rolcanlogin`,
+     `rolbypassrls`, `rolsuper`, …), function `proconfig` (`search_path`),
+     `relrowsecurity` / `relforcerowsecurity`, and `pg_policies`.
 
 ## RLS
 

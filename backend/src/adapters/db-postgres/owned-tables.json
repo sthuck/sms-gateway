@@ -1,0 +1,16 @@
+[
+  "users",
+  "user_identities",
+  "devices",
+  "device_credentials",
+  "pairing_codes",
+  "messages",
+  "streams",
+  "stream_membership",
+  "agent_clients",
+  "agent_grants",
+  "audit_log",
+  "sender_ai_optout",
+  "sessions",
+  "queue_processed_jobs"
+]

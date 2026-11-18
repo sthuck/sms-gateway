@@ -40,7 +40,7 @@ export function createAppPool(): Pool {
  */
 export const LOCAL_DEV_SMS_APP_PASSWORD = "sms_app";
 
-export async function runMigrations(direction: "up" | "down" = "up"): Promise<void> {
+export async function runMigrations(direction: "up" | "stamp" | "baseline" = "up"): Promise<void> {
   const env = {
     ...process.env,
     DATABASE_URL: migrateDatabaseUrl(),
@@ -55,13 +55,32 @@ export async function runMigrations(direction: "up" | "down" = "up"): Promise<vo
   });
 }
 
+/** Test-only: apply legacy node-pg-migrate CJS files from migrations-legacy/. */
+export async function runLegacyMigrations(direction: "up" | "down" = "up"): Promise<void> {
+  const env = {
+    ...process.env,
+    DATABASE_URL: migrateDatabaseUrl(),
+    MIGRATE_DATABASE_URL: migrateDatabaseUrl(),
+    SMS_APP_PASSWORD: process.env.SMS_APP_PASSWORD ?? LOCAL_DEV_SMS_APP_PASSWORD,
+  };
+  await execFileAsync("node", ["scripts/legacy-migrate.mjs", direction], {
+    cwd: backendRoot,
+    env,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+}
+
 export async function resetSchema(admin: Pool): Promise<void> {
+  // Match Postgres 15+ CREATE DATABASE defaults: PUBLIC gets USAGE on public,
+  // not CREATE (stamp catalog fingerprint refuses GRANT CREATE … TO PUBLIC).
   await admin.query(`
     DROP SCHEMA IF EXISTS public CASCADE;
     CREATE SCHEMA public;
-    GRANT ALL ON SCHEMA public TO PUBLIC;
+    GRANT USAGE ON SCHEMA public TO PUBLIC;
+    GRANT ALL ON SCHEMA public TO CURRENT_USER;
     DROP SCHEMA IF EXISTS app CASCADE;
     DROP SCHEMA IF EXISTS pgboss CASCADE;
+    DROP SCHEMA IF EXISTS drizzle CASCADE;
   `);
 }
 

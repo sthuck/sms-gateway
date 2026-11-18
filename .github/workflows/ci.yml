@@ -95,15 +95,12 @@ jobs:
         run: pnpm lint
       - name: Typecheck
         run: pnpm typecheck
-      - name: Migrate up / down / up
-        run: |
-          pnpm migrate:up
-          pnpm migrate:down
-          pnpm migrate:down
-          pnpm migrate:down
-          pnpm migrate:down
-          pnpm migrate:down
-          pnpm migrate:up
+      - name: Drizzle snapshot / journal / push guards
+        run: pnpm drizzle:check
+      - name: Migrate up (Drizzle baseline)
+        run: pnpm migrate:up
+      - name: Schema equivalence (legacy+stamp ≡ drizzle baseline)
+        run: pnpm schema:equivalence
       - name: Test
         run: pnpm test
       - name: Build Docker image

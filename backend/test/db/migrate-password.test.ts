@@ -65,17 +65,39 @@ describe.skipIf(!migratorOk)("migrate.mjs SMS_APP_PASSWORD policy", () => {
 
     const rotated = "rotated-test-password-not-default";
     await setRolePassword(admin, rotated);
+    const beforeHash = await rolePasswordHash(admin);
+    expect(beforeHash).toBeTruthy();
 
     // Later up must succeed with SMS_APP_PASSWORD set, but must not overwrite.
     await runMigrations("up");
 
-    await expect(canConnect(appUrlWithPassword(rotated))).resolves.toBe(true);
-    await expect(canConnect(appUrlWithPassword(LOCAL_DEV_SMS_APP_PASSWORD))).resolves.toBe(false);
+    const afterHash = await rolePasswordHash(admin);
+    expect(afterHash).toBe(beforeHash);
+
+    // When the server enforces passwords (not local trust), rotated works and default does not.
+    if (await passwordAuthEnforced()) {
+      await expect(canConnect(appUrlWithPassword(rotated))).resolves.toBe(true);
+      await expect(canConnect(appUrlWithPassword(LOCAL_DEV_SMS_APP_PASSWORD))).resolves.toBe(false);
+    }
 
     // Restore local-dev password so subsequent test files can connect via APP_DATABASE_URL.
     await setRolePassword(admin, LOCAL_DEV_SMS_APP_PASSWORD);
   }, 120_000);
 });
+
+async function rolePasswordHash(admin: Pool): Promise<string | null> {
+  const { rows } = await admin.query<{ rolpassword: string | null }>(
+    `SELECT rolpassword FROM pg_authid WHERE rolname = 'sms_app'`,
+  );
+  return rows[0]?.rolpassword ?? null;
+}
+
+/** False under pg_hba trust/peer where any password is accepted. */
+async function passwordAuthEnforced(): Promise<boolean> {
+  const probe = "definitely-wrong-password-xyz";
+  const okWrong = await canConnect(appUrlWithPassword(probe));
+  return !okWrong;
+}
 
 async function setRolePassword(admin: Pool, password: string): Promise<void> {
   const client = await admin.connect();

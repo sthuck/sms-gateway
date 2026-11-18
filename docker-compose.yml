@@ -24,10 +24,11 @@ services:
       HOST: "0.0.0.0"
       PORT: "8080"
       LOG_LEVEL: info
-      # App connects as sms_app (RLS). Create the role via migrations first
+      # App connects as sms_app (RLS). Apply Drizzle baseline first
       # (SMS_APP_PASSWORD required; local-dev-only value below):
       #   MIGRATE_DATABASE_URL=postgres://sms:sms@localhost:5432/sms \
       #   SMS_APP_PASSWORD=sms_app pnpm --filter @sms-gateway/backend migrate:up
+      # Existing legacy DBs: pnpm migrate:stamp (no DDL re-run). Never drizzle-kit push.
       DATABASE_URL: postgres://sms_app:sms_app@postgres:5432/sms
       MIGRATE_DATABASE_URL: postgres://sms:sms@postgres:5432/sms
       # LOCAL-DEV ONLY — required by migrate:up; never a silent script default
