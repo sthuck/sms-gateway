@@ -16,6 +16,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -140,6 +141,20 @@ class DeviceApiTest {
         assertEquals(DeviceStatusValue.Revoked, response.status)
         assertEquals("2026-11-18T09:30:00Z", response.revokedAt)
         assertEquals("/v1/devices/me", server.takeRequest().path)
+    }
+
+    @Test
+    fun postHeartbeatHitsDraftPathWithEmptyBody() = runTest {
+        DeviceApiMock.enqueueHeartbeatNoContent(server)
+
+        val response = api.postHeartbeat(ByteArray(0).toRequestBody(null))
+
+        assertTrue(response.isSuccessful)
+        assertEquals(204, response.code())
+        val recorded = server.takeRequest()
+        assertEquals("POST", recorded.method)
+        assertEquals("/v1/devices/me/heartbeat", recorded.path)
+        assertEquals(0, recorded.body.size)
     }
 
     @Test

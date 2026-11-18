@@ -7,6 +7,10 @@
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <uses-feature
         android:name="android.hardware.telephony"
@@ -54,13 +58,28 @@
             </intent-filter>
         </receiver>
 
+        <!--
+          Not directBootAware: Room / WorkManager / DataStore need credential-
+          encrypted storage, available only after unlock (BOOT_COMPLETED).
+          See docs/android-keepalive.md and BootUploadReceiver KDoc.
+        -->
         <receiver
             android:name=".upload.BootUploadReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:directBootAware="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <service
+            android:name=".keepalive.GatewayKeepaliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Private SMS gateway keepalive for near-real-time outbox upload after SMS_RECEIVED" />
+        </service>
 
         <provider
             android:name="androidx.startup.InitializationProvider"

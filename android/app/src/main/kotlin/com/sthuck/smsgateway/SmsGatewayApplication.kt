@@ -6,6 +6,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
+import com.sthuck.smsgateway.keepalive.KeepaliveController
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.upload.OutboxHousekeeping
 import com.sthuck.smsgateway.upload.UploadScheduler
@@ -38,6 +39,9 @@ class SmsGatewayApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var housekeeping: OutboxHousekeeping
 
+    @Inject
+    lateinit var keepaliveController: KeepaliveController
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val workManagerConfiguration: Configuration
@@ -49,9 +53,13 @@ class SmsGatewayApplication : Application(), Configuration.Provider {
         super.onCreate()
         // Restore the preferred Keystore alias before any already-scheduled
         // worker can run (closes the restore/enqueue race).
-        runBlocking {
+        val paired = runBlocking {
             val creds = credentialStore.current()
             deviceKeyStore.restorePreferredActiveAlias(creds.activeKeyAlias)
+            creds.isPaired
+        }
+        if (paired) {
+            keepaliveController.ensureStarted()
         }
         appScope.launch {
             maybeUnparkAfterUpgrade()

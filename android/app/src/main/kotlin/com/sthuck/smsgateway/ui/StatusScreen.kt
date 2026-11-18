@@ -39,6 +39,10 @@ fun StatusScreen(
     onConfirmUnpairKeepQueue: () -> Unit = {},
     onDismissUnpair: () -> Unit = {},
     onRetryParked: () -> Unit = {},
+    onGrantNotificationsClick: () -> Unit = {},
+    onRequestBatteryExemptClick: () -> Unit = {},
+    onOpenOemSetupClick: () -> Unit = {},
+    onOpenOemFallbackClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -58,6 +62,13 @@ fun StatusScreen(
                 state = state.smsPermission,
                 onGrantSmsClick = onGrantSmsClick,
                 onOpenSettingsClick = onOpenSettingsClick,
+            )
+            KeepaliveSetupCard(
+                state = state,
+                onGrantNotificationsClick = onGrantNotificationsClick,
+                onRequestBatteryExemptClick = onRequestBatteryExemptClick,
+                onOpenOemSetupClick = onOpenOemSetupClick,
+                onOpenOemFallbackClick = onOpenOemFallbackClick,
             )
             StatusRow(stringResource(R.string.status_sms_permission), permissionLabel(state.smsPermission))
             StatusRow(stringResource(R.string.status_flavor), state.flavor)
@@ -161,6 +172,96 @@ private fun formatQueuedPreview(item: QueuedMessagePreview): String = buildStrin
     if (!item.lastError.isNullOrBlank()) {
         append(" · ")
         append(item.lastError)
+    }
+}
+
+@Composable
+private fun KeepaliveSetupCard(
+    state: StatusUiState,
+    onGrantNotificationsClick: () -> Unit,
+    onRequestBatteryExemptClick: () -> Unit,
+    onOpenOemSetupClick: () -> Unit,
+    onOpenOemFallbackClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.setup_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.setup_body),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            StatusRow(
+                stringResource(R.string.setup_notifications),
+                if (state.notificationsGranted) {
+                    stringResource(R.string.setup_notifications_ok)
+                } else {
+                    stringResource(R.string.setup_notifications_needed)
+                },
+            )
+            if (!state.notificationsGranted) {
+                Button(
+                    onClick = onGrantNotificationsClick,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.setup_notifications_grant))
+                }
+            }
+            StatusRow(
+                stringResource(R.string.setup_battery),
+                if (state.batteryExempt) {
+                    stringResource(R.string.setup_battery_ok)
+                } else {
+                    stringResource(R.string.setup_battery_needed)
+                },
+            )
+            if (!state.batteryExempt) {
+                Button(
+                    onClick = onRequestBatteryExemptClick,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.setup_battery_request))
+                }
+            }
+            Text(
+                text = stringResource(R.string.setup_oem_title, state.oemSetup.displayName),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = stringResource(R.string.setup_oem_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state.oemSetup.deepLinkUris.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = onOpenOemSetupClick,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.setup_oem_open, state.oemSetup.displayName))
+                }
+            }
+            OutlinedButton(
+                onClick = onOpenOemFallbackClick,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.setup_oem_fallback))
+            }
+            Text(
+                text = stringResource(R.string.setup_force_stop_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

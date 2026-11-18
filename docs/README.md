@@ -8,6 +8,8 @@
 | [local-dev.md](./local-dev.md) | Docker Compose, ports, emulator access, Prism mock, Authentik |
 | [pairing.md](./pairing.md) | Pairing codes, device auth, rate limits, replay cache, revoke (STH-14) |
 | [android-outbox-retention.md](./android-outbox-retention.md) | Outbox TTL/cap defaults and plaintext-at-rest decision |
+| [android-keepalive.md](./android-keepalive.md) | FGS vs WorkManager, boot/Doze/force-stop, permissions, OEM setup (STH-47) |
+| [contracts/device-heartbeat-draft.md](./contracts/device-heartbeat-draft.md) | Proposed `POST /v1/devices/me/heartbeat` (backend not shipped yet) |
 | [deployment-auth.md](./deployment-auth.md) | OIDC/Authentik hostnames and Helm env examples (deploy deferred) |
 | [adr/0001-oidc-authentik.md](./adr/0001-oidc-authentik.md) | ADR: generic OIDC, identity mapping, MFA, sessions |
 | [contracts/device-api.yaml](./contracts/device-api.yaml) | STH-5 device API OpenAPI contract (v1 draft 2) |

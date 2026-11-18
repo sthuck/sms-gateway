@@ -99,3 +99,13 @@ Entries are appended by the reviewer. HIGH-severity findings are tracked in Line
 | 2026-11-18 | Android | AndroidManifest.xml:59-65, BootUploadReceiver.kt:16-22 | low | BootUploadReceiver is exported + directBootAware but credential-encrypted storage may be unavailable at locked boot. | Drop directBootAware or handle locked state. |
 | 2026-11-18 | Android | OutboxUploader.kt:27 | low | Unused UploadPassResult.Failed. | Remove. |
 | 2026-11-18 | Android | BatchPacker.kt:34-35 | low | Comment says body_too_large for a single oversized item, but the uploader parks it as payload_too_large. | Fix the comment. |
+
+## 2026-11-18 — PR #18 (outbox follow-ups) medium findings
+
+Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed here.
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-18 | Android | OutboxUploader + StatusViewModel.retryParked (PR #18) | medium | `enforceLimits` re-parks TTL-expired rows on Retry; explicit retry still hits housekeeping TTL. | Skip TTL on explicit retry, or add a grace flag so Retry parked does not immediately re-park. |
+| 2026-11-18 | Android | AppDatabase MIGRATION_3_4 (PR #18) | medium | Seeds `nextOrdinal` with `COUNT(*)` instead of `max(ordinal)+1`; drained `contentKeys` are missing from counters. | Seed from `max(ordinal)+1` per key (including tombstones / drained keys). |
+| 2026-11-18 | Android | UploadScheduler delay-0 REPLACE (PR #18) | medium | Delay-0 `REPLACE` cancels an in-flight drain; racing enqueues can abort a live worker. | Prefer `REPLACE` only when existing unique work is delayed; keep in-flight drains. |

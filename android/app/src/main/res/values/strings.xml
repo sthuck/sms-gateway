@@ -51,4 +51,25 @@
     <string name="unpair_confirm_clear">Unpair and clear queue</string>
     <string name="unpair_confirm_keep">Unpair, keep unsent messages</string>
     <string name="unpair_cancel">Cancel</string>
+
+    <string name="keepalive_channel_name">Background gateway</string>
+    <string name="keepalive_channel_desc">Keeps SMS capture and upload running</string>
+    <string name="keepalive_notification_title">SMS Gateway is running</string>
+    <string name="keepalive_notification_text">Forwarding incoming SMS in the background</string>
+
+    <string name="setup_title">Keep the gateway alive</string>
+    <string name="setup_body">SMS capture survives process death and reboot after unlock. Force-stopping the app blocks SMS until you open it again. Complete these steps so OEMs do not kill the uploader.</string>
+    <string name="setup_notifications">Notifications</string>
+    <string name="setup_notifications_ok">Allowed (needed for the ongoing service)</string>
+    <string name="setup_notifications_needed">Required on Android 13+ for the foreground service</string>
+    <string name="setup_notifications_grant">Allow notifications</string>
+    <string name="setup_battery">Battery optimisation</string>
+    <string name="setup_battery_ok">Exempted</string>
+    <string name="setup_battery_needed">Not exempted — uploads may stall in Doze</string>
+    <string name="setup_battery_request">Exempt from battery optimisation</string>
+    <string name="setup_oem_title">Phone maker settings (%1$s)</string>
+    <string name="setup_oem_body">Allow autostart / unrestricted battery for this app. If the deep link fails, the fallback guide opens in the browser.</string>
+    <string name="setup_oem_open">Open %1$s settings</string>
+    <string name="setup_oem_fallback">Open background guide</string>
+    <string name="setup_force_stop_note">Force-stop is permanent until you launch the app again. Android blocks SMS broadcasts to force-stopped apps.</string>
 </resources>
