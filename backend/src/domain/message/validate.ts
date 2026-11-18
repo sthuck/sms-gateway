@@ -63,7 +63,7 @@ export function validateBatchItem(
   if (containsNul(deviceMsgId)) {
     return {
       ok: false,
-      deviceMsgId: "",
+      deviceMsgId,
       code: "invalid_field",
       detail: "device_msg_id must not contain NUL",
     };
@@ -91,14 +91,6 @@ export function validateBatchItem(
       deviceMsgId,
       code: "invalid_field",
       detail: "body must be a string",
-    };
-  }
-  if (containsNul(item.body)) {
-    return {
-      ok: false,
-      deviceMsgId,
-      code: "invalid_field",
-      detail: "body must not contain NUL",
     };
   }
   if ([...item.body].length > MAX_BODY_CHARS) {
