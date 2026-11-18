@@ -2,7 +2,7 @@ package com.sthuck.smsgateway.data.remote
 
 /**
  * ES256 request-signing headers from the STH-5 device API contract.
- * Signing itself is implemented in STH-11.
+ * Applied by [RequestSigningInterceptor].
  */
 object DeviceHeaders {
     const val DEVICE_ID = "X-Device-Id"

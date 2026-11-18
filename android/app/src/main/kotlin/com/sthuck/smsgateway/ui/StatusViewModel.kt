@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
+import com.sthuck.smsgateway.pairing.PairingCredentialStore
+import com.sthuck.smsgateway.pairing.PairingRepository
 import com.sthuck.smsgateway.sms.SmsPermissionSnapshot
 import com.sthuck.smsgateway.sms.SmsPermissionState
 import com.sthuck.smsgateway.sms.smsPermissionState
@@ -28,14 +30,18 @@ data class StatusUiState(
     val backendUrl: String,
     val versionName: String,
     val pairingStatus: String,
+    val deviceId: String? = null,
     val smsPermission: SmsPermissionState = SmsPermissionState.NotRequested,
     val queuedCount: Int = 0,
     val recentQueued: List<QueuedMessagePreview> = emptyList(),
+    val unpairConfirmVisible: Boolean = false,
 )
 
 @HiltViewModel
 class StatusViewModel @Inject constructor(
     private val queuedMessageDao: QueuedMessageDao,
+    private val credentialStore: PairingCredentialStore,
+    private val pairingRepository: PairingRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
         StatusUiState(
@@ -52,26 +58,50 @@ class StatusViewModel @Inject constructor(
             combine(
                 queuedMessageDao.observeCount(),
                 queuedMessageDao.observeRecent(5),
-            ) { count, recent -> count to recent }
-                .collect { (count, recent) ->
-                    _uiState.update { state ->
-                        state.copy(
-                            queuedCount = count,
-                            recentQueued = recent.map { row ->
-                                QueuedMessagePreview(
-                                    deviceMsgId = row.deviceMsgId,
-                                    sender = row.sender,
-                                    receivedAt = row.receivedAt,
-                                    simSlot = row.simSlot,
-                                )
-                            },
-                        )
-                    }
+                credentialStore.credentials,
+            ) { count, recent, creds ->
+                Triple(count, recent, creds)
+            }.collect { (count, recent, creds) ->
+                _uiState.update { state ->
+                    state.copy(
+                        queuedCount = count,
+                        recentQueued = recent.map { row ->
+                            QueuedMessagePreview(
+                                deviceMsgId = row.deviceMsgId,
+                                sender = row.sender,
+                                receivedAt = row.receivedAt,
+                                simSlot = row.simSlot,
+                            )
+                        },
+                        backendUrl = creds.serverUrl,
+                        deviceId = creds.deviceId,
+                        pairingStatus = if (creds.isPaired) {
+                            "Paired (${creds.deviceId})"
+                        } else {
+                            "Not paired"
+                        },
+                    )
                 }
+            }
         }
     }
 
     fun onPermissionSnapshot(snapshot: SmsPermissionSnapshot) {
         _uiState.update { it.copy(smsPermission = smsPermissionState(snapshot)) }
+    }
+
+    fun requestUnpair() {
+        _uiState.update { it.copy(unpairConfirmVisible = true) }
+    }
+
+    fun dismissUnpair() {
+        _uiState.update { it.copy(unpairConfirmVisible = false) }
+    }
+
+    fun confirmUnpair(clearQueue: Boolean) {
+        viewModelScope.launch {
+            pairingRepository.unpair(clearQueue = clearQueue)
+            _uiState.update { it.copy(unpairConfirmVisible = false) }
+        }
     }
 }

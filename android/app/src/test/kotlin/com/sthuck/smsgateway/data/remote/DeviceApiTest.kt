@@ -28,6 +28,10 @@ import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 
+/**
+ * DeviceApi DTO / path wiring. Signing headers are added by
+ * [RequestSigningInterceptor] and covered in [SigningContractTest].
+ */
 class DeviceApiTest {
 
     private lateinit var server: MockWebServer
@@ -57,15 +61,11 @@ class DeviceApiTest {
     }
 
     @Test
-    fun pairReturnsDeviceIdAndOmitsDeviceIdHeader() = runTest {
+    fun pairReturnsDeviceId() = runTest {
         DeviceApiMock.enqueuePairCreated(server)
 
         val response = api.pair(
-            timestamp = "1794995160",
-            nonce = "V1nQe4r0sK8mP2yL6dF9TQ",
-            contentSha256 = "deadbeef",
-            signature = "test-signature",
-            body = PairRequest(
+            PairRequest(
                 pairingCode = "7K3M-9Q2P",
                 publicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyl6LQOh0Vol6Y7eUeYprtMPD_cB9oVwRFBAQ6BpcRbXZAXLl745jKd-uxX4bwUlHxH-jHsMc___m3WlOguxwRQ",
                 deviceInfo = DeviceInfo(
@@ -87,25 +87,15 @@ class DeviceApiTest {
         val recorded = server.takeRequest()
         assertEquals("POST", recorded.method)
         assertEquals("/v1/devices/pair", recorded.path)
-        assertEquals("1794995160", recorded.getHeader(DeviceHeaders.TIMESTAMP))
-        assertEquals("V1nQe4r0sK8mP2yL6dF9TQ", recorded.getHeader(DeviceHeaders.NONCE))
-        assertEquals("deadbeef", recorded.getHeader(DeviceHeaders.CONTENT_SHA256))
-        assertEquals("test-signature", recorded.getHeader(DeviceHeaders.SIGNATURE))
-        assertEquals(null, recorded.getHeader(DeviceHeaders.DEVICE_ID))
         assertTrue(recorded.body.readUtf8().contains("\"pairing_code\""))
     }
 
     @Test
-    fun batchIngestReturnsAcceptedAndSendsSigningHeaders() = runTest {
+    fun batchIngestReturnsAccepted() = runTest {
         DeviceApiMock.enqueueBatchAccepted(server, deviceMsgId = "sms-42")
 
         val response = api.ingestMessageBatch(
-            deviceId = DeviceApiMock.SAMPLE_DEVICE_ID,
-            timestamp = "1794995160",
-            nonce = "V1nQe4r0sK8mP2yL6dF9TQ",
-            contentSha256 = "8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9",
-            signature = "test-signature",
-            body = MessageBatchRequest(
+            MessageBatchRequest(
                 messages = listOf(
                     DeviceMessage(
                         deviceMsgId = "sms-42",
@@ -125,34 +115,19 @@ class DeviceApiTest {
         assertEquals(DeviceApiMock.SAMPLE_SERVER_MESSAGE_ID, response.results[0].id)
 
         val recorded = server.takeRequest()
-        assertEquals(DeviceApiMock.SAMPLE_DEVICE_ID, recorded.getHeader(DeviceHeaders.DEVICE_ID))
-        assertEquals("1794995160", recorded.getHeader(DeviceHeaders.TIMESTAMP))
-        assertEquals("V1nQe4r0sK8mP2yL6dF9TQ", recorded.getHeader(DeviceHeaders.NONCE))
-        assertEquals(
-            "8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9",
-            recorded.getHeader(DeviceHeaders.CONTENT_SHA256),
-        )
-        assertEquals("test-signature", recorded.getHeader(DeviceHeaders.SIGNATURE))
+        assertEquals("POST", recorded.method)
+        assertEquals("/v1/messages:batch", recorded.path)
     }
 
     @Test
     fun getDeviceMeReturnsRevokedStatus() = runTest {
         DeviceApiMock.enqueueDeviceMe(server, status = "revoked")
 
-        val response = api.getDeviceMe(
-            deviceId = DeviceApiMock.SAMPLE_DEVICE_ID,
-            timestamp = "1794995160",
-            nonce = "V1nQe4r0sK8mP2yL6dF9TQ",
-            contentSha256 = DeviceHeaders.EMPTY_BODY_SHA256,
-            signature = "test-signature",
-        )
+        val response = api.getDeviceMe()
 
         assertEquals(DeviceStatusValue.Revoked, response.status)
         assertEquals("2026-11-18T09:30:00Z", response.revokedAt)
-        assertEquals(
-            DeviceHeaders.EMPTY_BODY_SHA256,
-            server.takeRequest().getHeader(DeviceHeaders.CONTENT_SHA256),
-        )
+        assertEquals("/v1/devices/me", server.takeRequest().path)
     }
 
     @Test
@@ -168,13 +143,7 @@ class DeviceApiTest {
         )
 
         try {
-            api.getDeviceMe(
-                deviceId = DeviceApiMock.SAMPLE_DEVICE_ID,
-                timestamp = "1",
-                nonce = "n",
-                contentSha256 = DeviceHeaders.EMPTY_BODY_SHA256,
-                signature = "s",
-            )
+            api.getDeviceMe()
             throw AssertionError("expected HttpException")
         } catch (e: HttpException) {
             assertEquals(401, e.code())
@@ -201,13 +170,7 @@ class DeviceApiTest {
         )
 
         try {
-            api.getDeviceMe(
-                deviceId = DeviceApiMock.SAMPLE_DEVICE_ID,
-                timestamp = "1",
-                nonce = "n",
-                contentSha256 = DeviceHeaders.EMPTY_BODY_SHA256,
-                signature = "s",
-            )
+            api.getDeviceMe()
             throw AssertionError("expected HttpException")
         } catch (e: HttpException) {
             assertEquals(401, e.code())
@@ -232,14 +195,7 @@ class DeviceApiTest {
         )
 
         try {
-            api.ingestMessageBatch(
-                deviceId = "00000000-0000-0000-0000-000000000000",
-                timestamp = "1794995160",
-                nonce = "V1nQe4r0sK8mP2yL6dF9TQ",
-                contentSha256 = DeviceHeaders.EMPTY_BODY_SHA256,
-                signature = "s",
-                body = MessageBatchRequest(messages = emptyList()),
-            )
+            api.ingestMessageBatch(MessageBatchRequest(messages = emptyList()))
             throw AssertionError("expected HttpException")
         } catch (e: HttpException) {
             assertEquals(401, e.code())
@@ -282,4 +238,3 @@ class DeviceApiTest {
         assertEquals(ProblemCodes.BODY_TOO_LARGE, "body_too_large")
     }
 }
-

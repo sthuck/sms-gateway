@@ -41,7 +41,7 @@ jobs:
           dependency-graph: disabled
 
       - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
+        run: chmod +x gradlew scripts/check-room-schema.sh
 
       # GitHub-hosted runners already ship ANDROID_HOME. Do not use
       # android-actions/setup-android: it still tries to install the obsolete
@@ -65,8 +65,24 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-37.2" "build-tools;36.0.0"
 
+      - name: Check Room schema JSON matches version (and migrations on bump)
+        run: ./scripts/check-room-schema.sh
+
       - name: Build, lint, and unit test (devDebug)
         run: ./gradlew assembleDevDebug lintDevDebug testDevDebugUnitTest --stacktrace --refresh-dependencies
+
+      # Catches entity changes that rebuild schema JSON without a version bump,
+      # and commented-out / skipped migrations that fooled the static script.
+      - name: Fail if Room schema export drifted from git
+        run: |
+          git diff --exit-code -- app/schemas || {
+            echo "Room schema JSON under app/schemas changed during the build." >&2
+            echo "Bump APP_DATABASE_VERSION, commit the new schema, and add a Migration." >&2
+            exit 1
+          }
+
+      - name: Assemble prod release
+        run: ./gradlew assembleProdRelease --stacktrace
 
       - name: Upload dev debug APK
         uses: actions/upload-artifact@v4
@@ -74,6 +90,13 @@ jobs:
         with:
           name: app-dev-debug
           path: android/app/build/outputs/apk/dev/debug/*.apk
+
+      - name: Upload prod release APK
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: app-prod-release
+          path: android/app/build/outputs/apk/prod/release/*.apk
 
   instrumented:
     name: instrumented
