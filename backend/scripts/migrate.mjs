@@ -45,17 +45,38 @@ child.on("exit", (code, signal) => {
     return;
   }
   if (direction === "up") {
-    void setAppRolePassword(databaseUrl).then(
-      () => process.exit(0),
-      (err) => {
-        console.error("Failed to set sms_app password:", err.message);
+    void setAppRolePassword(databaseUrl)
+      .then(() => bootstrapPgBoss())
+      .then(() => process.exit(0))
+      .catch((err) => {
+        console.error("Post-migrate setup failed:", err.message);
         process.exit(1);
-      },
-    );
+      });
     return;
   }
   process.exit(0);
 });
+
+function bootstrapPgBoss() {
+  return new Promise((resolve, reject) => {
+    const boot = spawn("node", ["scripts/bootstrap-pgboss.mjs"], {
+      cwd: backendRoot,
+      stdio: "inherit",
+      env: process.env,
+    });
+    boot.on("exit", (bootCode, bootSignal) => {
+      if (bootSignal) {
+        reject(new Error(`pg-boss bootstrap killed by ${bootSignal}`));
+        return;
+      }
+      if (bootCode !== 0) {
+        reject(new Error(`pg-boss bootstrap exited ${bootCode ?? 1}`));
+        return;
+      }
+      resolve();
+    });
+  });
+}
 
 async function setAppRolePassword(url) {
   const password = process.env.SMS_APP_PASSWORD ?? "sms_app";

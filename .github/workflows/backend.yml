@@ -70,6 +70,7 @@ jobs:
           pnpm migrate:up
           pnpm migrate:down
           pnpm migrate:down
+          pnpm migrate:down
           pnpm migrate:up
       - run: pnpm test
       - name: Build Docker image

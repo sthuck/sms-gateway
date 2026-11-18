@@ -40,12 +40,14 @@ cp .env.example .env   # edit DATABASE_URL if needed
 pnpm dev               # API on 0.0.0.0:8080
 ```
 
-Separate stubs:
+Separate processes:
 
 ```bash
-pnpm worker   # queue worker stub
+pnpm worker   # pg-boss consumer (needs migrate:up first)
 pnpm mcp      # MCP server stub
 ```
+
+Queue details: `docs/queue.md`. Worker metrics (optional): `http://localhost:9090/metrics`.
 
 Tests and lint:
 
@@ -115,9 +117,10 @@ export SMS_APP_PASSWORD=sms_app
 pnpm migrate:up
 ```
 
-This creates role `sms_app`, tables, RLS, and lookup functions. The API
-should then use `DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms`.
-See `docs/schema.md` for the ER diagram and roles model.
+This creates role `sms_app`, tables, RLS, lookup functions, and bootstraps
+the `pgboss` queue schema (grants to `sms_app`). The API and worker should
+then use `DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms`.
+See `docs/schema.md` and `docs/queue.md`.
 
 Integration tests expect the same URLs (or `APP_DATABASE_URL` for the app
 role). They run against a real Postgres (Compose locally; service

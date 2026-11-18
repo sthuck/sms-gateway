@@ -39,9 +39,12 @@ helm template sms-gateway deploy/helm/sms-gateway >/dev/null
 See `values.yaml`. Notable knobs:
 
 - `config.*` — non-secret env (`HOST`, `PORT`, `LOG_LEVEL`, `LLM_BASE_URL`, `LLM_MODEL`)
+- `queue.*` — pg-boss settings (`schema`, retries, polling, metrics port); see `docs/queue.md`
 - `secrets.*` — Secret names/keys for `DATABASE_URL`, `ENCRYPTION_KEY`, `LLM_API_KEY`
 - `ingress.enabled` — optional Ingress for the API Service
 - `api` / `worker` / `mcp` — replicas, resources, commands
+- `worker.replicaCount` — scale consumers; `terminationGracePeriodSeconds` for graceful drain
+- `worker.metrics` — optional metrics container port (Prometheus text at `/metrics`)
 
 ## Postgres (not bundled)
 

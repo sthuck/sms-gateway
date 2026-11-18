@@ -4,6 +4,7 @@
 | --- | --- |
 | [architecture.md](./architecture.md) | Proposed stack and homelab Kubernetes notes |
 | [schema.md](./schema.md) | Postgres ER diagram, RLS, roles, device/pairing lookups |
+| [queue.md](./queue.md) | pg-boss events, publishInTx, retries/DLQ, worker RLS |
 | [local-dev.md](./local-dev.md) | Docker Compose, ports, emulator access, Prism mock |
 | [contracts/device-api.yaml](./contracts/device-api.yaml) | STH-5 device API OpenAPI contract (v1 draft 2) |
 | [contracts/device-signing.md](./contracts/device-signing.md) | ECDSA P-256 request signing scheme + test vector |

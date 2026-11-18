@@ -53,6 +53,7 @@ export async function resetSchema(admin: Pool): Promise<void> {
     CREATE SCHEMA public;
     GRANT ALL ON SCHEMA public TO PUBLIC;
     DROP SCHEMA IF EXISTS app CASCADE;
+    DROP SCHEMA IF EXISTS pgboss CASCADE;
   `);
 }
 
@@ -239,6 +240,14 @@ export async function seedTwoOwners(admin: Pool): Promise<SeededOwners> {
     await client.query(
       `INSERT INTO sender_ai_optout (owner_id, sender_pattern)
        VALUES ($1, 'BankA*'), ($2, 'BankB*')`,
+      [userA, userB],
+    );
+
+    await client.query(
+      `INSERT INTO queue_processed_jobs (owner_id, dedupe_key, job_name)
+       VALUES
+         ($1, 'seed:a', 'seed'),
+         ($2, 'seed:b', 'seed')`,
       [userA, userB],
     );
 

@@ -15,3 +15,7 @@ pnpm migrate:down
 
 Schema, roles (`sms_app`), RLS, and `SECURITY DEFINER` lookup helpers are
 defined here (Linear **STH-8**). See `docs/schema.md`.
+
+`migrate:up` also runs `scripts/bootstrap-pgboss.mjs`, which installs the
+pg-boss schema (`pgboss`) as the migrator and grants DML to `sms_app`
+(Linear **STH-12**). See `docs/queue.md`.
