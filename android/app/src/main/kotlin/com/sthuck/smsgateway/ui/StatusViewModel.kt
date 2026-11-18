@@ -1,9 +1,14 @@
 package com.sthuck.smsgateway.ui
 
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
+import com.sthuck.smsgateway.keepalive.BatteryOptimization
+import com.sthuck.smsgateway.keepalive.KeepaliveController
+import com.sthuck.smsgateway.keepalive.OemSetupCatalog
+import com.sthuck.smsgateway.keepalive.OemSetupTarget
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.pairing.PairingRepository
 import com.sthuck.smsgateway.upload.UploadDefaults
@@ -44,6 +49,9 @@ data class StatusUiState(
     val unpairConfirmVisible: Boolean = false,
     val outboxMaxRows: Int = UploadDefaults.MAX_OUTBOX_ROWS,
     val outboxTtlDays: Int = TimeUnit.MILLISECONDS.toDays(UploadDefaults.OUTBOX_TTL_MS).toInt(),
+    val notificationsGranted: Boolean = true,
+    val batteryExempt: Boolean = false,
+    val oemSetup: OemSetupTarget = OemSetupCatalog.forManufacturer(Build.MANUFACTURER),
 )
 
 @HiltViewModel
@@ -52,6 +60,8 @@ class StatusViewModel @Inject constructor(
     private val credentialStore: PairingCredentialStore,
     private val pairingRepository: PairingRepository,
     private val uploadScheduler: UploadScheduler,
+    private val keepaliveController: KeepaliveController,
+    private val batteryOptimization: BatteryOptimization,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
         StatusUiState(
@@ -113,6 +123,19 @@ class StatusViewModel @Inject constructor(
         _uiState.update { it.copy(smsPermission = smsPermissionState(snapshot)) }
     }
 
+    fun onSetupSnapshot(notificationsGranted: Boolean) {
+        _uiState.update {
+            it.copy(
+                notificationsGranted = notificationsGranted,
+                batteryExempt = batteryOptimization.isIgnoringBatteryOptimizations(),
+                oemSetup = OemSetupCatalog.forManufacturer(Build.MANUFACTURER),
+            )
+        }
+        if (_uiState.value.deviceId != null) {
+            keepaliveController.ensureStarted()
+        }
+    }
+
     fun requestUnpair() {
         _uiState.update { it.copy(unpairConfirmVisible = true) }
     }
@@ -124,6 +147,7 @@ class StatusViewModel @Inject constructor(
     fun confirmUnpair(clearQueue: Boolean) {
         viewModelScope.launch {
             pairingRepository.unpair(clearQueue = clearQueue)
+            keepaliveController.stop()
             _uiState.update { it.copy(unpairConfirmVisible = false) }
         }
     }

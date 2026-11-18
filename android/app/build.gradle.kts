@@ -24,6 +24,9 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "dagger.hilt.android.testing.HiltTestRunner"
+
+        // Heartbeat endpoint is draft-only; keep off until the backend ships.
+        buildConfigField("boolean", "HEARTBEAT_ENABLED", "false")
     }
 
     flavorDimensions += "environment"

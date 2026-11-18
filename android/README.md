@@ -73,6 +73,10 @@ Package: `com.sthuck.smsgateway`
 - `upload` — WorkManager unique work, batch packer (≤100 msgs / ≤1 MiB),
   outbox uploader (retry / park / re-pair). Defaults live in
   `UploadDefaults` (15s exponential backoff, 15m cap).
+- `keepalive` — `specialUse` foreground service, battery-exemption + OEM
+  setup checklist, optional signed heartbeat behind
+  `BuildConfig.HEARTBEAT_ENABLED` (default false). See
+  `docs/android-keepalive.md`.
 - `di` — Hilt modules for network and database
 - `ui` — pairing screen, status screen, permission rationale, and theme
 

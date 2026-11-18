@@ -14,4 +14,4 @@ Housekeeping runs on enqueue, on each uploader pass, and on cold start.
 
 **Decision (this PR):** SMS bodies remain **plaintext in Room**. The app already documents plaintext outbox storage; enabling SQLCipher / EncryptedFile for Room would be a larger schema and migration change and is deferred.
 
-**Follow-up:** encrypt outbox bodies at rest (or the whole DB) before any large inbox backfill (STH-17), and revisit once device-protected vs credential-encrypted storage choices for background work are settled (STH-47).
+**Follow-up:** encrypt outbox bodies at rest (or the whole DB) before any large inbox backfill (STH-17). Keepalive / CE storage choices are documented in `docs/android-keepalive.md` (STH-47): boot work stays on `BOOT_COMPLETED` after unlock, not direct boot.
