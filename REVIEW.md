@@ -99,3 +99,20 @@ Entries are appended by the reviewer. HIGH-severity findings are tracked in Line
 | 2026-11-18 | Android | AndroidManifest.xml:59-65, BootUploadReceiver.kt:16-22 | low | BootUploadReceiver is exported + directBootAware but credential-encrypted storage may be unavailable at locked boot. | Drop directBootAware or handle locked state. |
 | 2026-11-18 | Android | OutboxUploader.kt:27 | low | Unused UploadPassResult.Failed. | Remove. |
 | 2026-11-18 | Android | BatchPacker.kt:34-35 | low | Comment says body_too_large for a single oversized item, but the uploader parks it as payload_too_large. | Fix the comment. |
+
+## 2026-11-18 — PR #21 (STH-15 message ingestion)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-18 | Backend | backend/src/domain/message/normalise.ts, domain/message/validate.ts, adapters/db-postgres/message-repository.ts | medium | A U+0000 character in sender or device_msg_id passes validation but Postgres rejects it (SQLSTATE 22021); received_at with year 0000 passes the regex, then timestamptz rejects it. Either rolls the whole batch back into a retryable 500 on every retry; Android never parks a 500, so that device's outbox stalls. | Reject NUL per item as invalid_field, add a lower bound on received_at (1970 or 2000), optionally a SAVEPOINT per item mapping SQLSTATE class 22 to a rejection. |
+| 2026-11-18 | Backend | tests for POST /v1/messages:batch | medium | Missing: parallel identical batches, mid-batch failure (fault on item 2+, item 1 not persisted, response 500), HTTP-level infra failure for the route (only use-case level covered), poison-item cases. | Add them. |
+| 2026-11-18 | Backend | backend/bench/ingest-batch.ts | medium | Seeds a user, active device and credential bound to the public test-vector key into whatever DB URL is set, no host guard, no cleanup; against a real DB it leaves a device credential anyone with the repo can sign for (owner is a throwaway). | Refuse non-localhost hosts without an explicit flag; delete the seeded user at the end. |
+| 2026-11-18 | Backend | validate.ts | low | Non-string device_msg_id returns missing_field instead of invalid_field. | Return invalid_field. |
+| 2026-11-18 | Backend | message repository transaction | low | Overlapping batches with different item order can deadlock (40P01) giving a retryable 500. | Sort by device_msg_id inside the transaction. |
+| 2026-11-18 | Backend | message repository inserts | low | One round trip per item; fine at the benchmarked p95 of ~85 ms. | Consider unnest batching later. |
+| 2026-11-18 | Backend | received_at handling | low | Loses microseconds because toISOString() is millisecond precision. | Accept or preserve precision. |
+| 2026-11-18 | Backend | last_seen_at | low | Not updated when every item in a batch is rejected. | Decide if intended. |
+| 2026-11-18 | Backend | rate limit | low | Tokens consumed before validation and on attempts that later return 500; default 10,000 messages/hour per device may throttle a large backfill. | Revisit the limits. |
+| 2026-11-18 | Backend/Deploy | INGEST_DEFAULT_PHONE_REGION | low | Defaults to US; set to IL in deployment so national-format senders normalise. | Set it in the Helm values/env. |
+| 2026-11-18 | Backend | adapters/http-fastify/message-routes.ts | low | MAX_PAYLOAD_BYTES check duplicates the one in device auth; `void body.owner_id` statements are no-ops. | Remove. |
+| 2026-11-18 | Backend | request schema | low | Unknown top-level keys tolerated although the schema says additionalProperties: false. | Harmless; align or document. |
