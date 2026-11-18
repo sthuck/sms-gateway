@@ -16,6 +16,8 @@ export const REDACT_PATHS = [
   "res.body",
   "pairing_code",
   "pairingCode",
+  "public_key",
+  "publicKey",
   "signature",
   "X-Signature",
   'headers["x-signature"]',
