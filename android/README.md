@@ -56,8 +56,9 @@ pairing screen (QR via CameraX + ML Kit, manual short code, or
 shows SMS permission state, queue depth, and an unpair action. Hilt wires the
 graph. OkHttp rewrites the backend base URL from stored credentials (flavour
 default until a QR/`server` override) and signs every device request per
-STH-5. Incoming SMS is written to a Room outbox; the WorkManager uploader is
-a later ticket (STH-13) and is not implemented yet.
+STH-5. Incoming SMS is written to a Room outbox; WorkManager drains it to
+`POST /v1/messages:batch` (STH-13) with network constraints, exponential
+backoff, per-item park on non-retryable errors, and stop-on-revoke.
 
 Package: `com.sthuck.smsgateway`
 
@@ -69,12 +70,16 @@ Package: `com.sthuck.smsgateway`
   Schema JSON is exported to `app/schemas/` (committed). Release builds
   never use destructive migration; bump `AppDatabase` version only with
   an explicit Migration / AutoMigration and a `MigrationTestHelper` case.
+- `upload` — WorkManager unique work, batch packer (≤100 msgs / ≤1 MiB),
+  outbox uploader (retry / park / re-pair). Defaults live in
+  `UploadDefaults` (15s exponential backoff, 15m cap).
 - `di` — Hilt modules for network and database
 - `ui` — pairing screen, status screen, permission rationale, and theme
 
 Signing matches `docs/contracts/device-signing.md` and is unit-tested against
 `docs/contracts/examples/test-vector.json` (including `devHostVector`).
-Keystore generation is covered by an instrumented test.
+Keystore generation is covered by an instrumented test. Outbox encryption
+at rest (SQLCipher) is deferred; the queue stores plaintext bodies today.
 
 ### Incoming SMS and `device_msg_id`
 

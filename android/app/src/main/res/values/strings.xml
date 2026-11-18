@@ -12,6 +12,12 @@
         <item quantity="other">%d pending</item>
     </plurals>
     <string name="status_queue_recent">Recent queued messages</string>
+    <string name="status_parked">Parked (non-retryable)</string>
+    <plurals name="status_parked_count">
+        <item quantity="one">%d parked</item>
+        <item quantity="other">%d parked</item>
+    </plurals>
+    <string name="status_parked_recent">Recent parked messages</string>
 
     <string name="sms_rationale_title">Allow SMS access</string>
     <string name="sms_rationale_body">SMS Gateway reads incoming text messages on this phone so it can forward them to your gateway. It does not send SMS. Receive SMS is used for live delivery; Read SMS is used so the same messages can later be backfilled from the device inbox.</string>
