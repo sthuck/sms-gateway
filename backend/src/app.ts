@@ -58,6 +58,7 @@ export async function buildApp(
     });
   }
 
+  const ownsPool = options.pool === undefined && Boolean(config.DATABASE_URL);
   const pool =
     options.pool !== undefined
       ? options.pool
@@ -65,7 +66,8 @@ export async function buildApp(
         ? createPool({ connectionString: config.DATABASE_URL })
         : null;
 
-  if (pool) {
+  // Only close pools we created; injected test pools are owned by the caller.
+  if (ownsPool && pool) {
     app.addHook("onClose", async () => {
       await pool.end().catch(() => undefined);
     });
