@@ -158,6 +158,212 @@ class OutboxUploaderTest {
     }
 
     @Test
+    fun html502DoesNotParkAndRetries() = runBlocking {
+        dao.rows += sample("sms-1")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(502)
+                .setBody("<html>Bad Gateway</html>")
+                .addHeader("Content-Type", "text/html"),
+        )
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.RetryLater)
+        val row = dao.rows.single()
+        assertTrue(!row.parked)
+        assertEquals(1, row.attemptCount)
+    }
+
+    @Test
+    fun empty404BodyDoesNotParkAndRetries() = runBlocking {
+        dao.rows += sample("sms-1")
+        server.enqueue(MockResponse().setResponseCode(404).setBody(""))
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.RetryLater)
+        assertTrue(!dao.rows.single().parked)
+    }
+
+    @Test
+    fun empty500BodyDoesNotParkAndRetries() = runBlocking {
+        dao.rows += sample("sms-1")
+        server.enqueue(MockResponse().setResponseCode(500).setBody(""))
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.RetryLater)
+        assertTrue(!dao.rows.single().parked)
+        assertEquals(1, dao.rows.single().attemptCount)
+    }
+
+    @Test
+    fun replayDetectedSchedulesImmediateRetry() = runBlocking {
+        dao.rows += sample("sms-1")
+        DeviceApiMock.enqueueProblem(
+            server,
+            httpCode = 401,
+            code = ProblemCodes.REPLAY_DETECTED,
+            title = "replay",
+            detail = "nonce",
+            retryable = true,
+        )
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.RetryLater)
+        assertEquals(ProblemCodes.REPLAY_DETECTED, (result as UploadPassResult.RetryLater).reason)
+        assertEquals(1_000L, dao.rows.single().nextAttemptAtEpochMs)
+        assertTrue(!dao.rows.single().parked)
+    }
+
+    @Test
+    fun invalidTimestampSchedulesImmediateRetry() = runBlocking {
+        dao.rows += sample("sms-1")
+        DeviceApiMock.enqueueProblem(
+            server,
+            httpCode = 401,
+            code = ProblemCodes.INVALID_TIMESTAMP,
+            title = "skew",
+            detail = "window",
+            retryable = true,
+            serverTime = 1_794_995_160L,
+        )
+        val result = uploader.runOnce(nowEpochMs = 2_000L)
+        assertTrue(result is UploadPassResult.RetryLater)
+        assertEquals(ProblemCodes.INVALID_TIMESTAMP, (result as UploadPassResult.RetryLater).reason)
+        assertEquals(2_000L, dao.rows.single().nextAttemptAtEpochMs)
+        assertTrue(!dao.rows.single().parked)
+    }
+
+    @Test
+    fun rateLimitedHonoursRetryAfter() = runBlocking {
+        dao.rows += sample("sms-1")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(429)
+                .setBody(
+                    """
+                    {
+                      "type":"about:blank",
+                      "title":"rate",
+                      "status":429,
+                      "code":"rate_limited",
+                      "retryable":true,
+                      "detail":"slow down"
+                    }
+                    """.trimIndent(),
+                )
+                .addHeader("Content-Type", "application/problem+json")
+                .addHeader("Retry-After", "30"),
+        )
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.RetryLater)
+        assertEquals(1_000L + 30_000L, dao.rows.single().nextAttemptAtEpochMs)
+        assertTrue(!dao.rows.single().parked)
+    }
+
+    @Test
+    fun serviceUnavailableHonoursRetryAfter() = runBlocking {
+        dao.rows += sample("sms-1")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(503)
+                .setBody(
+                    """
+                    {
+                      "type":"about:blank",
+                      "title":"unavailable",
+                      "status":503,
+                      "code":"service_unavailable",
+                      "retryable":true,
+                      "detail":"try later"
+                    }
+                    """.trimIndent(),
+                )
+                .addHeader("Content-Type", "application/problem+json")
+                .addHeader("Retry-After", "12"),
+        )
+        val result = uploader.runOnce(nowEpochMs = 5_000L)
+        assertTrue(result is UploadPassResult.RetryLater)
+        assertEquals(5_000L + 12_000L, dao.rows.single().nextAttemptAtEpochMs)
+    }
+
+    @Test
+    fun batchTooLargeSplitsAndUploadsSubset() = runBlocking {
+        dao.rows += sample("sms-a")
+        dao.rows += sample("sms-b")
+        DeviceApiMock.enqueueProblem(
+            server,
+            httpCode = 413,
+            code = ProblemCodes.BATCH_TOO_LARGE,
+            title = "too big",
+            detail = "split",
+            retryable = false,
+        )
+        DeviceApiMock.enqueueBatchAccepted(server, deviceMsgId = "sms-a")
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.MorePending)
+        assertEquals(1, dao.rows.size)
+        assertEquals("sms-b", dao.rows.single().deviceMsgId)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun missingResultSchedulesRetryWithoutParking() = runBlocking {
+        dao.rows += sample("sms-1")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"results":[]}""")
+                .addHeader("Content-Type", "application/json"),
+        )
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.Idle || result is UploadPassResult.MorePending)
+        val row = dao.rows.single()
+        assertTrue(!row.parked)
+        assertEquals(1, row.attemptCount)
+        assertEquals("missing_result", row.lastError)
+        assertTrue(row.nextAttemptAtEpochMs > 1_000L)
+    }
+
+    @Test
+    fun invalidSignatureStopsForRePairWithoutParking() = runBlocking {
+        dao.rows += sample("sms-otp")
+        DeviceApiMock.enqueueProblem(
+            server,
+            httpCode = 401,
+            code = ProblemCodes.INVALID_SIGNATURE,
+            title = "bad sig",
+            detail = "mismatch",
+            retryable = false,
+        )
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.StopForRePair)
+        assertEquals(ProblemCodes.INVALID_SIGNATURE, (result as UploadPassResult.StopForRePair).code)
+        assertTrue(!dao.rows.single().parked)
+        assertEquals(0, dao.rows.single().attemptCount)
+    }
+
+    @Test
+    fun explicitNonRetryable4xxParksBatch() = runBlocking {
+        dao.rows += sample("sms-1")
+        DeviceApiMock.enqueueProblem(
+            server,
+            httpCode = 400,
+            code = ProblemCodes.INVALID_REQUEST,
+            title = "bad",
+            detail = "malformed",
+            retryable = false,
+        )
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.MorePending)
+        assertTrue(dao.rows.single().parked)
+    }
+
+    @Test
+    fun unparkAllMakesRowsReadyAgain() = runBlocking {
+        dao.rows += sample("sms-1").copy(parked = true, lastError = "http_404")
+        dao.unparkAll(2_000L)
+        val ready = dao.getReadyForUpload(2_000L, 10)
+        assertEquals(1, ready.size)
+        assertTrue(!ready.single().parked)
+    }
+
+    @Test
     fun duplicateInsertIgnored() = runBlocking {
         dao.rows += sample("sms-dup")
         assertEquals(-1L, dao.insert(sample("sms-dup", body = "other")))
@@ -197,6 +403,9 @@ private class FakeDao : QueuedMessageDao {
             .sortedBy { it.createdAtEpochMs }
             .take(limit)
 
+    override suspend fun earliestPendingAttemptAtEpochMs(): Long? =
+        rows.filter { !it.parked }.minOfOrNull { it.nextAttemptAtEpochMs }
+
     override suspend fun insert(message: QueuedMessageEntity): Long {
         if (rows.any { it.deviceMsgId == message.deviceMsgId }) return -1L
         rows += message
@@ -234,6 +443,16 @@ private class FakeDao : QueuedMessageDao {
                     nextAttemptAtEpochMs = nextAttemptAtEpochMs,
                     lastError = error,
                 )
+            } else {
+                row
+            }
+        }
+    }
+
+    override suspend fun unparkAll(nowEpochMs: Long) {
+        rows.replaceAll { row ->
+            if (row.parked) {
+                row.copy(parked = false, nextAttemptAtEpochMs = nowEpochMs, lastError = null)
             } else {
                 row
             }

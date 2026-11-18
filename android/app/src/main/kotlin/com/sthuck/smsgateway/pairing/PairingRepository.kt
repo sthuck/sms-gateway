@@ -74,12 +74,21 @@ class PairingRepository @Inject constructor(
                     ),
                 ),
             )
-            // Key first, then credentials: never persist a device id without a key.
-            deviceKeyStore.commitPendingKey()
+            // Promote key, persist alias+credentials, then retire the previous
+            // Keystore alias — never delete the old key before savePairing.
+            val previousAlias = deviceKeyStore.currentActiveAlias()
+            val activeAlias = deviceKeyStore.commitPendingKey()
             credentialStore.savePairing(
                 deviceId = response.deviceId,
                 serverUrl = validated.url,
+                activeKeyAlias = activeAlias,
             )
+            deviceKeyStore.restorePreferredActiveAlias(activeAlias)
+            if (previousAlias != null && previousAlias != activeAlias) {
+                deviceKeyStore.deleteKeyAlias(previousAlias)
+            }
+            // Re-pair must drain rows left pending / parked (e.g. after invalid_signature).
+            queuedMessageDao.unparkAll(System.currentTimeMillis())
             PairingResult.Success(deviceId = response.deviceId, serverUrl = validated.url)
         } catch (e: CancellationException) {
             deviceKeyStore.discardPendingKey()

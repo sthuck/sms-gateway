@@ -30,6 +30,10 @@ sealed class UploadPassResult {
 /**
  * Drains ready outbox rows via `POST /v1/messages:batch`.
  * Signing / clock-skew / credential wipe are handled by OkHttp interceptors.
+ *
+ * Request-level parking is reserved for explicit non-retryable 4xx problem
+ * codes. Missing/unparsable bodies, 5xx/408/429, and `invalid_signature`
+ * never park the batch (STH-49).
  */
 @Singleton
 class OutboxUploader @Inject constructor(
@@ -131,13 +135,16 @@ class OutboxUploader @Inject constructor(
         val problem = parseProblem(e)
         val code = problem?.code
         when (code) {
-            ProblemCodes.DEVICE_UNKNOWN, ProblemCodes.DEVICE_REVOKED -> {
-                // Interceptor already cleared credentials; ensure UI is notified.
+            ProblemCodes.DEVICE_UNKNOWN,
+            ProblemCodes.DEVICE_REVOKED,
+            ProblemCodes.INVALID_SIGNATURE,
+            -> {
+                // Interceptor clears credentials for these; leave outbox pending
+                // so a later re-pair can drain it (do not park).
                 pairingSession.notifyRePairRequired()
                 return UploadPassResult.StopForRePair(code)
             }
             ProblemCodes.INVALID_TIMESTAMP, ProblemCodes.REPLAY_DETECTED -> {
-                // Signing interceptor already applied skew + one resign for invalid_timestamp.
                 scheduleRetry(rows, nowEpochMs, code, delayMs = 0L)
                 return UploadPassResult.RetryLater(code)
             }
@@ -155,25 +162,34 @@ class OutboxUploader @Inject constructor(
                 return tryUploadSubset(first.rows, nowEpochMs)
             }
             ProblemCodes.RATE_LIMITED -> {
-                val retryAfterSec = e.response()?.headers()?.get("Retry-After")?.toLongOrNull()
-                val delay = (retryAfterSec?.times(1000L))
+                val delay = retryAfterDelayMs(e)
                     ?: backoffMs(rows.first().attemptCount)
                 scheduleRetry(rows, nowEpochMs, code, delayMs = delay)
                 return UploadPassResult.RetryLater(code)
             }
             ProblemCodes.INTERNAL_ERROR, ProblemCodes.SERVICE_UNAVAILABLE -> {
-                scheduleRetry(rows, nowEpochMs, code ?: "server_error")
-                return UploadPassResult.RetryLater(code ?: "server_error")
+                val delay = retryAfterDelayMs(e)
+                    ?: backoffMs(rows.minOf { it.attemptCount })
+                val reason = code!!
+                scheduleRetry(rows, nowEpochMs, reason, delayMs = delay)
+                return UploadPassResult.RetryLater(reason)
             }
             else -> {
-                if (problem?.retryable == true) {
-                    scheduleRetry(rows, nowEpochMs, code ?: "retryable_http_${e.code()}")
-                    return UploadPassResult.RetryLater(code ?: "retryable")
+                if (shouldRetryHttp(e.code(), problem)) {
+                    val reason = code ?: "http_${e.code()}"
+                    val delay = retryAfterDelayMs(e)
+                        ?: backoffMs(rows.minOf { it.attemptCount })
+                    scheduleRetry(rows, nowEpochMs, reason, delayMs = delay)
+                    return UploadPassResult.RetryLater(reason)
                 }
-                // Non-retryable request-level error: park every item in the batch.
+                // Explicit non-retryable 4xx problem+json only.
                 val detail = problem?.detail ?: problem?.title ?: "http_${e.code()}"
                 for (row in rows) {
-                    dao.park(row.deviceMsgId, "${code ?: "http_${e.code()}"}: $detail", nowEpochMs)
+                    dao.park(
+                        row.deviceMsgId,
+                        "${code ?: "http_${e.code()}"}: $detail",
+                        nowEpochMs,
+                    )
                 }
                 return UploadPassResult.MorePending
             }
@@ -235,6 +251,33 @@ class OutboxUploader @Inject constructor(
     }
 
     companion object {
+        /** Codes that permanently fail the whole request (park). */
+        private val NON_RETRYABLE_REQUEST_CODES = setOf(
+            ProblemCodes.INVALID_REQUEST,
+            ProblemCodes.CONTENT_HASH_MISMATCH,
+            ProblemCodes.BODY_TOO_LARGE,
+        )
+
+        /**
+         * Retry when: 5xx / 408 / 429, missing/unparsable problem body, or
+         * problem.retryable == true. Park only for an explicit non-retryable
+         * 4xx problem code.
+         */
+        fun shouldRetryHttp(httpCode: Int, problem: Problem?): Boolean {
+            if (httpCode in 500..599 || httpCode == 408 || httpCode == 429) return true
+            if (problem == null) return true
+            if (problem.retryable) return true
+            if (problem.code in NON_RETRYABLE_REQUEST_CODES) return false
+            // Unknown non-retryable 4xx with a parsed problem → park.
+            return httpCode !in 400..499
+        }
+
+        fun retryAfterDelayMs(e: HttpException): Long? {
+            val raw = e.response()?.headers()?.get("Retry-After") ?: return null
+            raw.toLongOrNull()?.let { return it.coerceAtLeast(0L) * 1000L }
+            return null
+        }
+
         /** Full-jitter exponential backoff from 15s, capped at 15m (contract). */
         fun backoffMs(attemptCount: Int): Long {
             val exp = min(attemptCount, 6)

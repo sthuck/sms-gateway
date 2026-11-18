@@ -199,8 +199,8 @@ class RequestSigningInterceptorTest {
         override suspend fun clearDeviceId() {
             value = value.copy(deviceId = null)
         }
-        override suspend fun savePairing(deviceId: String, serverUrl: String) {
-            value = PairingCredentials(deviceId, serverUrl)
+        override suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String) {
+            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias)
         }
         override suspend fun clearAll() {
             value = PairingCredentials(null, value.serverUrl)
@@ -219,7 +219,10 @@ class RequestSigningInterceptorTest {
         override fun requireSigner() = signer
         override fun requirePendingSigner() = signer
         override fun createPendingKeypair() = error("not used")
-        override fun commitPendingKey() = error("not used")
+        override fun commitPendingKey(): String = error("not used")
+        override fun currentActiveAlias(): String? = if (deleted) null else "alias_a"
+        override fun restorePreferredActiveAlias(alias: String?) = Unit
+        override fun deleteKeyAlias(alias: String) = Unit
         override fun discardPendingKey() = Unit
     }
 }

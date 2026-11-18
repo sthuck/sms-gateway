@@ -90,6 +90,7 @@ class MainActivity : ComponentActivity() {
                             statusViewModel.confirmUnpair(clearQueue = false)
                         },
                         onDismissUnpair = statusViewModel::dismissUnpair,
+                        onRetryParked = statusViewModel::retryParked,
                     )
                 }
             }

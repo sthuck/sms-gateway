@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -13,6 +14,7 @@ class MessageUploadWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val uploader: OutboxUploader,
     private val uploadScheduler: UploadScheduler,
+    private val queuedMessageDao: QueuedMessageDao,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
@@ -21,6 +23,7 @@ class MessageUploadWorker @AssistedInject constructor(
         while (guard++ < 32) {
             when (val pass = uploader.runOnce()) {
                 is UploadPassResult.Idle, is UploadPassResult.NothingToDo -> {
+                    scheduleIfPendingNotDue()
                     return Result.success()
                 }
                 is UploadPassResult.MorePending -> {
@@ -28,7 +31,10 @@ class MessageUploadWorker @AssistedInject constructor(
                     continue
                 }
                 is UploadPassResult.RetryLater -> {
-                    return Result.retry()
+                    // Persist nextAttemptAt in Room; wake via delayed unique work
+                    // so retries survive without a live process (M1 / STH-49).
+                    scheduleIfPendingNotDue()
+                    return Result.success()
                 }
                 is UploadPassResult.StopForRePair -> {
                     return Result.failure()
@@ -38,8 +44,19 @@ class MessageUploadWorker @AssistedInject constructor(
                 }
             }
         }
-        // Still pending after many batches — schedule another unique run.
+        // Still pending after many batches — chain another unique run.
         uploadScheduler.enqueueUpload()
         return Result.success()
+    }
+
+    private suspend fun scheduleIfPendingNotDue() {
+        val next = queuedMessageDao.earliestPendingAttemptAtEpochMs() ?: return
+        val now = System.currentTimeMillis()
+        if (next > now) {
+            uploadScheduler.enqueueDelayedUntil(next)
+        } else {
+            // Ready rows remain (e.g. raced with insert) — run ASAP.
+            uploadScheduler.enqueueUpload()
+        }
     }
 }

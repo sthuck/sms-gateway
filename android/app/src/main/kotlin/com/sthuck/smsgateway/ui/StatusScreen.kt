@@ -38,6 +38,7 @@ fun StatusScreen(
     onConfirmUnpairClearQueue: () -> Unit = {},
     onConfirmUnpairKeepQueue: () -> Unit = {},
     onDismissUnpair: () -> Unit = {},
+    onRetryParked: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -115,6 +116,14 @@ fun StatusScreen(
                     state.parkedCount,
                 ),
             )
+            if (state.parkedCount > 0) {
+                OutlinedButton(
+                    onClick = onRetryParked,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.status_parked_retry))
+                }
+            }
             if (state.recentParked.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
                 Text(

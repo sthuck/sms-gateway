@@ -39,6 +39,10 @@ interface QueuedMessageDao {
     )
     suspend fun getReadyForUpload(nowEpochMs: Long, limit: Int = 100): List<QueuedMessageEntity>
 
+    /** Earliest nextAttemptAt among non-parked rows, or null when the outbox is empty. */
+    @Query("SELECT MIN(nextAttemptAtEpochMs) FROM queued_messages WHERE parked = 0")
+    suspend fun earliestPendingAttemptAtEpochMs(): Long?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(message: QueuedMessageEntity): Long
 
@@ -67,4 +71,10 @@ interface QueuedMessageDao {
         nextAttemptAtEpochMs: Long,
         error: String?,
     )
+
+    @Query(
+        "UPDATE queued_messages SET parked = 0, nextAttemptAtEpochMs = :nowEpochMs, " +
+            "lastError = NULL WHERE parked = 1",
+    )
+    suspend fun unparkAll(nowEpochMs: Long)
 }

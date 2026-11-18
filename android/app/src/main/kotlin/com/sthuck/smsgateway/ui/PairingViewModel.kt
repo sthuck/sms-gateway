@@ -8,6 +8,8 @@ import com.sthuck.smsgateway.pairing.PairingRepository
 import com.sthuck.smsgateway.pairing.PairingResult
 import com.sthuck.smsgateway.pairing.PairingUriParser
 import com.sthuck.smsgateway.pairing.ServerUrlValidator
+import com.sthuck.smsgateway.upload.UploadScheduler
+import androidx.work.ExistingWorkPolicy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +39,7 @@ data class PairingUiState(
 class PairingViewModel @Inject constructor(
     private val pairingRepository: PairingRepository,
     private val credentialStore: PairingCredentialStore,
+    private val uploadScheduler: UploadScheduler,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(PairingUiState())
     val uiState: StateFlow<PairingUiState> = _uiState.asStateFlow()
@@ -83,6 +86,7 @@ class PairingViewModel @Inject constructor(
             _uiState.update { it.copy(inProgress = true, error = null) }
             when (val result = pairingRepository.pair(pending.code, pending.serverUrl)) {
                 is PairingResult.Success -> {
+                    uploadScheduler.enqueueUpload(ExistingWorkPolicy.REPLACE)
                     _uiState.update {
                         it.copy(
                             inProgress = false,

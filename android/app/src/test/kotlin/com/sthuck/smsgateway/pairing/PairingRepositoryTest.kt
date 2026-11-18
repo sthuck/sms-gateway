@@ -123,13 +123,17 @@ class PairingRepositoryTest {
         assertTrue("got $result", result is PairingResult.Success)
         assertEquals(DeviceApiMock.SAMPLE_DEVICE_ID, credentials.current().deviceId)
         assertEquals(candidate, credentials.current().serverUrl)
+        assertEquals("alias_b", credentials.current().activeKeyAlias)
         assertEquals(1, keys.commitCount.get())
         assertEquals(0, keys.discardCount.get())
         assertTrue(keys.hasKey())
         assertFalse(keys.hasPendingKey())
         val commitIdx = events.indexOf("commit")
         val saveIdx = events.indexOf("save")
+        val deleteIdx = events.indexOf("delete:alias_a")
         assertTrue("commit before save: $events", commitIdx >= 0 && saveIdx > commitIdx)
+        assertTrue("delete previous after save: $events", deleteIdx > saveIdx)
+        assertEquals(listOf("alias_a"), keys.deletedAliases)
     }
 
     @Test
@@ -186,9 +190,9 @@ class PairingRepositoryTest {
         override suspend fun clearDeviceId() {
             value = value.copy(deviceId = null)
         }
-        override suspend fun savePairing(deviceId: String, serverUrl: String) {
+        override suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String) {
             events += "save"
-            value = PairingCredentials(deviceId, serverUrl)
+            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias)
         }
         override suspend fun clearAll() {
             value = PairingCredentials(null, "https://sms.sthuck.info")
@@ -202,32 +206,51 @@ class PairingRepositoryTest {
     ) : DeviceKeyAccess {
         private val active = AtomicBoolean(initiallyHasKey)
         private val pending = AtomicBoolean(false)
+        private var activeAlias: String? = if (initiallyHasKey) "alias_a" else null
+        private var pendingAlias: String? = null
         val createCount = AtomicInteger(0)
         val commitCount = AtomicInteger(0)
         val discardCount = AtomicInteger(0)
+        val deletedAliases = mutableListOf<String>()
 
         override fun hasKey() = active.get()
         override fun hasPendingKey() = pending.get()
         override fun deleteKey() {
             active.set(false)
             pending.set(false)
+            activeAlias = null
+            pendingAlias = null
         }
         override fun requireSigner() = signer
         override fun requirePendingSigner() = signer
         override fun createPendingKeypair(): String {
             createCount.incrementAndGet()
             pending.set(true)
+            pendingAlias = "alias_b"
             return "pending-spki"
         }
-        override fun commitPendingKey() {
+        override fun commitPendingKey(): String {
             events += "commit"
             commitCount.incrementAndGet()
+            val next = pendingAlias ?: error("no pending")
             pending.set(false)
+            pendingAlias = null
             active.set(true)
+            activeAlias = next
+            return next
+        }
+        override fun currentActiveAlias(): String? = activeAlias
+        override fun restorePreferredActiveAlias(alias: String?) {
+            if (alias != null) activeAlias = alias
+        }
+        override fun deleteKeyAlias(alias: String) {
+            events += "delete:$alias"
+            deletedAliases += alias
         }
         override fun discardPendingKey() {
             discardCount.incrementAndGet()
             pending.set(false)
+            pendingAlias = null
         }
     }
 
@@ -247,6 +270,7 @@ class PairingRepositoryTest {
             nowEpochMs: Long,
             limit: Int,
         ): List<QueuedMessageEntity> = emptyList()
+        override suspend fun earliestPendingAttemptAtEpochMs(): Long? = null
         override suspend fun insert(message: QueuedMessageEntity): Long {
             rows.incrementAndGet()
             return 1L
@@ -263,5 +287,6 @@ class PairingRepositoryTest {
             nextAttemptAtEpochMs: Long,
             error: String?,
         ) = Unit
+        override suspend fun unparkAll(nowEpochMs: Long) = Unit
     }
 }

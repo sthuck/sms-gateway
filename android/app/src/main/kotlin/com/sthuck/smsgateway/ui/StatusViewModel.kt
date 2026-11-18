@@ -6,6 +6,8 @@ import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.pairing.PairingRepository
+import com.sthuck.smsgateway.upload.UploadScheduler
+import androidx.work.ExistingWorkPolicy
 import com.sthuck.smsgateway.sms.SmsPermissionSnapshot
 import com.sthuck.smsgateway.sms.SmsPermissionState
 import com.sthuck.smsgateway.sms.smsPermissionState
@@ -45,6 +47,7 @@ class StatusViewModel @Inject constructor(
     private val queuedMessageDao: QueuedMessageDao,
     private val credentialStore: PairingCredentialStore,
     private val pairingRepository: PairingRepository,
+    private val uploadScheduler: UploadScheduler,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
         StatusUiState(
@@ -118,6 +121,13 @@ class StatusViewModel @Inject constructor(
         viewModelScope.launch {
             pairingRepository.unpair(clearQueue = clearQueue)
             _uiState.update { it.copy(unpairConfirmVisible = false) }
+        }
+    }
+
+    fun retryParked() {
+        viewModelScope.launch {
+            queuedMessageDao.unparkAll(System.currentTimeMillis())
+            uploadScheduler.enqueueUpload(ExistingWorkPolicy.REPLACE)
         }
     }
 

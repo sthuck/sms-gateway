@@ -21,6 +21,8 @@ private val Context.pairingDataStore: DataStore<Preferences> by preferencesDataS
 data class PairingCredentials(
     val deviceId: String?,
     val serverUrl: String,
+    /** Android Keystore alias for the committed signing key (STH-11 residual). */
+    val activeKeyAlias: String? = null,
 ) {
     val isPaired: Boolean get() = !deviceId.isNullOrBlank()
 }
@@ -32,7 +34,7 @@ interface PairingCredentialsReader {
 
 interface PairingStateAccess : PairingCredentialsReader {
     suspend fun clearDeviceId()
-    suspend fun savePairing(deviceId: String, serverUrl: String)
+    suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String)
     suspend fun clearAll()
 }
 
@@ -42,11 +44,13 @@ class PairingCredentialStore @Inject constructor(
 ) : PairingStateAccess {
     private val deviceIdKey = stringPreferencesKey("device_id")
     private val serverUrlKey = stringPreferencesKey("server_url")
+    private val activeKeyAliasKey = stringPreferencesKey("active_key_alias")
 
     val credentials: Flow<PairingCredentials> = context.pairingDataStore.data.map { prefs ->
         PairingCredentials(
             deviceId = prefs[deviceIdKey]?.takeIf { it.isNotBlank() },
             serverUrl = prefs[serverUrlKey] ?: BuildConfig.BACKEND_URL,
+            activeKeyAlias = prefs[activeKeyAliasKey]?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -58,10 +62,11 @@ class PairingCredentialStore @Inject constructor(
         }
     }
 
-    override suspend fun savePairing(deviceId: String, serverUrl: String) {
+    override suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String) {
         context.pairingDataStore.edit { prefs ->
             prefs[deviceIdKey] = deviceId
             prefs[serverUrlKey] = normalizeBaseUrl(serverUrl)
+            prefs[activeKeyAliasKey] = activeKeyAlias
         }
     }
 
@@ -69,6 +74,7 @@ class PairingCredentialStore @Inject constructor(
     override suspend fun clearDeviceId() {
         context.pairingDataStore.edit { prefs ->
             prefs.remove(deviceIdKey)
+            prefs.remove(activeKeyAliasKey)
         }
     }
 
