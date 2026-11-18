@@ -105,5 +105,23 @@ Must exit 0. The embedded keypair is a **throwaway test vector**.
 
 ## Migrations
 
-Migration tooling is stubbed under `backend/migrations/` (node-pg-migrate).
-No real schema yet — that is Linear STH-8.
+With Compose Postgres running:
+
+```bash
+cd backend
+export MIGRATE_DATABASE_URL=postgres://sms:sms@localhost:5432/sms
+export DATABASE_URL="$MIGRATE_DATABASE_URL"
+# Required — local-dev-only value. migrate:up fails if unset.
+export SMS_APP_PASSWORD=sms_app
+pnpm migrate:up
+```
+
+This creates role `sms_app` (password set only on first create), tables,
+RLS, and lookup functions. The API should then use
+`DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms`.
+See `docs/schema.md` for the ER diagram and roles model. To rotate the
+app role password later: `ALTER ROLE sms_app PASSWORD '…'` (not migrate).
+
+Integration tests expect the same URLs (or `APP_DATABASE_URL` for the app
+role) and an explicit `SMS_APP_PASSWORD`. They run against a real Postgres
+(Compose locally; service container in CI).

@@ -19,19 +19,21 @@
     "lint:fix": "eslint . --fix && prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate": "node-pg-migrate -m migrations",
-    "migrate:up": "node-pg-migrate up -m migrations",
-    "migrate:down": "node-pg-migrate down -m migrations",
-    "migrate:create": "node-pg-migrate create -m migrations"
+    "migrate": "node scripts/migrate.mjs",
+    "migrate:up": "node scripts/migrate.mjs up",
+    "migrate:down": "node scripts/migrate.mjs down",
+    "migrate:create": "node-pg-migrate create -m migrations --migration-file-language js"
   },
   "dependencies": {
     "fastify": "^5.2.1",
+    "pg": "^8.23.1",
     "pino": "^9.6.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@types/node": "^22.10.5",
+    "@types/pg": "^8.23.1",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "node-pg-migrate": "^7.9.1",
