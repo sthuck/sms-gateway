@@ -37,7 +37,6 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          # Cache can retain incomplete artifact downloads across retries.
           cache-read-only: false
           dependency-graph: disabled
 
@@ -88,6 +87,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          set -eux
+          df -h
+          # Previous run: emulator FATAL "Not enough space to create userdata
+          # partition. Available: 6244 MB, need 7372 MB". Drop heavy unused
+          # toolchains so the AVD userdata image fits.
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android/sdk/ndk* || true
+          sudo rm -rf /usr/local/lib/android/sdk/system-images/android-28 || true
+          sudo rm -rf /usr/local/lib/android/sdk/system-images/android-29 || true
+          sudo rm -rf /usr/local/lib/android/sdk/system-images/android-30 || true
+          sudo rm -rf /usr/local/lib/android/sdk/system-images/android-31 || true
+          sudo rm -rf /usr/local/lib/android/sdk/system-images/android-32 || true
+          sudo rm -rf /usr/local/lib/android/sdk/system-images/android-33 || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo docker system prune -af || true
+          df -h
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -137,7 +156,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-api34-google-apis-x86_64-v1
+          key: avd-api34-google-apis-x86_64-disk4g-v2
 
       - name: Generate AVD snapshot
         if: steps.avd-cache.outputs.cache-hit != 'true'
@@ -146,8 +165,13 @@ jobs:
           api-level: 34
           target: google_apis
           arch: x86_64
+          # Default userdata (~7.3 GiB) exceeded free space on ubuntu-latest.
+          disk-size: 4096M
+          heap-size: 512M
+          ram-size: 2048M
+          cores: 2
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-metrics
           disable-animations: false
           working-directory: android
           script: echo "Generated AVD snapshot for caching."
@@ -158,8 +182,12 @@ jobs:
           api-level: 34
           target: google_apis
           arch: x86_64
+          disk-size: 4096M
+          heap-size: 512M
+          ram-size: 2048M
+          cores: 2
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-metrics
           disable-animations: true
           working-directory: android
           script: ./scripts/run-connected-dev-debug.sh
