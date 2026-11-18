@@ -7,6 +7,8 @@ on:
       - "android/**"
       - ".github/workflows/android.yml"
       - ".github/workflows/android-ci.yml"
+  # Same path filter as Android CI; push is main-only so PR branches do not
+  # get a duplicate workflow run alongside pull_request.
   pull_request:
     paths:
       - "android/**"

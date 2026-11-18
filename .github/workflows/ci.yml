@@ -9,6 +9,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# paths-filter needs pull-requests:read to list PR files; without it the
+# Detect changes job fails with "Resource not accessible by integration".
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   changes:
     name: Detect changes
