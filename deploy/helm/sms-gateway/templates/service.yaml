@@ -1,0 +1,39 @@
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sms-gateway.fullname" . }}-api
+  labels:
+    {{- include "sms-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.api.service.type }}
+  ports:
+    - port: {{ .Values.api.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "sms-gateway.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+{{- end }}
+{{- if .Values.mcp.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sms-gateway.fullname" . }}-mcp
+  labels:
+    {{- include "sms-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  type: {{ .Values.mcp.service.type }}
+  ports:
+    - port: {{ .Values.mcp.service.port }}
+      targetPort: {{ .Values.mcp.service.port }}
+      protocol: TCP
+      name: mcp
+  selector:
+    {{- include "sms-gateway.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+{{- end }}

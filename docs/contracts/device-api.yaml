@@ -1,0 +1,911 @@
+openapi: 3.1.0
+info:
+  title: SMS Gateway Device API
+  summary: Android device pairing and SMS ingestion contract (STH-5 v1 draft 2)
+  description: |
+    Contract between the Android app and the backend ingestion API.
+
+    Devices authenticate with ECDSA P-256 (ES256) request signatures.
+    The signing scheme, canonical string, test vector, and Android notes
+    are defined in `docs/contracts/device-signing.md`. Idempotency, batch
+    limits, error codes, retries, and versioning are defined in
+    `docs/contracts/semantics.md`.
+
+    Base path version is `/v1`. Changes inside `/v1` are additive only.
+
+    This revision is v1 draft 2 (Android review applied): per-message
+    body cap 32768, optional `server` in the pairing QR, `server_time`
+    plus `Date` on `invalid_timestamp`, `401 device_unknown`, cleartext
+    HTTP only for the Android `dev` mock at `10.0.2.2:4010`, and request
+    bodies signed over the exact bytes on the wire (no gzip).
+  version: 0.2.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: https://api.sms-gateway.example
+    description: |
+      Placeholder production origin. HTTPS only. The Host header
+      value is part of the signed canonical string and must be an
+      allowed backend host. Replace with the deployed API host.
+  - url: http://10.0.2.2:4010
+    description: |
+      Android emulator dev mock (cleartext HTTP). Used only by the
+      Android `dev` flavour talking to a local mock. Production and
+      the prod flavour are HTTPS only. Canonical HOST is
+      `10.0.2.2:4010` (kept as sent, lowercased, port included).
+
+tags:
+  - name: Devices
+    description: Pairing and device status
+  - name: Messages
+    description: Idempotent SMS batch ingestion
+
+paths:
+  /v1/devices/pair:
+    post:
+      operationId: pairDevice
+      tags: [Devices]
+      summary: Pair a device with a one-time pairing code
+      description: |
+        Completes pairing started in the web UI. The client sends a
+        single-use pairing code (5 minute TTL), the device public key,
+        and device info. The request is signed with the corresponding
+        private key as proof of possession. There is no `X-Device-Id`
+        yet; that field of the canonical string is empty.
+
+        On success the code is burned, a device and credential are
+        created, and a device id is returned. Subsequent requests use
+        `X-Device-Id` and the same key.
+
+        This endpoint is not authenticated with an existing device
+        credential. Replay protection is keyed by the SHA-256 of the
+        public key for the clock-skew window.
+
+        The web UI presents a pairing QR (and the raw code) of the form
+        `smsgw://pair?code=<code>`. An optional `server` query
+        parameter may be added, whose value is the URL-encoded API
+        base URL, so the app does not need a hardcoded backend, e.g.
+        `smsgw://pair?code=7K3M-9Q2P&server=https%3A%2F%2Fapi.sms-gateway.example`.
+        The request `Host` must be the host (and port, if any) of that
+        base URL, must match the HOST field in the signed canonical
+        string, and must be one of the server's allowed backend hosts.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/XTimestamp"
+        - $ref: "#/components/parameters/XNonce"
+        - $ref: "#/components/parameters/XContentSha256"
+        - $ref: "#/components/parameters/XSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PairRequest"
+            examples:
+              pixel:
+                summary: Successful pairing request
+                value:
+                  pairing_code: "7K3M-9Q2P"
+                  alg: ES256
+                  public_key: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyl6LQOh0Vol6Y7eUeYprtMPD_cB9oVwRFBAQ6BpcRbXZAXLl745jKd-uxX4bwUlHxH-jHsMc___m3WlOguxwRQ
+                  device_info:
+                    name: Google Pixel 8
+                    platform: android
+                    manufacturer: Google
+                    model: Pixel 8
+                    os_version: "14"
+                    app_version: 1.0.0
+                    sdk_int: 34
+      responses:
+        "201":
+          description: Device paired
+          headers:
+            RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+            RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+            RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairResponse"
+              examples:
+                created:
+                  value:
+                    device_id: 018f3c2a-9b4d-7e21-a456-426614174000
+                    name: Google Pixel 8
+                    status: active
+                    paired_at: "2026-11-18T09:46:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/messages:batch:
+    post:
+      operationId: ingestMessageBatch
+      tags: [Messages]
+      summary: Upload a batch of SMS messages
+      description: |
+        Idempotent upsert of SMS messages for the authenticated device.
+
+        The batch is evaluated as a whole only after request-level
+        authentication and size checks succeed. The HTTP status is `200`
+        when every item has a per-item result, including mixes of
+        accepted, duplicate, and rejected items.
+
+        Uniqueness key is `(device_id, device_msg_id)`. A repeat of an
+        already stored `device_msg_id` is a no-op and returns
+        `status: duplicate` with the existing server message id. The
+        body and other fields of a duplicate are not updated.
+
+        Limits: at most 100 messages and 1 048 576 bytes (1 MiB) of
+        raw request body. Clients pack batches by bytes and item count
+        to stay under both limits. A per-message `body` may be at most
+        32 768 Unicode characters; a longer body is a per-item
+        `body_too_large` rejection, not a request-level 413.
+
+        The request body is signed over the exact bytes sent on the
+        wire. Do not re-serialise after hashing, and do not gzip or
+        otherwise set `Content-Encoding` on the request (not supported
+        in v1).
+
+        Request-level failures (auth, revocation, unknown device,
+        payload too large, rate limit) return a problem+json document
+        and process no items. Backfill uses this same endpoint.
+      security:
+        - DeviceSignature: []
+      parameters:
+        - $ref: "#/components/parameters/XDeviceId"
+        - $ref: "#/components/parameters/XTimestamp"
+        - $ref: "#/components/parameters/XNonce"
+        - $ref: "#/components/parameters/XContentSha256"
+        - $ref: "#/components/parameters/XSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageBatchRequest"
+            examples:
+              testVector:
+                summary: Single inbound message (signing test vector body)
+                value:
+                  messages:
+                    - device_msg_id: sms-42
+                      sender: "+15551234567"
+                      body: Your code is 123456
+                      received_at: "2026-11-18T09:45:12Z"
+                      sim_slot: 0
+                      direction: inbound
+      responses:
+        "200":
+          description: Batch evaluated; see per-item results
+          headers:
+            RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+            RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+            RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageBatchResponse"
+              examples:
+                mixed:
+                  summary: Accepted, duplicate, and rejected items
+                  value:
+                    results:
+                      - device_msg_id: sms-42
+                        status: accepted
+                        id: 01932b1c-7a8e-7c01-9f10-6b2d8e4a11aa
+                      - device_msg_id: sms-7
+                        status: duplicate
+                        id: 01932b00-1111-7c01-9f10-6b2d8e4a0001
+                      - device_msg_id: ""
+                        status: rejected
+                        error:
+                          code: missing_field
+                          detail: device_msg_id is required
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/devices/me:
+    get:
+      operationId: getDeviceMe
+      tags: [Devices]
+      summary: Get this device's status
+      description: |
+        Returns the calling device's status and last-seen timestamp
+        for the app status screen.
+
+        Unlike write endpoints, a revoked device with a valid signature
+        still receives `200` and `status: revoked` so the app can
+        prompt the user to re-pair. `last_seen_at` is the timestamp of
+        this request after a successful signature check.
+
+        The body is empty; `X-Content-SHA256` must be the SHA-256 of
+        the empty byte string
+        (`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`).
+      security:
+        - DeviceSignature: []
+      parameters:
+        - $ref: "#/components/parameters/XDeviceId"
+        - $ref: "#/components/parameters/XTimestamp"
+        - $ref: "#/components/parameters/XNonce"
+        - $ref: "#/components/parameters/XContentSha256"
+        - $ref: "#/components/parameters/XSignature"
+      responses:
+        "200":
+          description: Device status
+          headers:
+            RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+            RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+            RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceStatus"
+              examples:
+                active:
+                  value:
+                    device_id: 018f3c2a-9b4d-7e21-a456-426614174000
+                    name: Google Pixel 8
+                    status: active
+                    paired_at: "2026-11-18T09:00:00Z"
+                    last_seen_at: "2026-11-18T09:46:00Z"
+                revoked:
+                  value:
+                    device_id: 018f3c2a-9b4d-7e21-a456-426614174000
+                    name: Google Pixel 8
+                    status: revoked
+                    paired_at: "2026-11-18T09:00:00Z"
+                    last_seen_at: "2026-11-18T09:46:00Z"
+                    revoked_at: "2026-11-18T09:30:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+components:
+  securitySchemes:
+    DeviceSignature:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: |
+        ES256 request signature. Required headers, all covered by the
+        canonical string unless noted:
+
+        - `X-Device-Id` (UUID; omit on `POST /v1/devices/pair`)
+        - `X-Timestamp` (Unix seconds, UTC)
+        - `X-Nonce` (unique per request, 22–86 character base64url)
+        - `X-Content-SHA256` (lowercase hex SHA-256 of the exact
+          request body bytes on the wire; no re-serialisation, no
+          gzip / `Content-Encoding` on requests)
+        - `X-Signature` (IEEE P1363 r||s, 64 bytes, base64url no padding)
+        - `Host` (standard HTTP header; included in the canonical
+          string; include the port when the client sent one)
+
+        Algorithm: ECDSA P-256 with SHA-256 (JWA `ES256`). Public keys
+        are X.509 SubjectPublicKeyInfo (SPKI) DER, base64url, no padding.
+
+        Canonical string (UTF-8, newline between fields, no trailing
+        newline after `NONCE`):
+
+        ```
+        v1
+        METHOD
+        PATH
+        QUERY
+        HOST
+        DEVICE_ID
+        TIMESTAMP
+        CONTENT_SHA256
+        NONCE
+        ```
+
+        Clock skew window is ±300 seconds. Nonce and signature values
+        are rejected if reused for the same device (or, at pairing, the
+        same public key) within 360 seconds.
+
+        See `docs/contracts/device-signing.md` for the full scheme and a
+        worked, verifiable test vector.
+
+  parameters:
+    XDeviceId:
+      name: X-Device-Id
+      in: header
+      required: true
+      description: Device id returned by `POST /v1/devices/pair`.
+      schema:
+        $ref: "#/components/schemas/DeviceId"
+    XTimestamp:
+      name: X-Timestamp
+      in: header
+      required: true
+      description: Unix time in seconds (UTC), decimal integer, no leading zeros.
+      schema:
+        type: string
+        pattern: "^[1-9][0-9]{8,11}$"
+        examples: ["1794995160"]
+    XNonce:
+      name: X-Nonce
+      in: header
+      required: true
+      description: |
+        Unique request nonce. 16–64 bytes of cryptographic randomness,
+        encoded as unpadded base64url (22–86 characters).
+      schema:
+        type: string
+        minLength: 22
+        maxLength: 86
+        pattern: "^[A-Za-z0-9_-]+$"
+        examples: ["V1nQe4r0sK8mP2yL6dF9TQ"]
+    XContentSha256:
+      name: X-Content-SHA256
+      in: header
+      required: true
+      description: |
+        Lowercase hex SHA-256 of the exact request body bytes sent on
+        the wire. Do not re-serialise the JSON after hashing. Request
+        bodies must not be gzipped or otherwise compressed;
+        `Content-Encoding` on requests is not supported in v1 and is
+        rejected with `400 invalid_request`.
+        For an empty body use the SHA-256 of the empty byte string,
+        `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+        Must match the received body bytes or the request is rejected
+        with `content_hash_mismatch`.
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        examples:
+          - "8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9"
+    XSignature:
+      name: X-Signature
+      in: header
+      required: true
+      description: |
+        ES256 signature of the canonical string, IEEE P1363 encoding
+        (r and s as 32-byte big-endian integers, concatenated), then
+        unpadded base64url. 86 characters. See `docs/contracts/device-signing.md`.
+      schema:
+        type: string
+        minLength: 86
+        maxLength: 86
+        pattern: "^[A-Za-z0-9_-]{86}$"
+        examples:
+          - "dzk2otghSLa69_4gd_jzCjHEzSXl5lUoJRXd5OmXEPamGBcoTIklHuRNTyatMjYv5_ar0fXNwucc9h9Ox189uQ"
+
+  headers:
+    RateLimit-Limit:
+      description: Maximum requests allowed in the current policy window.
+      schema:
+        type: integer
+        examples: [60]
+    RateLimit-Remaining:
+      description: Requests remaining in the current window.
+      schema:
+        type: integer
+        examples: [59]
+    RateLimit-Reset:
+      description: Seconds until the current window resets (delta-seconds).
+      schema:
+        type: integer
+        minimum: 0
+        examples: [42]
+    Retry-After:
+      description: Seconds the client should wait before retrying.
+      schema:
+        type: integer
+        minimum: 1
+        examples: [12]
+    Date:
+      description: |
+        Standard HTTP Date header (RFC 9110). Required on
+        `401 invalid_timestamp` so the client can compute a clock
+        offset together with the `server_time` body field.
+      schema:
+        type: string
+        examples: ["Wed, 18 Nov 2026 09:46:00 GMT"]
+
+  responses:
+    BadRequest:
+      description: Malformed request, invalid pairing code, or content hash mismatch
+      headers:
+        RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+        RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+        RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            invalidPairingCode:
+              summary: Pairing code expired or already used
+              value:
+                type: https://sms-gateway.example/problems/invalid_pairing_code
+                title: Invalid pairing code
+                status: 400
+                detail: The pairing code is expired, already used, or malformed.
+                code: invalid_pairing_code
+                retryable: false
+                instance: /v1/devices/pair
+            contentHashMismatch:
+              value:
+                type: https://sms-gateway.example/problems/content_hash_mismatch
+                title: Content hash mismatch
+                status: 400
+                detail: X-Content-SHA256 does not match the SHA-256 of the request body.
+                code: content_hash_mismatch
+                retryable: false
+                instance: /v1/messages:batch
+    Unauthorized:
+      description: |
+        Missing or invalid signature, timestamp, nonce, or unknown
+        device. `401 invalid_timestamp` includes a `Date` response
+        header and a `server_time` (Unix seconds) field in the body.
+      headers:
+        RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+        RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+        RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+        Date: { $ref: "#/components/headers/Date" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            invalidSignature:
+              value:
+                type: https://sms-gateway.example/problems/invalid_signature
+                title: Invalid signature
+                status: 401
+                detail: The request signature could not be verified.
+                code: invalid_signature
+                retryable: false
+                instance: /v1/messages:batch
+            invalidTimestamp:
+              summary: Clock skew; Date header and server_time are required
+              value:
+                type: https://sms-gateway.example/problems/invalid_timestamp
+                title: Timestamp outside allowed window
+                status: 401
+                detail: X-Timestamp is more than 300 seconds from server time.
+                code: invalid_timestamp
+                retryable: true
+                server_time: 1794995160
+                instance: /v1/messages:batch
+            deviceUnknown:
+              summary: Unknown or deleted device id; clear credential and re-pair
+              value:
+                type: https://sms-gateway.example/problems/device_unknown
+                title: Device unknown
+                status: 401
+                detail: This device id is unknown or has been deleted. Clear the stored credential and pair again.
+                code: device_unknown
+                retryable: false
+                instance: /v1/messages:batch
+            replayDetected:
+              value:
+                type: https://sms-gateway.example/problems/replay_detected
+                title: Replay detected
+                status: 401
+                detail: This nonce or signature was already used within the replay window.
+                code: replay_detected
+                retryable: true
+                instance: /v1/messages:batch
+    Forbidden:
+      description: |
+        Device has been revoked. The client must clear its stored
+        credential and prompt re-pairing, the same path as
+        `401 device_unknown`. This code is not used on
+        `GET /v1/devices/me`, which still returns `200` and
+        `status: revoked` after a valid signature.
+      headers:
+        RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+        RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+        RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            revoked:
+              value:
+                type: https://sms-gateway.example/problems/device_revoked
+                title: Device revoked
+                status: 403
+                detail: This device credential has been revoked. Pair a new device.
+                code: device_revoked
+                retryable: false
+                instance: /v1/messages:batch
+    PayloadTooLarge:
+      description: Request body exceeds 1 MiB or the batch has more than 100 messages
+      headers:
+        RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+        RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+        RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            batchTooLarge:
+              value:
+                type: https://sms-gateway.example/problems/batch_too_large
+                title: Batch too large
+                status: 413
+                detail: A batch may contain at most 100 messages.
+                code: batch_too_large
+                retryable: false
+                instance: /v1/messages:batch
+            payloadTooLarge:
+              value:
+                type: https://sms-gateway.example/problems/payload_too_large
+                title: Payload too large
+                status: 413
+                detail: The request body must not exceed 1048576 bytes.
+                code: payload_too_large
+                retryable: false
+                instance: /v1/messages:batch
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+        RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+        RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+        Retry-After: { $ref: "#/components/headers/Retry-After" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            rateLimited:
+              value:
+                type: https://sms-gateway.example/problems/rate_limited
+                title: Rate limited
+                status: 429
+                detail: Too many requests. Wait and retry.
+                code: rate_limited
+                retryable: true
+                instance: /v1/messages:batch
+    InternalError:
+      description: Unexpected server error
+      headers:
+        Retry-After: { $ref: "#/components/headers/Retry-After" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            internal:
+              value:
+                type: https://sms-gateway.example/problems/internal_error
+                title: Internal error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+                retryable: true
+                instance: /v1/messages:batch
+    ServiceUnavailable:
+      description: Temporary outage
+      headers:
+        Retry-After: { $ref: "#/components/headers/Retry-After" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            unavailable:
+              value:
+                type: https://sms-gateway.example/problems/service_unavailable
+                title: Service unavailable
+                status: 503
+                detail: The service is temporarily unavailable.
+                code: service_unavailable
+                retryable: true
+                instance: /v1/messages:batch
+
+  schemas:
+    DeviceId:
+      type: string
+      format: uuid
+      description: Server-assigned device identifier.
+      examples: ["018f3c2a-9b4d-7e21-a456-426614174000"]
+
+    DeviceStatusValue:
+      type: string
+      enum: [active, revoked]
+
+    PairingCode:
+      type: string
+      description: |
+        Single-use pairing code issued by the web UI. 8 Crockford
+        Base32 characters (0-9, A-Z except I, L, O, U), optionally
+        grouped as `XXXX-XXXX`. Case-insensitive. Valid for 5 minutes
+        and burned on first successful pair.
+      pattern: "^[A-HJ-NP-TV-Za-hj-np-tv-z0-9]{4}-?[A-HJ-NP-TV-Za-hj-np-tv-z0-9]{4}$"
+      examples: ["7K3M-9Q2P"]
+
+    DeviceInfo:
+      type: object
+      additionalProperties: false
+      required: [platform, app_version]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: |
+            User-visible device name. The app sends
+            "<manufacturer> <model>" at pairing (e.g. "Google Pixel 8").
+            Renamable later in the web UI. Defaults to model if omitted.
+        platform:
+          type: string
+          enum: [android]
+        manufacturer:
+          type: string
+          maxLength: 80
+        model:
+          type: string
+          maxLength: 80
+        os_version:
+          type: string
+          maxLength: 32
+          description: Android release version, e.g. "14".
+        app_version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        sdk_int:
+          type: integer
+          minimum: 23
+          description: |
+            Android API level. The signing scheme's contract floor is
+            API 23 (`SHA256withECDSAinP1363Format`). The app's minSdk
+            is 26.
+
+    PairRequest:
+      type: object
+      additionalProperties: false
+      required: [pairing_code, alg, public_key, device_info]
+      properties:
+        pairing_code:
+          $ref: "#/components/schemas/PairingCode"
+        alg:
+          type: string
+          const: ES256
+          description: Must be ES256 in v1. No other algorithms are accepted.
+        public_key:
+          type: string
+          minLength: 80
+          maxLength: 200
+          pattern: "^[A-Za-z0-9_-]+$"
+          description: P-256 public key as unpadded base64url of the SPKI DER encoding (`key.getEncoded()` / X.509).
+        device_info:
+          $ref: "#/components/schemas/DeviceInfo"
+
+    PairResponse:
+      type: object
+      additionalProperties: false
+      required: [device_id, name, status, paired_at]
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceId"
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/DeviceStatusValue"
+        paired_at:
+          type: string
+          format: date-time
+
+    DeviceStatus:
+      type: object
+      additionalProperties: false
+      required: [device_id, name, status, paired_at, last_seen_at]
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceId"
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/DeviceStatusValue"
+        paired_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+
+    Direction:
+      type: string
+      enum: [inbound, outbound]
+
+    DeviceMessage:
+      type: object
+      additionalProperties: false
+      required: [device_msg_id, sender, body, received_at, direction]
+      properties:
+        device_msg_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: |
+            Client-assigned id, unique per device, at most 128 characters.
+            Stable across retries. The same value for the same device is
+            always a no-op after the first accept. The Android app sends a
+            deterministic opaque string: `sms-` plus a truncated SHA-256
+            over direction, sender, SMSC timestamp, body, and an ordinal.
+        sender:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: |
+            Originating address. E.164 (e.g. `+15551234567`) when the
+            sender is a phone number; otherwise the raw alphanumeric
+            sender id. Do not strip the leading `+`.
+        body:
+          type: string
+          maxLength: 32768
+          description: UTF-8 message text. Empty bodies are allowed. Max 32768 Unicode characters.
+        received_at:
+          type: string
+          format: date-time
+          description: |
+            Time the message was received (or sent, for outbound) on the
+            device, ISO 8601 UTC with a `Z` suffix. Fractional seconds
+            up to microseconds are allowed. Example:
+            `2026-11-18T09:45:12Z` or `2026-11-18T09:45:12.123Z`.
+        sim_slot:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 9
+          description: |
+            Zero-based SIM slot index. Null (or omitted) when the slot
+            is unknown.
+        direction:
+          $ref: "#/components/schemas/Direction"
+
+    MessageBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [messages]
+      description: |
+        Up to 100 messages. The raw request body must not exceed
+        1 048 576 bytes (1 MiB). Clients pack batches by bytes and
+        item count to stay under both limits.
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/DeviceMessage"
+
+    ItemError:
+      type: object
+      additionalProperties: false
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          enum:
+            - missing_field
+            - invalid_field
+            - body_too_large
+            - duplicate_in_batch
+          description: Stable per-item error code. See docs/contracts/semantics.md.
+        detail:
+          type: string
+          description: Human-readable reason. Safe to show in debug logs; does not include the message body.
+
+    BatchItemResult:
+      type: object
+      additionalProperties: false
+      required: [device_msg_id, status]
+      properties:
+        device_msg_id:
+          type: string
+          description: Echo of the client id. Empty string if the item was missing device_msg_id.
+        status:
+          type: string
+          enum: [accepted, duplicate, rejected]
+        id:
+          type: [string, "null"]
+          format: uuid
+          description: Server message id. Present for accepted and duplicate; absent for rejected.
+        error:
+          $ref: "#/components/schemas/ItemError"
+      description: |
+        `id` is required when status is accepted or duplicate.
+        `error` is required when status is rejected.
+
+    MessageBatchResponse:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BatchItemResult"
+          description: One result per request item, in the same order.
+
+    Problem:
+      type: object
+      additionalProperties: true
+      required: [type, title, status, code, retryable]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: RFC 9457 type URI. Pattern `https://sms-gateway.example/problems/{code}`. Host is a placeholder.
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          description: Human-readable explanation. Must not contain message bodies.
+        instance:
+          type: string
+          description: The request path that failed, e.g. `/v1/messages:batch`.
+        code:
+          type: string
+          description: Stable machine-readable error code. See docs/contracts/semantics.md.
+          enum:
+            - invalid_request
+            - content_hash_mismatch
+            - invalid_pairing_code
+            - invalid_public_key
+            - invalid_signature
+            - invalid_timestamp
+            - replay_detected
+            - device_unknown
+            - device_revoked
+            - payload_too_large
+            - batch_too_large
+            - rate_limited
+            - internal_error
+            - service_unavailable
+        retryable:
+          type: boolean
+          description: If true, the client may retry the request (after clock sync, a new nonce, or backoff as documented).
+        server_time:
+          type: integer
+          description: |
+            Server UTC time as Unix seconds. Required on
+            `401 invalid_timestamp` so the client can compute a clock
+            offset and re-sign. Absent on other problem responses.

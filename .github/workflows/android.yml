@@ -1,0 +1,30 @@
+name: Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Placeholder
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip until Android project exists
+        run: |
+          if [ -f android/settings.gradle ] || [ -f android/settings.gradle.kts ]; then
+            echo "Android Gradle project present — replace this job with real build"
+            exit 1
+          fi
+          echo "No Android project yet; placeholder OK"

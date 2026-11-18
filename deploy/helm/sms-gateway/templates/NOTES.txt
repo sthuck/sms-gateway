@@ -1,0 +1,21 @@
+SMS Gateway ({{ .Chart.Name }} {{ .Chart.Version }}) installed as release {{ .Release.Name }}.
+
+Components:
+{{- if .Values.api.enabled }}
+  - API Deployment/Service: {{ include "sms-gateway.fullname" . }}-api
+{{- end }}
+{{- if .Values.worker.enabled }}
+  - Worker Deployment: {{ include "sms-gateway.fullname" . }}-worker
+{{- end }}
+{{- if .Values.mcp.enabled }}
+  - MCP Deployment/Service: {{ include "sms-gateway.fullname" . }}-mcp
+{{- end }}
+
+Required Secrets (create before pods become Ready):
+  - {{ .Values.secrets.databaseSecretName }} (key {{ .Values.secrets.databaseSecretKey }})
+  - {{ .Values.secrets.encryptionSecretName }} (key {{ .Values.secrets.encryptionSecretKey }})
+  - {{ .Values.secrets.llmSecretName }} (key {{ .Values.secrets.llmSecretKey }})
+
+Postgres is not bundled. Point DATABASE_URL at an in-cluster StatefulSet or a
+CloudNativePG Cluster. pg-boss uses the same Postgres (no extra queue infra).
+See deploy/helm/sms-gateway/README.md and docs/architecture.md.

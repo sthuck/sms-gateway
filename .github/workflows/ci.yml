@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      web: ${{ steps.filter.outputs.web }}
+      android: ${{ steps.filter.outputs.android }}
+      helm: ${{ steps.filter.outputs.helm }}
+      docs: ${{ steps.filter.outputs.docs }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'pnpm-workspace.yaml'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'docker-compose.yml'
+            web:
+              - 'web/**'
+            android:
+              - 'android/**'
+            helm:
+              - 'deploy/helm/**'
+            docs:
+              - 'docs/**'
+            ci:
+              - '.github/workflows/**'
+
+  backend:
+    name: Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build Docker image
+        working-directory: .
+        run: docker build -f backend/Dockerfile -t sms-gateway-backend:ci .
+
+  helm:
+    name: Helm
+    needs: changes
+    if: needs.changes.outputs.helm == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: helm lint
+        run: helm lint deploy/helm/sms-gateway
+      - name: helm template
+        run: helm template sms-gateway deploy/helm/sms-gateway >/dev/null
+
+  openapi:
+    name: OpenAPI
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Redocly CLI
+        run: npm install -g @redocly/cli@1
+      - name: Lint OpenAPI
+        run: redocly lint
+      - name: Verify signing test vector
+        run: node docs/contracts/examples/gen-test-vector.mjs
+
+  web:
+    name: Web (placeholder)
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip until web app exists
+        run: |
+          if [ -f web/package.json ]; then
+            echo "web/package.json present — replace this job with real lint/test"
+            exit 1
+          fi
+          echo "No web package yet; placeholder OK"
+
+  android:
+    name: Android (placeholder)
+    needs: changes
+    if: needs.changes.outputs.android == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip until Android project exists
+        run: |
+          if [ -f android/settings.gradle ] || [ -f android/settings.gradle.kts ]; then
+            echo "Android Gradle project present — replace this job with real build"
+            exit 1
+          fi
+          echo "No Android project yet; placeholder OK"
+
+  # Aggregate required check: always succeeds/fails based on needed jobs.
+  # Mark this as the required status check in branch protection.
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [changes, backend, helm, openapi, web, android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate job results
+        run: |
+          set -euo pipefail
+          echo "backend=${{ needs.backend.result }}"
+          echo "helm=${{ needs.helm.result }}"
+          echo "openapi=${{ needs.openapi.result }}"
+          echo "web=${{ needs.web.result }}"
+          echo "android=${{ needs.android.result }}"
+
+          fail=0
+          for result in \
+            "${{ needs.backend.result }}" \
+            "${{ needs.helm.result }}" \
+            "${{ needs.openapi.result }}" \
+            "${{ needs.web.result }}" \
+            "${{ needs.android.result }}"
+          do
+            case "$result" in
+              success|skipped) ;;
+              *)
+                echo "Failing aggregate because a needed job result was: $result"
+                fail=1
+                ;;
+            esac
+          done
+          exit "$fail"

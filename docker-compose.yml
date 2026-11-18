@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sms
+      POSTGRES_PASSWORD: sms
+      POSTGRES_DB: sms
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sms -d sms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      NODE_ENV: development
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      LOG_LEVEL: info
+      DATABASE_URL: postgres://sms:sms@postgres:5432/sms
+    ports:
+      # Host + Android emulator (10.0.2.2:8080)
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # OpenAPI mock for the device API contract (STH-5).
+  # Does NOT verify ECDSA signatures — schema-only.
+  # Start with: docker compose --profile mock up
+  mock-api:
+    profiles: ["mock"]
+    image: stoplight/prism:5
+    # Port 4010 is required: Android dev flavour / OpenAPI servers use 10.0.2.2:4010
+    command:
+      - mock
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "4010"
+      - --multiprocess
+      - "false"
+      - /contracts/device-api.yaml
+    volumes:
+      - ./docs/contracts:/contracts:ro
+    ports:
+      # Host + Android emulator (10.0.2.2:4010)
+      - "4010:4010"
+
+volumes:
+  postgres_data:

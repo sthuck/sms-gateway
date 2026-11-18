@@ -1,0 +1,16 @@
+{
+  "name": "sms-gateway",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "lint": "pnpm --filter @sms-gateway/backend lint",
+    "typecheck": "pnpm --filter @sms-gateway/backend typecheck",
+    "test": "pnpm --filter @sms-gateway/backend test",
+    "backend:dev": "pnpm --filter @sms-gateway/backend dev",
+    "backend:worker": "pnpm --filter @sms-gateway/backend worker",
+    "backend:mcp": "pnpm --filter @sms-gateway/backend mcp"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

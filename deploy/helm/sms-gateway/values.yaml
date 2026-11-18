@@ -1,0 +1,118 @@
+# Shared container image for API, worker, and MCP (different commands).
+image:
+  repository: ghcr.io/sthuck/sms-gateway-backend
+  tag: "" # defaults to chart appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Common env (non-secret). Secrets are referenced below.
+config:
+  NODE_ENV: production
+  HOST: "0.0.0.0"
+  PORT: "8080"
+  LOG_LEVEL: info
+  # OpenAI-compatible classifier provider (non-secret pieces)
+  LLM_BASE_URL: ""
+  LLM_MODEL: ""
+
+# Secret-backed references. Create these Secrets out-of-band; nothing is generated.
+secrets:
+  # Expected keys: DATABASE_URL
+  databaseSecretName: sms-gateway-database
+  databaseSecretKey: DATABASE_URL
+  # Expected keys: ENCRYPTION_KEY — handling/KMS is an open item (see docs/architecture.md)
+  encryptionSecretName: sms-gateway-encryption
+  encryptionSecretKey: ENCRYPTION_KEY
+  # Expected keys: LLM_API_KEY
+  llmSecretName: sms-gateway-llm
+  llmSecretKey: LLM_API_KEY
+
+api:
+  enabled: true
+  replicaCount: 1
+  command: ["node", "dist/index.js"]
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  probes:
+    liveness:
+      path: /healthz
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    readiness:
+      path: /readyz
+      initialDelaySeconds: 5
+      periodSeconds: 10
+
+worker:
+  enabled: true
+  replicaCount: 1
+  command: ["node", "dist/worker.js"]
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+mcp:
+  enabled: true
+  replicaCount: 1
+  command: ["node", "dist/mcp.js"]
+  service:
+    type: ClusterIP
+    port: 8081
+  # MCP stub does not expose HTTP yet; probes disabled until transport exists.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: api.sms-gateway.example
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # - secretName: sms-gateway-tls
+  #   hosts:
+  #     - api.sms-gateway.example
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Postgres is NOT bundled. See README.md for StatefulSet / CloudNativePG options.
+postgres:
+  # Informational only — used in docs / comments rendered into NOTES.txt
+  managedExternally: true

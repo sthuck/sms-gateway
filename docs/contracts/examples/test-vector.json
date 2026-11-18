@@ -1,0 +1,64 @@
+{
+  "warning": "THROWAAWAY TEST VECTOR. Never use this keypair in production or on a real device.",
+  "alg": "ES256",
+  "curve": "P-256",
+  "hash": "SHA-256",
+  "signatureEncoding": "ieee-p1363-base64url",
+  "publicKeyEncoding": "spki-der-base64url",
+  "testPrivateKeyPkcs8Pem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg0tCxCFGtAN6rIAQX\nRpKMgFrWNK9OPHLpPPnwmPtjsXihRANCAATKXotA6HRWiXpjt5R5imu0w8P9wH2h\nXBEUEBDoGlxFtdkBcuXvjmMp367FfhvBSUfEf6Mewxz//+bdaU6C7HBF\n-----END PRIVATE KEY-----\n",
+  "testPublicKeySpkiPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyl6LQOh0Vol6Y7eUeYprtMPD/cB9\noVwRFBAQ6BpcRbXZAXLl745jKd+uxX4bwUlHxH+jHsMc///m3WlOguxwRQ==\n-----END PUBLIC KEY-----\n",
+  "testPublicKeySpkiB64url": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyl6LQOh0Vol6Y7eUeYprtMPD_cB9oVwRFBAQ6BpcRbXZAXLl745jKd-uxX4bwUlHxH-jHsMc___m3WlOguxwRQ",
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages:batch",
+    "query": "",
+    "headers": {
+      "Host": "api.sms-gateway.example",
+      "X-Device-Id": "018f3c2a-9b4d-7e21-a456-426614174000",
+      "X-Timestamp": "1794995160",
+      "X-Nonce": "V1nQe4r0sK8mP2yL6dF9TQ",
+      "X-Content-SHA256": "8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9",
+      "X-Signature": "dzk2otghSLa69_4gd_jzCjHEzSXl5lUoJRXd5OmXEPamGBcoTIklHuRNTyatMjYv5_ar0fXNwucc9h9Ox189uQ",
+      "Content-Type": "application/json"
+    },
+    "body": "{\"messages\":[{\"device_msg_id\":\"sms-42\",\"sender\":\"+15551234567\",\"body\":\"Your code is 123456\",\"received_at\":\"2026-11-18T09:45:12Z\",\"sim_slot\":0,\"direction\":\"inbound\"}]}",
+    "bodyUtf8ByteLength": 166
+  },
+  "bodySha256Hex": "8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9",
+  "canonicalString": "v1\nPOST\n/v1/messages:batch\n\napi.sms-gateway.example\n018f3c2a-9b4d-7e21-a456-426614174000\n1794995160\n8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9\nV1nQe4r0sK8mP2yL6dF9TQ",
+  "frozenSignatureB64url": "dzk2otghSLa69_4gd_jzCjHEzSXl5lUoJRXd5OmXEPamGBcoTIklHuRNTyatMjYv5_ar0fXNwucc9h9Ox189uQ",
+  "verification": {
+    "frozenSignatureVerifies": true,
+    "freshSignatureVerifies": true,
+    "tamperedCanonicalRejected": true,
+    "note": "ECDSA signatures are non-deterministic. Assert verify(publicKey, canonicalString, signature) === true, not byte equality with a previous signature. A fresh signature is produced and checked on each run but is not written here."
+  },
+  "devHostVector": {
+    "description": "Same request as the primary vector, but Host is 10.0.2.2:4010 (Android emulator dev mock). Canonical HOST keeps the port, lowercased as sent.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/messages:batch",
+      "query": "",
+      "headers": {
+        "Host": "10.0.2.2:4010",
+        "X-Device-Id": "018f3c2a-9b4d-7e21-a456-426614174000",
+        "X-Timestamp": "1794995160",
+        "X-Nonce": "V1nQe4r0sK8mP2yL6dF9TQ",
+        "X-Content-SHA256": "8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9",
+        "X-Signature": "N8eDkmoPaOK812xKVaiBQQIlTB4G2yrlKpTvJIaedUJ9zTUfm0LV3ZFveSNZ9nncCWgrVXMF73bUCLVEZaIShg",
+        "Content-Type": "application/json"
+      },
+      "body": "{\"messages\":[{\"device_msg_id\":\"sms-42\",\"sender\":\"+15551234567\",\"body\":\"Your code is 123456\",\"received_at\":\"2026-11-18T09:45:12Z\",\"sim_slot\":0,\"direction\":\"inbound\"}]}",
+      "bodyUtf8ByteLength": 166
+    },
+    "bodySha256Hex": "8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9",
+    "canonicalString": "v1\nPOST\n/v1/messages:batch\n\n10.0.2.2:4010\n018f3c2a-9b4d-7e21-a456-426614174000\n1794995160\n8745a7b3b4b4b1fd81d08106e22e2d6261a203d0fc673b7cbf4aa7fbdeee4ea9\nV1nQe4r0sK8mP2yL6dF9TQ",
+    "frozenSignatureB64url": "N8eDkmoPaOK812xKVaiBQQIlTB4G2yrlKpTvJIaedUJ9zTUfm0LV3ZFveSNZ9nncCWgrVXMF73bUCLVEZaIShg",
+    "verification": {
+      "frozenSignatureVerifies": true,
+      "freshSignatureVerifies": true,
+      "tamperedCanonicalRejected": true,
+      "note": "ECDSA signatures are non-deterministic. Assert verify(publicKey, canonicalString, signature) === true, not byte equality with a previous signature. A fresh signature is produced and checked on each run but is not written here."
+    }
+  }
+}
