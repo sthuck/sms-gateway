@@ -33,7 +33,8 @@ object NetworkModule {
     }
 
     @Provides
-    fun deviceSigner(deviceKeyStore: DeviceKeyStore): DeviceSigner = deviceKeyStore.signer()
+    fun deviceSigner(deviceKeyStore: DeviceKeyStore): DeviceSigner =
+        DeviceSigner { bytes -> deviceKeyStore.requireSigner().sign(bytes) }
 
     @Provides
     @Singleton

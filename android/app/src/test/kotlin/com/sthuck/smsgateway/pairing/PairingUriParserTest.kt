@@ -7,10 +7,9 @@ import org.junit.Test
 class PairingUriParserTest {
 
     @Test
-    fun parsesShortCode() {
-        val parsed = PairingUriParser.parse("7k3m-9q2p")
-        assertEquals("7K3M-9Q2P", parsed!!.code)
-        assertNull(parsed.serverUrl)
+    fun parsesShortCodeWithOptionalHyphen() {
+        assertEquals("7K3M-9Q2P", PairingUriParser.parse("7k3m9q2p")!!.code)
+        assertEquals("7K3M-9Q2P", PairingUriParser.parse("7K3M-9Q2P")!!.code)
     }
 
     @Test
@@ -23,9 +22,15 @@ class PairingUriParserTest {
     }
 
     @Test
-    fun rejectsGarbage() {
-        assertNull(PairingUriParser.parse(""))
-        assertNull(PairingUriParser.parse("not-a-code"))
+    fun rejectsWrongHostOrPath() {
+        assertNull(PairingUriParser.parse("smsgw://evil/pair?code=7K3M-9Q2P"))
+        assertNull(PairingUriParser.parse("smsgw://pair/extra?code=7K3M-9Q2P"))
         assertNull(PairingUriParser.parse("https://example.com/pair?code=7K3M-9Q2P"))
+    }
+
+    @Test
+    fun rejectsAmbiguousAlphabetLetters() {
+        // I/L/O/U are mapped or rejected; U has no crockford mapping → reject.
+        assertNull(PairingUriParser.normalizeCode("7K3U-9Q2P"))
     }
 }

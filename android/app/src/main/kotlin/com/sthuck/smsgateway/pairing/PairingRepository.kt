@@ -2,8 +2,9 @@ package com.sthuck.smsgateway.pairing
 
 import android.os.Build
 import com.sthuck.smsgateway.BuildConfig
-import com.sthuck.smsgateway.crypto.DeviceKeyStore
+import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
+import com.sthuck.smsgateway.data.remote.BackendUrlOverride
 import com.sthuck.smsgateway.data.remote.DeviceApi
 import com.sthuck.smsgateway.data.remote.dto.DeviceInfo
 import com.sthuck.smsgateway.data.remote.dto.PairRequest
@@ -13,6 +14,7 @@ import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 
 sealed class PairingResult {
     data class Success(val deviceId: String, val serverUrl: String) : PairingResult()
@@ -22,49 +24,64 @@ sealed class PairingResult {
 @Singleton
 class PairingRepository @Inject constructor(
     private val deviceApi: DeviceApi,
-    private val deviceKeyStore: DeviceKeyStore,
-    private val credentialStore: PairingCredentialStore,
+    private val deviceKeyStore: DeviceKeyAccess,
+    private val credentialStore: PairingStateAccess,
     private val queuedMessageDao: QueuedMessageDao,
+    private val backendUrlOverride: BackendUrlOverride,
     private val json: Json,
 ) {
-    suspend fun pair(rawInput: String, fallbackServerUrl: String? = null): PairingResult {
-        val parsed = PairingUriParser.parse(rawInput)
-            ?: return PairingResult.Failure(
-                "Enter a valid pairing code (e.g. 7K3M-9Q2P) or scan the QR.",
+    /**
+     * Pair using a validated server URL. Does not mutate existing credentials
+     * or the active Keystore key until the server returns success (STH-44).
+     */
+    suspend fun pair(code: String, serverUrl: String): PairingResult {
+        val validated = when (val result = ServerUrlValidator.validate(serverUrl)) {
+            is ServerUrlValidator.Result.Ok -> result.value
+            is ServerUrlValidator.Result.Err ->
+                return PairingResult.Failure(result.message)
+        }
+
+        val publicKey = try {
+            deviceKeyStore.createPendingKeypair()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return PairingResult.Failure(
+                message = (e.message ?: "Could not create device key.").take(180),
             )
-        val serverUrl = PairingCredentialStore.normalizeBaseUrl(
-            parsed.serverUrl
-                ?: fallbackServerUrl
-                ?: credentialStore.current().serverUrl,
-        )
-        // Point BackendUrlInterceptor at the target before the signed pair call.
-        credentialStore.setServerUrl(serverUrl)
-        credentialStore.clearDeviceId()
+        }
 
         return try {
-            deviceKeyStore.deleteKey()
-            val publicKey = deviceKeyStore.getOrCreatePublicKeySpkiBase64Url()
-            val response = deviceApi.pair(
-                PairRequest(
-                    pairingCode = parsed.code,
-                    publicKey = publicKey,
-                    deviceInfo = DeviceInfo(
-                        appVersion = BuildConfig.VERSION_NAME,
-                        name = listOf(Build.MANUFACTURER, Build.MODEL)
-                            .joinToString(" ")
-                            .trim()
-                            .ifEmpty { Build.MODEL },
-                        manufacturer = Build.MANUFACTURER,
-                        model = Build.MODEL,
-                        osVersion = Build.VERSION.RELEASE,
-                        sdkInt = Build.VERSION.SDK_INT,
+            val response = backendUrlOverride.withUrl(validated.url) {
+                deviceApi.pair(
+                    PairRequest(
+                        pairingCode = code,
+                        publicKey = publicKey,
+                        deviceInfo = DeviceInfo(
+                            appVersion = BuildConfig.VERSION_NAME,
+                            name = listOf(Build.MANUFACTURER, Build.MODEL)
+                                .joinToString(" ")
+                                .trim()
+                                .ifEmpty { Build.MODEL },
+                            manufacturer = Build.MANUFACTURER,
+                            model = Build.MODEL,
+                            osVersion = Build.VERSION.RELEASE,
+                            sdkInt = Build.VERSION.SDK_INT,
+                        ),
                     ),
-                ),
+                )
+            }
+            deviceKeyStore.commitPendingKey()
+            credentialStore.savePairing(
+                deviceId = response.deviceId,
+                serverUrl = validated.url,
             )
-            credentialStore.savePairing(deviceId = response.deviceId, serverUrl = serverUrl)
-            PairingResult.Success(deviceId = response.deviceId, serverUrl = serverUrl)
+            PairingResult.Success(deviceId = response.deviceId, serverUrl = validated.url)
+        } catch (e: CancellationException) {
+            deviceKeyStore.discardPendingKey()
+            throw e
         } catch (e: HttpException) {
-            deviceKeyStore.deleteKey()
+            deviceKeyStore.discardPendingKey()
             val problem = e.response()?.errorBody()?.string()?.let { body ->
                 runCatching { json.decodeFromString<Problem>(body) }.getOrNull()
             }
@@ -73,12 +90,16 @@ class PairingRepository @Inject constructor(
                     "That pairing code is invalid, expired, or already used."
                 ProblemCodes.INVALID_PUBLIC_KEY ->
                     "Device key was rejected. Try pairing again."
-                else -> problem?.detail ?: problem?.title ?: "Pairing failed (${e.code()})."
+                else -> {
+                    val detail = problem?.detail ?: problem?.title
+                        ?: "Pairing failed (${e.code()})."
+                    detail.take(180)
+                }
             }
             PairingResult.Failure(message = message, code = problem?.code)
         } catch (e: Exception) {
-            deviceKeyStore.deleteKey()
-            PairingResult.Failure(message = e.message ?: "Pairing failed.")
+            deviceKeyStore.discardPendingKey()
+            PairingResult.Failure(message = (e.message ?: "Pairing failed.").take(180))
         }
     }
 

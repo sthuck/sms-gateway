@@ -98,9 +98,9 @@ class StatusViewModel @Inject constructor(
         _uiState.update { it.copy(unpairConfirmVisible = false) }
     }
 
-    fun confirmUnpair() {
+    fun confirmUnpair(clearQueue: Boolean) {
         viewModelScope.launch {
-            pairingRepository.unpair(clearQueue = true)
+            pairingRepository.unpair(clearQueue = clearQueue)
             _uiState.update { it.copy(unpairConfirmVisible = false) }
         }
     }

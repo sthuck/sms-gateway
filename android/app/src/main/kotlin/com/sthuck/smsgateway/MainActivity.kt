@@ -47,7 +47,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        handlePairingIntent(intent)
+        // Consume deep link only on the first creation, never on rotation (STH-44).
+        if (savedInstanceState == null) {
+            handlePairingIntent(intent)
+        }
         setContent {
             SmsGatewayTheme {
                 val pairingState by pairingViewModel.uiState.collectAsStateWithLifecycle()
@@ -67,8 +70,10 @@ class MainActivity : ComponentActivity() {
                     PairingScreen(
                         state = pairingState,
                         onCodeChange = pairingViewModel::onCodeChange,
-                        onSubmit = { pairingViewModel.submit() },
-                        onScanned = pairingViewModel::onScanned,
+                        onRequestConfirmation = { pairingViewModel.requestConfirmation() },
+                        onConfirmPairing = pairingViewModel::confirmPairing,
+                        onCancelConfirmation = pairingViewModel::cancelConfirmation,
+                        onScanned = pairingViewModel::onScannedOrDeepLink,
                     )
                 } else {
                     StatusScreen(
@@ -78,7 +83,12 @@ class MainActivity : ComponentActivity() {
                         },
                         onOpenSettingsClick = { openAppSettings() },
                         onUnpairClick = statusViewModel::requestUnpair,
-                        onConfirmUnpair = statusViewModel::confirmUnpair,
+                        onConfirmUnpairClearQueue = {
+                            statusViewModel.confirmUnpair(clearQueue = true)
+                        },
+                        onConfirmUnpairKeepQueue = {
+                            statusViewModel.confirmUnpair(clearQueue = false)
+                        },
                         onDismissUnpair = statusViewModel::dismissUnpair,
                     )
                 }
@@ -94,9 +104,11 @@ class MainActivity : ComponentActivity() {
 
     private fun handlePairingIntent(intent: Intent?) {
         val data = intent?.data?.toString() ?: return
-        if (data.startsWith("smsgw://")) {
-            pairingViewModel.onScanned(data)
-        }
+        if (!data.startsWith("smsgw://")) return
+        // One-shot: clear so recreation / redelivery cannot replay.
+        intent.data = null
+        setIntent(Intent(intent).apply { this.data = null })
+        pairingViewModel.onScannedOrDeepLink(data)
     }
 
     private fun refreshSmsPermission() {

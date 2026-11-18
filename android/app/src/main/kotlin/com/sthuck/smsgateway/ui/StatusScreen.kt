@@ -35,7 +35,8 @@ fun StatusScreen(
     onGrantSmsClick: () -> Unit,
     onOpenSettingsClick: () -> Unit,
     onUnpairClick: () -> Unit = {},
-    onConfirmUnpair: () -> Unit = {},
+    onConfirmUnpairClearQueue: () -> Unit = {},
+    onConfirmUnpairKeepQueue: () -> Unit = {},
     onDismissUnpair: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -68,8 +69,17 @@ fun StatusScreen(
                         text = stringResource(R.string.unpair_confirm_body),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Button(onClick = onConfirmUnpair, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.unpair_confirm))
+                    Button(
+                        onClick = onConfirmUnpairClearQueue,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.unpair_confirm_clear))
+                    }
+                    OutlinedButton(
+                        onClick = onConfirmUnpairKeepQueue,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.unpair_confirm_keep))
                     }
                     OutlinedButton(onClick = onDismissUnpair, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.unpair_cancel))

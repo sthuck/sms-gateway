@@ -8,60 +8,161 @@ import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.cert.Certificate
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * Non-exportable ES256 (P-256) keypair in Android Keystore.
  * Tries StrongBox first, falls back to TEE/software-backed Keystore.
+ *
+ * Active vs pending aliases keep pairing transactional: a new key is
+ * generated under a pending alias and only promoted after a successful
+ * `POST /v1/devices/pair`. [requireSigner] never creates a key.
+ *
+ * The active alias is rediscovered from Keystore after process death
+ * (in-memory [activeAlias] is only a cache).
  */
+interface DeviceKeyAccess {
+    fun hasKey(): Boolean
+    fun hasPendingKey(): Boolean
+    fun deleteKey()
+    fun requireSigner(): DeviceSigner
+    fun createPendingKeypair(): String
+    fun commitPendingKey()
+    fun discardPendingKey()
+}
+
 @Singleton
-class DeviceKeyStore @Inject constructor() {
+class DeviceKeyStore @Inject constructor() : DeviceKeyAccess {
 
-    fun hasKey(): Boolean = androidKeyStore().containsAlias(ALIAS)
+    private val pendingAlias = AtomicReference<String?>(null)
+    private val activeAlias = AtomicReference<String?>(null)
 
-    fun getOrCreatePublicKeySpkiBase64Url(): String {
-        ensureKey()
-        return Base64Url.encode(requirePublicKey().encoded)
-    }
+    override fun hasKey(): Boolean = committedAlias() != null
 
-    fun signer(): DeviceSigner {
-        ensureKey()
-        val privateKey = androidKeyStore().getKey(ALIAS, null) as? PrivateKey
-            ?: error("Device signing key missing after ensureKey()")
+    override fun hasPendingKey(): Boolean = pendingAlias.get()?.let { contains(it) } == true
+
+    /**
+     * Returns a signer for the active key, or the pending key while a
+     * pairing attempt is in flight. Never creates a key.
+     */
+    override fun requireSigner(): DeviceSigner {
+        val alias = pendingAlias.get()?.takeIf { contains(it) }
+            ?: committedAlias()
+            ?: error("Device signing key missing")
+        val privateKey = androidKeyStore().getKey(alias, null) as? PrivateKey
+            ?: error("Device signing key missing for alias=$alias")
         return PrivateKeyDeviceSigner(privateKey)
     }
 
     fun publicKey(): PublicKey {
-        ensureKey()
-        return requirePublicKey()
+        val alias = pendingAlias.get()?.takeIf { contains(it) }
+            ?: committedAlias()
+            ?: error("Device public key missing")
+        return requirePublicKey(alias)
     }
 
-    fun deleteKey() {
+    /** SPKI of the active (committed) key only. */
+    fun activePublicKeySpkiBase64Url(): String {
+        val alias = committedAlias() ?: error("Device public key missing")
+        return Base64Url.encode(requirePublicKey(alias).encoded)
+    }
+
+    /**
+     * Create a pending keypair for a pairing attempt. Leaves the active
+     * key untouched. Returns the pending public key as unpadded base64url SPKI.
+     */
+    @Synchronized
+    override fun createPendingKeypair(): String {
+        discardPendingKeyLocked()
+        val active = committedAlias()
+        val next = when (active) {
+            ALIAS_A -> ALIAS_B
+            ALIAS_B -> ALIAS_A
+            else -> ALIAS_A
+        }
+        if (!tryGenerate(next, strongBox = true) && !tryGenerate(next, strongBox = false)) {
+            error("Failed to generate pending ES256 device key in Android Keystore")
+        }
+        pendingAlias.set(next)
+        return Base64Url.encode(requirePublicKey(next).encoded)
+    }
+
+    /** Promote the pending key to active and delete the previous active key. */
+    @Synchronized
+    override fun commitPendingKey() {
+        val pending = pendingAlias.get() ?: error("No pending key to commit")
+        val previous = committedAlias()
+        activeAlias.set(pending)
+        pendingAlias.set(null)
+        if (previous != null && previous != pending) {
+            deleteAlias(previous)
+        }
+        // Drop pre-STH-44 single alias if it somehow remained.
+        if (pending != LEGACY_ALIAS) {
+            deleteAlias(LEGACY_ALIAS)
+        }
+    }
+
+    /** Drop a failed pairing attempt's pending key; leave active key alone. */
+    @Synchronized
+    override fun discardPendingKey() {
+        discardPendingKeyLocked()
+    }
+
+    override fun deleteKey() {
+        synchronized(this) {
+            discardPendingKeyLocked()
+            deleteAlias(ALIAS_A)
+            deleteAlias(ALIAS_B)
+            deleteAlias(LEGACY_ALIAS)
+            activeAlias.set(null)
+        }
+    }
+
+    private fun discardPendingKeyLocked() {
+        val pending = pendingAlias.getAndSet(null) ?: return
+        val active = committedAlias()
+        if (pending != active) {
+            deleteAlias(pending)
+        }
+    }
+
+    /**
+     * Committed (non-pending) alias present in Keystore. Rediscovers after
+     * process death; prefers the cached [activeAlias] when still valid.
+     */
+    private fun committedAlias(): String? {
+        val pending = pendingAlias.get()
+        val cached = activeAlias.get()
+        if (cached != null && cached != pending && contains(cached)) {
+            return cached
+        }
+        val found = ALL_ALIASES.firstOrNull { it != pending && contains(it) } ?: return null
+        activeAlias.set(found)
+        return found
+    }
+
+    private fun contains(alias: String): Boolean = androidKeyStore().containsAlias(alias)
+
+    private fun deleteAlias(alias: String) {
         val ks = androidKeyStore()
-        if (ks.containsAlias(ALIAS)) {
-            ks.deleteEntry(ALIAS)
+        if (ks.containsAlias(alias)) {
+            ks.deleteEntry(alias)
         }
     }
 
-    private fun ensureKey() {
-        if (hasKey()) return
-        if (!tryGenerate(strongBox = true)) {
-            check(tryGenerate(strongBox = false)) {
-                "Failed to generate ES256 device key in Android Keystore"
-            }
-        }
-    }
-
-    private fun tryGenerate(strongBox: Boolean): Boolean {
+    private fun tryGenerate(alias: String, strongBox: Boolean): Boolean {
         return try {
+            deleteAlias(alias)
             val generator = KeyPairGenerator.getInstance(
                 KeyProperties.KEY_ALGORITHM_EC,
                 ANDROID_KEYSTORE,
             )
             val builder = KeyGenParameterSpec.Builder(
-                ALIAS,
-                KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
+                alias,
+                KeyProperties.PURPOSE_SIGN,
             )
                 .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec("secp256r1"))
                 .setDigests(KeyProperties.DIGEST_SHA256)
@@ -77,9 +178,9 @@ class DeviceKeyStore @Inject constructor() {
         }
     }
 
-    private fun requirePublicKey(): PublicKey {
-        val cert: Certificate = androidKeyStore().getCertificate(ALIAS)
-            ?: error("Device public key certificate missing")
+    private fun requirePublicKey(alias: String): PublicKey {
+        val cert: Certificate = androidKeyStore().getCertificate(alias)
+            ?: error("Device public key certificate missing for alias=$alias")
         return cert.publicKey
     }
 
@@ -87,7 +188,13 @@ class DeviceKeyStore @Inject constructor() {
         KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
     companion object {
-        const val ALIAS = "sms_gateway_device_es256"
+        const val ALIAS_A = "sms_gateway_device_es256_a"
+        const val ALIAS_B = "sms_gateway_device_es256_b"
+        /** Pre-transactional single alias from earlier STH-11 builds. */
+        const val LEGACY_ALIAS = "sms_gateway_device_es256"
+        /** @deprecated Prefer [ALIAS_A] / [committedAlias] rediscovery. */
+        const val ALIAS = ALIAS_A
+        private val ALL_ALIASES = listOf(ALIAS_A, ALIAS_B, LEGACY_ALIAS)
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     }
 }

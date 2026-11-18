@@ -10,9 +10,12 @@ data class PairingUri(
 /**
  * Parses `smsgw://pair?code=<code>&server=<url-encoded base URL>`.
  * Also accepts bare short codes (no scheme) for manual entry.
+ *
+ * Codes use the Crockford base32 alphabet (no I/L/O/U); hyphen optional.
  */
 object PairingUriParser {
-    private val CODE_PATTERN = Regex("^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$")
+    // Crockford: 0-9 A-H J-N P-T V-Z (excludes I L O U)
+    private val CODE_BODY = Regex("^[0-9A-HJKMNP-TV-Z]{4}-?[0-9A-HJKMNP-TV-Z]{4}$")
 
     fun parse(raw: String): PairingUri? {
         val trimmed = raw.trim()
@@ -37,10 +40,11 @@ object PairingUriParser {
         }
         val query = if (queryStart >= 0) afterScheme.substring(queryStart + 1) else ""
 
+        // Require host "pair" and no path (reject smsgw://anything/pair).
         val host = authorityAndPath.substringBefore('/').substringBefore(':')
-        val path = authorityAndPath.substringAfter('/', missingDelimiterValue = "")
-            .trim('/')
-        if (host != "pair" && path != "pair") return null
+        val pathPart = authorityAndPath.substringAfter('/', missingDelimiterValue = "")
+        if (host != "pair") return null
+        if (pathPart.isNotEmpty()) return null
 
         val params = parseQuery(query)
         val code = normalizeCode(params["code"] ?: return null) ?: return null
@@ -49,8 +53,14 @@ object PairingUriParser {
     }
 
     fun normalizeCode(raw: String): String? {
-        val cleaned = raw.trim().uppercase().replace(' ', '-')
-        return cleaned.takeIf { CODE_PATTERN.matches(it) }
+        val upper = raw.trim().uppercase()
+            .replace('I', '1')
+            .replace('L', '1')
+            .replace('O', '0')
+            .replace(' ', '-')
+        if (!CODE_BODY.matches(upper)) return null
+        val compact = upper.replace("-", "")
+        return compact.substring(0, 4) + "-" + compact.substring(4, 8)
     }
 
     private fun parseQuery(query: String): Map<String, String> {

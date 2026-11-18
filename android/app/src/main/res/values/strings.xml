@@ -26,15 +26,21 @@
     <string name="sms_status_not_requested">Not granted yet</string>
 
     <string name="pairing_title">Pair this device</string>
-    <string name="pairing_body">Scan the pairing QR from the web UI, or type the short code. An optional server URL in the QR overrides the flavour default.</string>
+    <string name="pairing_body">Scan the pairing QR from the web UI, or type the short code. You will always confirm the server host before pairing.</string>
     <string name="pairing_server_hint">Backend: %1$s</string>
     <string name="pairing_code_label">Pairing code or smsgw:// URI</string>
-    <string name="pairing_submit">Pair</string>
+    <string name="pairing_submit">Continue</string>
     <string name="pairing_enable_camera">Allow camera to scan QR</string>
+    <string name="pairing_confirm_title">Confirm pairing</string>
+    <string name="pairing_confirm_body">Pair with code %1$s to server %2$s?</string>
+    <string name="pairing_confirm_unlisted_host">Warning: %1$s is not the default production host (sms.sthuck.info). Only continue if you trust this server.</string>
+    <string name="pairing_confirm_replace">This will replace the existing pairing after the new one succeeds.</string>
+    <string name="pairing_confirm_action">Confirm and pair</string>
+    <string name="pairing_confirm_cancel">Cancel</string>
 
     <string name="unpair_action">Unpair device</string>
-    <string name="unpair_confirm_body">This removes the Keystore key, device id, and clears the local outbox. You will need to pair again.</string>
-    <string name="unpair_confirm">Unpair and clear queue</string>
+    <string name="unpair_confirm_body">This removes the Keystore key and device id. Choose whether to keep unsent outbox messages.</string>
+    <string name="unpair_confirm_clear">Unpair and clear queue</string>
+    <string name="unpair_confirm_keep">Unpair, keep unsent messages</string>
     <string name="unpair_cancel">Cancel</string>
 </resources>
-

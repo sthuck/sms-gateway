@@ -124,14 +124,12 @@ class SigningContractTest {
             "fresh signature must verify ($label)",
             verifyEs256P1363(publicKey, canonicalBytes, fresh),
         )
-        assertEquals(
-            "fresh signature encoding ($label)",
-            Base64Url.encode(fresh),
-            Base64Url.encode(fresh).trimEnd('='),
-        )
+        assertEquals("fresh P1363 length ($label)", 64, fresh.size)
+        val encoded = Base64Url.encode(fresh)
+        assertEquals("fresh signature encoding length ($label)", 86, encoded.length)
         assertFalse(
             "fresh signature must not contain base64 padding ($label)",
-            Base64Url.encode(fresh).contains('='),
+            encoded.contains('='),
         )
 
         val tampered = canonical.replaceFirst("v1", "v2").toByteArray(Charsets.UTF_8)

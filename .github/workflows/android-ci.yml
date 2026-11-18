@@ -71,6 +71,16 @@ jobs:
       - name: Build, lint, and unit test (devDebug)
         run: ./gradlew assembleDevDebug lintDevDebug testDevDebugUnitTest --stacktrace --refresh-dependencies
 
+      # Catches entity changes that rebuild schema JSON without a version bump,
+      # and commented-out / skipped migrations that fooled the static script.
+      - name: Fail if Room schema export drifted from git
+        run: |
+          git diff --exit-code -- app/schemas || {
+            echo "Room schema JSON under app/schemas changed during the build." >&2
+            echo "Bump APP_DATABASE_VERSION, commit the new schema, and add a Migration." >&2
+            exit 1
+          }
+
       - name: Assemble prod release
         run: ./gradlew assembleProdRelease --stacktrace
 

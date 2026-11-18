@@ -25,10 +25,17 @@ data class PairingCredentials(
     val isPaired: Boolean get() = !deviceId.isNullOrBlank()
 }
 
+interface PairingStateAccess {
+    suspend fun current(): PairingCredentials
+    suspend fun clearDeviceId()
+    suspend fun savePairing(deviceId: String, serverUrl: String)
+    suspend fun clearAll()
+}
+
 @Singleton
 class PairingCredentialStore @Inject constructor(
     @ApplicationContext private val context: Context,
-) {
+) : PairingStateAccess {
     private val deviceIdKey = stringPreferencesKey("device_id")
     private val serverUrlKey = stringPreferencesKey("server_url")
 
@@ -39,7 +46,7 @@ class PairingCredentialStore @Inject constructor(
         )
     }
 
-    suspend fun current(): PairingCredentials = credentials.first()
+    override suspend fun current(): PairingCredentials = credentials.first()
 
     suspend fun setServerUrl(serverUrl: String) {
         context.pairingDataStore.edit { prefs ->
@@ -47,7 +54,7 @@ class PairingCredentialStore @Inject constructor(
         }
     }
 
-    suspend fun savePairing(deviceId: String, serverUrl: String) {
+    override suspend fun savePairing(deviceId: String, serverUrl: String) {
         context.pairingDataStore.edit { prefs ->
             prefs[deviceIdKey] = deviceId
             prefs[serverUrlKey] = normalizeBaseUrl(serverUrl)
@@ -55,20 +62,22 @@ class PairingCredentialStore @Inject constructor(
     }
 
     /** Clears device id (and keeps server URL for re-pair). */
-    suspend fun clearDeviceId() {
+    override suspend fun clearDeviceId() {
         context.pairingDataStore.edit { prefs ->
             prefs.remove(deviceIdKey)
         }
     }
 
-    suspend fun clearAll() {
+    override suspend fun clearAll() {
         context.pairingDataStore.edit { it.clear() }
     }
 
     companion object {
         fun normalizeBaseUrl(url: String): String {
-            val trimmed = url.trim().trimEnd('/')
-            return trimmed.ifEmpty { BuildConfig.BACKEND_URL.trimEnd('/') }
+            return when (val result = ServerUrlValidator.validate(url)) {
+                is ServerUrlValidator.Result.Ok -> result.value.url
+                is ServerUrlValidator.Result.Err -> BuildConfig.BACKEND_URL.trimEnd('/')
+            }
         }
     }
 }

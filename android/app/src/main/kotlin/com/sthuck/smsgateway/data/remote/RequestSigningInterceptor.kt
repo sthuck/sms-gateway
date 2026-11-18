@@ -3,11 +3,11 @@ package com.sthuck.smsgateway.data.remote
 import com.sthuck.smsgateway.crypto.Base64Url
 import com.sthuck.smsgateway.crypto.CanonicalString
 import com.sthuck.smsgateway.crypto.ClockSkewStore
-import com.sthuck.smsgateway.crypto.DeviceKeyStore
+import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.crypto.DeviceSigner
 import com.sthuck.smsgateway.data.remote.dto.Problem
 import com.sthuck.smsgateway.data.remote.dto.ProblemCodes
-import com.sthuck.smsgateway.pairing.PairingCredentialStore
+import com.sthuck.smsgateway.pairing.PairingStateAccess
 import com.sthuck.smsgateway.pairing.PairingSession
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -27,11 +27,12 @@ import javax.inject.Singleton
  * Signs every device API request per STH-5 draft 2.
  * Retries once on `401 invalid_timestamp` after applying `server_time`.
  * Clears pairing on `device_unknown` / `device_revoked`.
+ * A paired device with a missing Keystore key is treated as re-pair required (M2).
  */
 @Singleton
 class RequestSigningInterceptor @Inject constructor(
-    private val credentialStore: PairingCredentialStore,
-    private val deviceKeyStore: DeviceKeyStore,
+    private val credentialStore: PairingStateAccess,
+    private val deviceKeyStore: DeviceKeyAccess,
     private val clockSkewStore: ClockSkewStore,
     private val pairingSession: PairingSession,
     private val json: Json,
@@ -46,6 +47,19 @@ class RequestSigningInterceptor @Inject constructor(
 
         if (!isPair && !credentials.isPaired) {
             return chain.proceed(original)
+        }
+
+        if (!isPair && credentials.isPaired && !deviceKeyStore.hasKey() && !deviceKeyStore.hasPendingKey()) {
+            runBlocking {
+                credentialStore.clearDeviceId()
+                clockSkewStore.clear()
+            }
+            pairingSession.notifyRePairRequired()
+            return chain.proceed(original)
+        }
+
+        require(original.url.encodedQuery == null) {
+            "Device API v1 requests must not include a query string (got ${original.url})"
         }
 
         val bodyBytes = original.body?.let { readBodyBytes(it) } ?: ByteArray(0)
@@ -65,12 +79,14 @@ class RequestSigningInterceptor @Inject constructor(
         if (response.code == 401 || response.code == 403) {
             val problem = peekProblem(response)
             when (problem?.code) {
-                ProblemCodes.INVALID_TIMESTAMP -> {
+                ProblemCodes.INVALID_TIMESTAMP, ProblemCodes.REPLAY_DETECTED -> {
                     val serverTime = problem.serverTime
                         ?: parseHttpDateToUnixSeconds(response.header("Date"))
-                    if (serverTime != null) {
+                    if (serverTime != null || problem.code == ProblemCodes.REPLAY_DETECTED) {
                         response.close()
-                        clockSkewStore.applyServerTime(serverTime)
+                        if (serverTime != null) {
+                            clockSkewStore.applyServerTime(serverTime)
+                        }
                         val retryBody = if (original.body == null) {
                             null
                         } else {
@@ -92,6 +108,16 @@ class RequestSigningInterceptor @Inject constructor(
                     }
                     pairingSession.notifyRePairRequired()
                 }
+                ProblemCodes.INVALID_SIGNATURE -> {
+                    if (credentials.isPaired) {
+                        runBlocking {
+                            credentialStore.clearDeviceId()
+                            deviceKeyStore.deleteKey()
+                            clockSkewStore.clear()
+                        }
+                        pairingSession.notifyRePairRequired()
+                    }
+                }
             }
         }
         return response
@@ -105,13 +131,9 @@ class RequestSigningInterceptor @Inject constructor(
         val contentSha = sha256Hex(bodyBytes)
         val timestamp = clockSkewStore.nowUnixSeconds().toString()
         val nonce = newNonce()
-        val host = original.url.host.let { h ->
-            val port = original.url.port
-            val defaultPort = if (original.url.scheme == "https") 443 else 80
-            if (port != defaultPort) "$h:$port" else h
-        }.lowercase()
+        val host = hostHeaderValue(original)
         val path = original.url.encodedPath
-        val query = "" // v1 device endpoints have no query
+        val query = ""
         val canonical = CanonicalString.build(
             method = original.method,
             path = path,
@@ -130,7 +152,6 @@ class RequestSigningInterceptor @Inject constructor(
             .header(DeviceHeaders.NONCE, nonce)
             .header(DeviceHeaders.CONTENT_SHA256, contentSha)
             .header(DeviceHeaders.SIGNATURE, signature)
-            // Contract: bodies are signed over exact wire bytes; no Content-Encoding.
             .removeHeader("Content-Encoding")
             .removeHeader(DeviceHeaders.DEVICE_ID)
         if (!deviceId.isNullOrBlank()) {
@@ -149,6 +170,16 @@ class RequestSigningInterceptor @Inject constructor(
     }
 
     companion object {
+        fun hostHeaderValue(request: Request): String {
+            val url = request.url
+            val defaultPort = if (url.scheme == "https") 443 else 80
+            return if (url.port != defaultPort) {
+                "${url.host}:${url.port}"
+            } else {
+                url.host
+            }.lowercase()
+        }
+
         fun sha256Hex(bytes: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
             return digest.joinToString("") { b -> "%02x".format(b) }
@@ -166,7 +197,6 @@ class RequestSigningInterceptor @Inject constructor(
             return buffer.readByteArray()
         }
 
-        /** Parses an RFC 7231 `Date` header into Unix seconds, or null. */
         fun parseHttpDateToUnixSeconds(dateHeader: String?): Long? {
             if (dateHeader.isNullOrBlank()) return null
             return try {
