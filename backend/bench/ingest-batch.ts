@@ -2,7 +2,8 @@
  * Repeatable latency benchmark for POST /v1/messages:batch (100 messages).
  *
  * Seeds a device credential with the contract test-vector key, then measures
- * signed request latency against a running API.
+ * signed request latency against a running API. Localhost-only by default;
+ * deletes the seeded user (cascade) when finished.
  *
  * Example:
  *   pnpm exec tsx bench/ingest-batch.ts \
@@ -37,6 +38,7 @@ type Args = {
   warmup: number;
   batchSize: number;
   databaseUrl: string;
+  allowRemote: boolean;
 };
 
 function parseArgs(argv: string[]): Args {
@@ -56,7 +58,48 @@ function parseArgs(argv: string[]): Args {
       process.env.MIGRATE_DATABASE_URL ??
       process.env.DATABASE_URL ??
       "postgres://sms:sms@127.0.0.1:5432/sms",
+    allowRemote: argv.includes("--allow-remote"),
   };
+}
+
+function isLocalHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+}
+
+function assertLocalOnly(args: Args): void {
+  if (args.allowRemote) return;
+
+  let baseHost: string;
+  try {
+    baseHost = new URL(args.baseUrl).hostname;
+  } catch {
+    throw new Error(`Invalid --base-url: ${args.baseUrl}`);
+  }
+  if (!isLocalHostname(baseHost)) {
+    throw new Error(
+      `Refusing non-localhost --base-url host "${baseHost}" (pass --allow-remote to override)`,
+    );
+  }
+
+  const hostOnly = args.host.split(":")[0] ?? args.host;
+  if (!isLocalHostname(hostOnly)) {
+    throw new Error(
+      `Refusing non-localhost --host "${args.host}" (pass --allow-remote to override)`,
+    );
+  }
+
+  let dbHost: string;
+  try {
+    dbHost = new URL(args.databaseUrl).hostname;
+  } catch {
+    throw new Error(`Invalid --database-url: ${args.databaseUrl}`);
+  }
+  if (!isLocalHostname(dbHost)) {
+    throw new Error(
+      `Refusing non-localhost database host "${dbHost}" (pass --allow-remote to override)`,
+    );
+  }
 }
 
 function freshNonce(): string {
@@ -107,7 +150,7 @@ function sign(opts: {
   };
 }
 
-async function seedDevice(databaseUrl: string): Promise<string> {
+async function seedDevice(databaseUrl: string): Promise<{ deviceId: string; ownerId: string }> {
   const pool = new pg.Pool({ connectionString: databaseUrl });
   try {
     const user = await pool.query<{ id: string }>(
@@ -129,7 +172,16 @@ async function seedDevice(databaseUrl: string): Promise<string> {
        VALUES ($1, $2, $3)`,
       [ownerId, deviceId, testVector.testPublicKeySpkiB64url],
     );
-    return deviceId;
+    return { deviceId, ownerId };
+  } finally {
+    await pool.end();
+  }
+}
+
+async function deleteSeededUser(databaseUrl: string, ownerId: string): Promise<void> {
+  const pool = new pg.Pool({ connectionString: databaseUrl });
+  try {
+    await pool.query(`DELETE FROM users WHERE id = $1`, [ownerId]);
   } finally {
     await pool.end();
   }
@@ -143,6 +195,7 @@ function percentile(sorted: number[], p: number): number {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  assertLocalOnly(args);
   if (args.batchSize > 100) {
     throw new Error("batch size must be <= 100 (contract limit)");
   }
@@ -152,75 +205,87 @@ async function main(): Promise<void> {
     throw new Error(`API not healthy at ${args.baseUrl}/healthz (${health.status})`);
   }
 
-  const deviceId = await seedDevice(args.databaseUrl);
-  console.log(
-    JSON.stringify({
-      event: "bench_start",
-      baseUrl: args.baseUrl,
-      host: args.host,
-      deviceId,
-      batchSize: args.batchSize,
-      warmup: args.warmup,
-      iterations: args.iterations,
-      node: process.version,
-      platform: process.platform,
-      arch: process.arch,
-    }),
-  );
-
-  const samples: number[] = [];
-  const total = args.warmup + args.iterations;
-
-  for (let i = 0; i < total; i++) {
-    const body = buildBatch(args.batchSize, `bench-${Date.now()}-${i}`);
-    const headers = sign({
-      method: "POST",
-      path: "/v1/messages:batch",
-      host: args.host,
-      deviceId,
-      body,
-    });
-    const t0 = performance.now();
-    const res = await fetch(`${args.baseUrl}/v1/messages:batch`, {
-      method: "POST",
-      headers,
-      body,
-    });
-    const ms = performance.now() - t0;
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`iteration ${i} failed: HTTP ${res.status} ${text.slice(0, 200)}`);
-    }
-    const json = (await res.json()) as { results: unknown[] };
-    if (json.results.length !== args.batchSize) {
-      throw new Error(`iteration ${i}: expected ${args.batchSize} results`);
-    }
-    if (i >= args.warmup) {
-      samples.push(ms);
-    }
+  const seeded = await seedDevice(args.databaseUrl);
+  try {
     console.log(
       JSON.stringify({
-        event: "sample",
-        i,
-        phase: i < args.warmup ? "warmup" : "measure",
-        ms: Number(ms.toFixed(2)),
+        event: "bench_start",
+        baseUrl: args.baseUrl,
+        host: args.host,
+        deviceId: seeded.deviceId,
+        batchSize: args.batchSize,
+        warmup: args.warmup,
+        iterations: args.iterations,
+        node: process.version,
+        platform: process.platform,
+        arch: process.arch,
       }),
     );
-  }
 
-  samples.sort((a, b) => a - b);
-  const summary = {
-    event: "bench_summary",
-    samples: samples.length,
-    batchSize: args.batchSize,
-    p50_ms: Number(percentile(samples, 50).toFixed(2)),
-    p95_ms: Number(percentile(samples, 95).toFixed(2)),
-    p99_ms: Number(percentile(samples, 99).toFixed(2)),
-    mean_ms: Number((samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(2)),
-    min_ms: Number(samples[0]!.toFixed(2)),
-    max_ms: Number(samples[samples.length - 1]!.toFixed(2)),
-  };
-  console.log(JSON.stringify(summary));
+    const samples: number[] = [];
+    const total = args.warmup + args.iterations;
+
+    for (let i = 0; i < total; i++) {
+      const body = buildBatch(args.batchSize, `bench-${Date.now()}-${i}`);
+      const headers = sign({
+        method: "POST",
+        path: "/v1/messages:batch",
+        host: args.host,
+        deviceId: seeded.deviceId,
+        body,
+      });
+      const t0 = performance.now();
+      const res = await fetch(`${args.baseUrl}/v1/messages:batch`, {
+        method: "POST",
+        headers,
+        body,
+      });
+      const ms = performance.now() - t0;
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`iteration ${i} failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+      }
+      const json = (await res.json()) as { results: unknown[] };
+      if (json.results.length !== args.batchSize) {
+        throw new Error(`iteration ${i}: expected ${args.batchSize} results`);
+      }
+      if (i >= args.warmup) {
+        samples.push(ms);
+      }
+      console.log(
+        JSON.stringify({
+          event: "sample",
+          i,
+          phase: i < args.warmup ? "warmup" : "measure",
+          ms: Number(ms.toFixed(2)),
+        }),
+      );
+    }
+
+    samples.sort((a, b) => a - b);
+    const summary = {
+      event: "bench_summary",
+      samples: samples.length,
+      batchSize: args.batchSize,
+      p50_ms: Number(percentile(samples, 50).toFixed(2)),
+      p95_ms: Number(percentile(samples, 95).toFixed(2)),
+      p99_ms: Number(percentile(samples, 99).toFixed(2)),
+      mean_ms: Number((samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(2)),
+      min_ms: Number(samples[0]!.toFixed(2)),
+      max_ms: Number(samples[samples.length - 1]!.toFixed(2)),
+    };
+    console.log(JSON.stringify(summary));
+  } finally {
+    await deleteSeededUser(args.databaseUrl, seeded.ownerId).catch((err) => {
+      console.error(
+        JSON.stringify({
+          event: "bench_cleanup_failed",
+          ownerId: seeded.ownerId,
+          err: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    });
+  }
 }
 
 main().catch((err) => {

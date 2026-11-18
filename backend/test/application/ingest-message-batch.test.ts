@@ -126,6 +126,48 @@ describe("IngestMessageBatch use case", () => {
     expect(messages.rows.get(`${DEVICE}:ok-2`)?.message.sender).toBe("BankAlert");
   });
 
+  it("rejects poison items (NUL / year-0000) individually and still stores valid peers", async () => {
+    const { useCase, messages } = buildUseCase();
+    const result = await useCase.execute({
+      ownerId: OWNER,
+      deviceId: DEVICE,
+      rawMessages: [
+        msg("good-1"),
+        msg("nul-sender", { sender: "+1555\u00001234567" }),
+        {
+          device_msg_id: "bad\u0000id",
+          sender: "+15551234567",
+          body: "x",
+          received_at: "2026-11-18T09:45:12Z",
+          sim_slot: 0,
+          direction: "inbound",
+        },
+        msg("year-zero", { received_at: "0000-01-01T00:00:00Z" }),
+        msg("good-2"),
+      ],
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.results[0]).toMatchObject({ device_msg_id: "good-1", status: "accepted" });
+    expect(result.results[1]).toMatchObject({
+      status: "rejected",
+      error: { code: "invalid_field" },
+    });
+    expect(result.results[2]).toMatchObject({
+      status: "rejected",
+      error: { code: "invalid_field" },
+    });
+    expect(result.results[3]).toMatchObject({
+      status: "rejected",
+      error: { code: "invalid_field" },
+    });
+    expect(result.results[4]).toMatchObject({ device_msg_id: "good-2", status: "accepted" });
+    expect(messages.rows.size).toBe(2);
+    expect(messages.rows.has(`${DEVICE}:good-1`)).toBe(true);
+    expect(messages.rows.has(`${DEVICE}:good-2`)).toBe(true);
+  });
+
   it("takes owner id only from credentials, never the payload", async () => {
     const { useCase, messages } = buildUseCase();
     const fakeOwner = "00000000-0000-4000-8000-000000000099";

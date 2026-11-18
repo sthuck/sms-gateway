@@ -28,7 +28,7 @@ describe("message normalisation", () => {
     });
   });
 
-  it("requires UTC Z timestamps and rejects far-future values", () => {
+  it("requires UTC Z timestamps and rejects far-future and pre-1970 values", () => {
     const now = new Date("2026-11-18T12:00:00Z");
     expect(normaliseReceivedAt("2026-11-18T09:45:12Z", now)).toEqual({
       ok: true,
@@ -40,6 +40,50 @@ describe("message normalisation", () => {
       ok: false,
       code: "invalid_field",
     });
+    expect(normaliseReceivedAt("0000-01-01T00:00:00Z", now)).toMatchObject({
+      ok: false,
+      code: "invalid_field",
+    });
+    expect(normaliseReceivedAt("1969-12-31T23:59:59Z", now)).toMatchObject({
+      ok: false,
+      code: "invalid_field",
+    });
+    expect(normaliseReceivedAt("1970-01-01T00:00:00Z", now).ok).toBe(true);
+  });
+
+  it("rejects NUL in sender, device_msg_id, and body as invalid_field", () => {
+    expect(normaliseSender("Bank\u0000Alert", "US", formatPhoneSender)).toMatchObject({
+      ok: false,
+      code: "invalid_field",
+    });
+    expect(
+      validateBatchItem(
+        {
+          device_msg_id: "sms-\u0000-1",
+          sender: "+15551234567",
+          body: "hi",
+          received_at: "2026-11-18T09:45:12Z",
+          direction: "inbound",
+        },
+        "US",
+        formatPhoneSender,
+        new Date("2026-11-18T12:00:00Z"),
+      ),
+    ).toMatchObject({ ok: false, code: "invalid_field" });
+    expect(
+      validateBatchItem(
+        {
+          device_msg_id: "sms-ok",
+          sender: "+15551234567",
+          body: "hi\u0000there",
+          received_at: "2026-11-18T09:45:12Z",
+          direction: "inbound",
+        },
+        "US",
+        formatPhoneSender,
+        new Date("2026-11-18T12:00:00Z"),
+      ),
+    ).toMatchObject({ ok: false, code: "invalid_field" });
   });
 
   it("validates sim_slot and direction", () => {

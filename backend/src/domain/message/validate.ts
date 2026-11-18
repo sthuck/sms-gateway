@@ -1,4 +1,5 @@
 import {
+  containsNul,
   normaliseDirection,
   normaliseReceivedAt,
   normaliseSender,
@@ -42,12 +43,7 @@ export function validateBatchItem(
   void item.deviceId;
 
   const deviceMsgIdRaw = item.device_msg_id;
-  let deviceMsgId = "";
-  if (typeof deviceMsgIdRaw === "string") {
-    deviceMsgId = deviceMsgIdRaw;
-  }
-
-  if (deviceMsgIdRaw === undefined || deviceMsgIdRaw === null || deviceMsgId === "") {
+  if (deviceMsgIdRaw === undefined || deviceMsgIdRaw === null || deviceMsgIdRaw === "") {
     return {
       ok: false,
       deviceMsgId: "",
@@ -61,6 +57,15 @@ export function validateBatchItem(
       deviceMsgId: "",
       code: "invalid_field",
       detail: "device_msg_id must be a string",
+    };
+  }
+  const deviceMsgId = deviceMsgIdRaw;
+  if (containsNul(deviceMsgId)) {
+    return {
+      ok: false,
+      deviceMsgId: "",
+      code: "invalid_field",
+      detail: "device_msg_id must not contain NUL",
     };
   }
   if (deviceMsgId.length > MAX_DEVICE_MSG_ID_LEN) {
@@ -86,6 +91,14 @@ export function validateBatchItem(
       deviceMsgId,
       code: "invalid_field",
       detail: "body must be a string",
+    };
+  }
+  if (containsNul(item.body)) {
+    return {
+      ok: false,
+      deviceMsgId,
+      code: "invalid_field",
+      detail: "body must not contain NUL",
     };
   }
   if ([...item.body].length > MAX_BODY_CHARS) {
