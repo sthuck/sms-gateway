@@ -68,6 +68,8 @@ export async function claimNonceAndSignature(
       return "replay";
     }
     await client.query("COMMIT");
+    // Outside the claim txn so prune does not lengthen the lock window.
+    void maybePurgeExpiredReplays(pool).catch(() => undefined);
     return "ok";
   } catch (err) {
     try {
@@ -105,7 +107,18 @@ async function claimOnClient(
   return (rowCount ?? 0) > 0;
 }
 
-/** Best-effort cleanup of expired rows (not on the hot path of every request). */
-export async function purgeExpiredReplays(pool: Pool): Promise<void> {
-  await pool.query(`DELETE FROM app.device_replay_cache WHERE expires_at <= now()`);
+/**
+ * Opportunistic bounded prune of expired rows (avoids unbounded table growth
+ * when pairing/device auth is high-volume). ~1/32 of claims run a small delete.
+ */
+export async function maybePurgeExpiredReplays(pool: Pool): Promise<void> {
+  if ((Math.random() * 32) | 0) return;
+  await pool.query(
+    `DELETE FROM app.device_replay_cache
+     WHERE ctid IN (
+       SELECT ctid FROM app.device_replay_cache
+       WHERE expires_at <= now()
+       LIMIT 256
+     )`,
+  );
 }

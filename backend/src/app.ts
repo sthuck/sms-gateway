@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import type { Pool } from "pg";
-import type { Config } from "./config.js";
+import { toFastifyTrustProxy, type Config } from "./config.js";
 import { buildLoggerOptions } from "./logger.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
@@ -29,9 +29,9 @@ export async function buildApp(
     requestIdHeader: "x-request-id",
     bodyLimit: 1_048_576,
     // Only trust XFF from configured proxy hops; request.ip is then safe
-    // for rate limits and audit (STH-38). Cast: Fastify overloads exclude
-    // `number` hop-count from the narrowest signature under exactOptional.
-    trustProxy: config.trustProxy as boolean | string | string[],
+    // for rate limits and audit (STH-38/42). Prefer IP/CIDR or hop count;
+    // never recommend boolean true.
+    trustProxy: toFastifyTrustProxy(config.trustProxy),
   });
 
   // Extra guard: never attach raw bodies to request logs.

@@ -37,9 +37,10 @@ Postgres table `app.rate_limit_buckets` (shared across instances).
 | Global invalid codes | 120 / 60 s | `PAIR_GLOBAL_INVALID_LIMIT`, `PAIR_GLOBAL_INVALID_WINDOW_SEC` |
 | IP lock after invalids | 20 fails → 900 s lock | `PAIR_IP_INVALID_LOCK_THRESHOLD`, `PAIR_IP_INVALID_LOCK_SEC` |
 
-Client IP comes from Fastify `request.ip` with `TRUST_PROXY` configured for
-known reverse-proxy hops/CIDRs. **X-Forwarded-For is never parsed by hand**
-(spoofing would bypass per-IP limits).
+Client IP comes from Fastify `request.ip` with `TRUST_PROXY` set to an
+**explicit proxy IP/CIDR list** (preferred) or a hop count (`1` = one hop).
+Default is trust nothing. Do not set `TRUST_PROXY=true` (trusts every hop;
+clients can spoof `X-Forwarded-For`). **XFF is never parsed by hand.**
 
 **Why Postgres, not in-memory:** an in-memory Fastify rate-limit store
 would not enforce correctly with multiple API replicas. No Redis in the

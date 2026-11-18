@@ -32,6 +32,10 @@ const envSchema = z.object({
 
 export type TrustProxyOption = boolean | number | string | string[];
 
+/** Fastify's typed trustProxy shape (types omit hop-count numbers). */
+export type FastifyTrustProxy =
+  boolean | string | string[] | ((address: string, hop: number) => boolean);
+
 export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS" | "TRUST_PROXY"> & {
   corsAllowedOrigins: string[];
   trustProxy: TrustProxyOption;
@@ -39,10 +43,20 @@ export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS" | "T
   deviceAuth: DeviceAuthConfig;
 };
 
+/**
+ * Parse TRUST_PROXY. Default / false / no → trust nothing.
+ * All-digit values are hop counts (`0` = no proxy, `1` = one hop) — never
+ * boolean, so `TRUST_PROXY=1` does not become `true` (STH-42).
+ * Prefer an explicit proxy IP/CIDR list in production.
+ */
 export function parseTrustProxy(raw: string | undefined): TrustProxyOption {
-  if (!raw || raw === "false" || raw === "0" || raw === "no") return false;
-  if (raw === "true" || raw === "1" || raw === "yes") return true;
-  if (/^\d+$/.test(raw)) return Number(raw);
+  if (!raw || raw === "false" || raw === "no") return false;
+  // Digits before boolean keywords so "1" / "0" are hop counts, not true/false.
+  if (/^\d+$/.test(raw)) {
+    const hops = Number(raw);
+    return hops === 0 ? false : hops;
+  }
+  if (raw === "true" || raw === "yes") return true;
   const parts = raw
     .split(",")
     .map((s) => s.trim())
@@ -50,6 +64,18 @@ export function parseTrustProxy(raw: string | undefined): TrustProxyOption {
   if (parts.length === 0) return false;
   if (parts.length === 1) return parts[0]!;
   return parts;
+}
+
+/**
+ * Map our TrustProxyOption onto Fastify's typed trustProxy.
+ * Hop counts become `(address, hop) => hop < n` (same as proxy-addr).
+ */
+export function toFastifyTrustProxy(opt: TrustProxyOption): FastifyTrustProxy {
+  if (typeof opt === "number") {
+    const hops = opt;
+    return (_address, hop) => hop < hops;
+  }
+  return opt;
 }
 
 export function parseCorsAllowedOrigins(raw: string | undefined): string[] {

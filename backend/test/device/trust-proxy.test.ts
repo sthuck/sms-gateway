@@ -29,11 +29,19 @@ describe("parseTrustProxy", () => {
     expect(parseTrustProxy(undefined)).toBe(false);
     expect(parseTrustProxy("false")).toBe(false);
     expect(parseTrustProxy("")).toBe(false);
+    expect(parseTrustProxy("0")).toBe(false);
+    expect(parseTrustProxy("no")).toBe(false);
   });
 
-  it("parses true, hop counts, and CIDR/IP lists", () => {
-    expect(parseTrustProxy("true")).toBe(true);
+  it("parses hop counts before boolean keywords (STH-42)", () => {
+    // "1" must be hop count 1, never boolean true (would trust every hop).
+    expect(parseTrustProxy("1")).toBe(1);
     expect(parseTrustProxy("2")).toBe(2);
+    expect(parseTrustProxy("true")).toBe(true);
+    expect(parseTrustProxy("yes")).toBe(true);
+  });
+
+  it("parses CIDR/IP lists", () => {
     expect(parseTrustProxy("10.0.0.5")).toBe("10.0.0.5");
     expect(parseTrustProxy("10.0.0.5,10.0.0.0/8")).toEqual(["10.0.0.5", "10.0.0.0/8"]);
   });
@@ -141,6 +149,24 @@ describe.skipIf(!migratorOk)("trustProxy vs spoofed X-Forwarded-For (STH-38)", (
       await hitPair(app, { remoteAddress: PEER, xff: SPOOFED });
       expect(await bucketHits(PEER)).toBeGreaterThanOrEqual(1);
       expect(await bucketHits(SPOOFED)).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("TRUST_PROXY=1 peels one hop only, not the whole chain (STH-42)", async () => {
+    await appPool.query(`DELETE FROM app.rate_limit_buckets`);
+    const intermediate = "203.0.113.50";
+    const app = await build("1");
+    try {
+      // Multi-hop XFF: hop-count 1 → client is the rightmost entry, not leftmost.
+      await hitPair(app, {
+        remoteAddress: PEER,
+        xff: `${SPOOFED}, ${intermediate}`,
+      });
+      expect(await bucketHits(intermediate)).toBeGreaterThanOrEqual(1);
+      expect(await bucketHits(SPOOFED)).toBe(0);
+      expect(await bucketHits(PEER)).toBe(0);
     } finally {
       await app.close();
     }
