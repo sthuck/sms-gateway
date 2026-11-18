@@ -32,6 +32,8 @@ pnpm-debug.log*
 .vitest/
 .eslintcache
 .prettiercache
+backend/.drift-probe-*/
+backend/.drift-cfg-*/
 
 # Docker
 docker-compose.override.yml

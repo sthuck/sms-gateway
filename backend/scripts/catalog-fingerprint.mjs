@@ -3,13 +3,20 @@
  *
  * Covers what `pg_dump --schema-only --no-privileges` misses:
  * - table/function/schema/database ACLs (via aclexplode), excluding the
- *   object's owner (migrator role name / PG-version owner privs like MAINTAIN)
+ *   stamping connection's migrator role (current_user) — not whichever role
+ *   happens to own the object — so OWNER TO evil cannot hide in filtered ACLs.
+ *   Also drops pg_database_owner rows when that role stands in for the migrator
+ *   (PG15+ public schema) and owner-implied privs such as MAINTAIN on PG17.
  * - column ACLs (attacl)
- * - pg_default_acl
+ * - pg_default_acl (current_user only — see captureDefaultAcls)
  * - sms_app role attributes, memberships, and role settings
  * - function proconfig (search_path)
  * - relrowsecurity / relforcerowsecurity + pg_policies
  * - column names (unexpected added columns)
+ *
+ * Ownership is NOT stored in the fingerprint (migrator role names vary). Stamp
+ * and schema-equivalence call assertMigratorOwnership() separately so every
+ * relevant object is owned by current_user of the MIGRATE_DATABASE_URL session.
  *
  * Schemas in scope: public, app. Excludes pgboss (bootstrap) and
  * public.pgmigrations (legacy bookkeeping).
@@ -29,22 +36,29 @@ export const EXPECTED_CATALOG_PATH = path.join(backendRoot, "drizzle", "expected
 /** Role name used for PUBLIC in ACL rows (grantee oid 0). */
 const PUBLIC = "PUBLIC";
 
+/** PG15+ stand-in for the owner of the current database. */
+const PG_DATABASE_OWNER = "pg_database_owner";
+
 /**
  * @param {import('pg').Client | import('pg').PoolClient} client
  * @returns {Promise<object>}
  */
 export async function captureCatalog(client) {
   // Sequential: node-postgres deprecates concurrent query() on one client.
+  const migratorRole = await currentUser(client);
+  const databaseOwner = await captureDatabaseOwner(client);
+  const migratorAclRoles = migratorAclRoleSet(migratorRole, databaseOwner);
+
   const roles = await captureRoles(client);
   const roleMembers = await captureRoleMembers(client);
   const roleSettings = await captureRoleSettings(client);
-  const tables = await captureTables(client);
+  const tables = await captureTables(client, migratorAclRoles);
   const columns = await captureColumns(client);
-  const columnAcls = await captureColumnAcls(client);
+  const columnAcls = await captureColumnAcls(client, migratorAclRoles);
   const policies = await capturePolicies(client);
-  const functions = await captureFunctions(client);
-  const namespaces = await captureNamespaces(client);
-  const database = await captureDatabase(client);
+  const functions = await captureFunctions(client, migratorAclRoles);
+  const namespaces = await captureNamespaces(client, migratorAclRoles);
+  const database = await captureDatabase(client, migratorAclRoles);
   const defaults = await captureDefaultAcls(client);
 
   return {
@@ -61,6 +75,151 @@ export async function captureCatalog(client) {
     database,
     defaultAcls: defaults,
   };
+}
+
+/** @param {import('pg').Client | import('pg').PoolClient} client */
+async function currentUser(client) {
+  const { rows } = await client.query(`SELECT current_user AS user`);
+  return String(rows[0].user);
+}
+
+/** @param {import('pg').Client | import('pg').PoolClient} client */
+async function captureDatabaseOwner(client) {
+  const { rows } = await client.query(`
+    SELECT d.datdba::regrole::text AS owner
+    FROM pg_database d
+    WHERE d.datname = current_database()
+  `);
+  return rows[0]?.owner ? String(rows[0].owner) : null;
+}
+
+/**
+ * Roles whose ACL rows are migrator/owner noise and must not appear in the
+ * fingerprint (so differently named migrators still compare equal).
+ * @param {string} migratorRole
+ * @param {string | null} databaseOwner
+ */
+function migratorAclRoleSet(migratorRole, databaseOwner) {
+  const roles = new Set([migratorRole]);
+  if (databaseOwner === migratorRole) {
+    roles.add(PG_DATABASE_OWNER);
+  }
+  return roles;
+}
+
+/**
+ * Assert every in-scope object is owned by the stamping connection's role
+ * (current_user / MIGRATE_DATABASE_URL user). Returns human-readable diffs
+ * (empty = OK). Tolerates PG15+ `pg_database_owner` on schema `public` when
+ * the database itself is owned by the migrator.
+ *
+ * @param {import('pg').Client | import('pg').PoolClient} client
+ * @returns {Promise<string[]>}
+ */
+export async function assertMigratorOwnership(client) {
+  const expected = await currentUser(client);
+  const databaseOwner = await captureDatabaseOwner(client);
+  const { rows } = await client.query(
+    `
+    WITH objs AS (
+      SELECT
+        'table'::text AS kind,
+        n.nspname || '.' || c.relname AS name,
+        c.relowner::regrole::text AS owner
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname IN ('public', 'app')
+        AND c.relkind = 'r'
+        AND NOT (n.nspname = 'public' AND c.relname = 'pgmigrations')
+
+      UNION ALL
+      SELECT
+        'sequence',
+        n.nspname || '.' || c.relname,
+        c.relowner::regrole::text
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname IN ('public', 'app')
+        AND c.relkind = 'S'
+
+      UNION ALL
+      SELECT
+        'view',
+        n.nspname || '.' || c.relname,
+        c.relowner::regrole::text
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname IN ('public', 'app')
+        AND c.relkind IN ('v', 'm')
+
+      UNION ALL
+      SELECT
+        'function',
+        n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+        p.proowner::regrole::text
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'app'
+
+      UNION ALL
+      SELECT
+        'type',
+        n.nspname || '.' || t.typname,
+        t.typowner::regrole::text
+      FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      WHERE n.nspname IN ('public', 'app')
+        AND t.typtype IN ('e', 'c', 'd')
+
+      UNION ALL
+      SELECT
+        'schema',
+        n.nspname,
+        n.nspowner::regrole::text
+      FROM pg_namespace n
+      WHERE n.nspname IN ('public', 'app')
+
+      UNION ALL
+      SELECT
+        'database',
+        d.datname,
+        d.datdba::regrole::text
+      FROM pg_database d
+      WHERE d.datname = current_database()
+    )
+    SELECT kind, name, owner FROM objs ORDER BY kind, name
+    `,
+  );
+
+  const diffs = [];
+  for (const row of rows) {
+    const owner = String(row.owner);
+    if (ownerIsMigrator(row.kind, row.name, owner, expected, databaseOwner)) continue;
+    diffs.push(`${row.kind} ${row.name}: owner=${owner}, expected migrator=${expected}`);
+  }
+  return diffs;
+}
+
+/**
+ * @param {string} kind
+ * @param {string} name
+ * @param {string} owner
+ * @param {string} expected
+ * @param {string | null} databaseOwner
+ */
+function ownerIsMigrator(kind, name, owner, expected, databaseOwner) {
+  if (owner === expected) return true;
+  // PG15+: CREATE DATABASE leaves schema public owned by pg_database_owner,
+  // which tracks the database owner. Accept that only when the DB is ours.
+  if (
+    kind === "schema" &&
+    name === "public" &&
+    owner === PG_DATABASE_OWNER &&
+    databaseOwner === expected
+  ) {
+    return true;
+  }
+  return false;
 }
 
 async function captureRoles(client) {
@@ -131,14 +290,14 @@ async function captureRoleSettings(client) {
   }));
 }
 
-async function captureTables(client) {
+/** @param {import('pg').Client | import('pg').PoolClient} client @param {Set<string>} migratorAclRoles */
+async function captureTables(client, migratorAclRoles) {
   const { rows } = await client.query(`
     SELECT
       n.nspname AS schema,
       c.relname AS name,
       c.relrowsecurity AS rls,
       c.relforcerowsecurity AS force_rls,
-      c.relowner::regrole::text AS owner,
       COALESCE(
         (
           SELECT json_agg(
@@ -167,8 +326,8 @@ async function captureTables(client) {
     name: r.name,
     rls: r.rls,
     force_rls: r.force_rls,
-    // Omit owner — migrator role name varies; compare non-owner ACL only.
-    acl: nonOwnerAcl(r.acl, r.owner),
+    // Ownership checked via assertMigratorOwnership; ACL drops migrator rows only.
+    acl: nonMigratorAcl(r.acl, migratorAclRoles),
   }));
 }
 
@@ -196,13 +355,13 @@ async function captureColumns(client) {
   }));
 }
 
-async function captureColumnAcls(client) {
+/** @param {import('pg').Client | import('pg').PoolClient} client @param {Set<string>} migratorAclRoles */
+async function captureColumnAcls(client, migratorAclRoles) {
   const { rows } = await client.query(`
     SELECT
       n.nspname AS schema,
       c.relname AS table,
       a.attname AS column,
-      c.relowner::regrole::text AS owner,
       COALESCE(
         (
           SELECT json_agg(
@@ -235,7 +394,7 @@ async function captureColumnAcls(client) {
       schema: r.schema,
       table: r.table,
       column: r.column,
-      acl: nonOwnerAcl(r.acl, r.owner),
+      acl: nonMigratorAcl(r.acl, migratorAclRoles),
     }))
     .filter((r) => r.acl.length > 0);
 }
@@ -267,7 +426,8 @@ async function capturePolicies(client) {
   }));
 }
 
-async function captureFunctions(client) {
+/** @param {import('pg').Client | import('pg').PoolClient} client @param {Set<string>} migratorAclRoles */
+async function captureFunctions(client, migratorAclRoles) {
   const { rows } = await client.query(`
     SELECT
       n.nspname AS schema,
@@ -303,15 +463,15 @@ async function captureFunctions(client) {
     args: r.args,
     security_definer: r.security_definer,
     config: [...r.config].map(String).sort(),
-    acl: nonOwnerAcl(r.acl, r.owner),
+    acl: nonMigratorAcl(r.acl, migratorAclRoles),
   }));
 }
 
-async function captureNamespaces(client) {
+/** @param {import('pg').Client | import('pg').PoolClient} client @param {Set<string>} migratorAclRoles */
+async function captureNamespaces(client, migratorAclRoles) {
   const { rows } = await client.query(`
     SELECT
       n.nspname AS name,
-      n.nspowner::regrole::text AS owner,
       COALESCE(
         (
           SELECT json_agg(
@@ -334,16 +494,16 @@ async function captureNamespaces(client) {
   `);
   return rows.map((r) => ({
     name: r.name,
-    // Non-owner grantees only (PUBLIC + sms_app, …). Catches GRANT CREATE … TO PUBLIC.
-    acl: nonOwnerAcl(r.acl, r.owner),
+    // Migrator / pg_database_owner rows dropped; catches GRANT CREATE … TO PUBLIC.
+    acl: nonMigratorAcl(r.acl, migratorAclRoles),
   }));
 }
 
-async function captureDatabase(client) {
+/** @param {import('pg').Client | import('pg').PoolClient} client @param {Set<string>} migratorAclRoles */
+async function captureDatabase(client, migratorAclRoles) {
   const { rows } = await client.query(`
     SELECT
       d.datname AS name,
-      d.datdba::regrole::text AS owner,
       COALESCE(
         (
           SELECT json_agg(
@@ -366,11 +526,13 @@ async function captureDatabase(client) {
   const r = rows[0];
   return {
     // Omit database name — differs across temp DBs in equivalence.
-    acl: nonOwnerAcl(r?.acl ?? [], r?.owner),
+    acl: nonMigratorAcl(r?.acl ?? [], migratorAclRoles),
   };
 }
 
 async function captureDefaultAcls(client) {
+  // Only default privileges recorded for current_user (the migrator). Other
+  // roles' ALTER DEFAULT PRIVILEGES entries are intentionally out of scope.
   const { rows } = await client.query(`
     SELECT
       COALESCE(n.nspname, '') AS schema,
@@ -405,10 +567,15 @@ async function captureDefaultAcls(client) {
   }));
 }
 
-/** Drop the object owner's own ACL rows (role-/PG-version specific). */
-function nonOwnerAcl(acl, owner) {
-  const ownerName = owner && owner !== "-" ? String(owner) : null;
-  return normalizeAcl(acl).filter((e) => e.grantee !== ownerName);
+/**
+ * Drop ACL rows for the expected migrator role (and pg_database_owner when it
+ * aliases that role). Does NOT key off the object's actual owner — OWNER TO
+ * evil must not make evil's privileges disappear from the fingerprint.
+ * @param {unknown} acl
+ * @param {Set<string>} migratorAclRoles
+ */
+function nonMigratorAcl(acl, migratorAclRoles) {
+  return normalizeAcl(acl).filter((e) => !migratorAclRoles.has(e.grantee));
 }
 
 function normalizeAcl(acl) {

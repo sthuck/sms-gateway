@@ -24,7 +24,12 @@ import { spawn } from "node:child_process";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { captureCatalog, diffAgainstExpected, formatCatalogDiffs } from "./catalog-fingerprint.mjs";
+import {
+  assertMigratorOwnership,
+  captureCatalog,
+  diffAgainstExpected,
+  formatCatalogDiffs,
+} from "./catalog-fingerprint.mjs";
 import ownedTablesJson from "../src/adapters/db-postgres/owned-tables.json" with { type: "json" };
 
 const backendRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -218,6 +223,16 @@ async function stampBaseline(client) {
 
 /** @param {import('pg').Client} client */
 async function assertCatalogMatchesBaseline(client) {
+  const ownerDiffs = await assertMigratorOwnership(client);
+  if (ownerDiffs.length > 0) {
+    throw new Error(
+      formatCatalogDiffs(
+        ownerDiffs,
+        "stamp refused: object owner(s) differ from migrator role (current_user)",
+      ),
+    );
+  }
+
   const actual = await captureCatalog(client);
   const diffs = diffAgainstExpected(actual);
   if (diffs.length > 0) {

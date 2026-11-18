@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import {
+  assertMigratorOwnership,
   captureCatalog,
   diffCatalogs,
   formatCatalogDiffs,
@@ -161,6 +162,17 @@ async function main() {
     await legacyClient.connect();
     await drizzleClient.connect();
     try {
+      for (const [label, c] of [
+        ["legacy+stamp", legacyClient],
+        ["drizzle-baseline", drizzleClient],
+      ]) {
+        const ownerDiffs = await assertMigratorOwnership(c);
+        if (ownerDiffs.length > 0) {
+          console.error(formatCatalogDiffs(ownerDiffs, `${label}: migrator ownership mismatch`));
+          failed = true;
+        }
+      }
+
       const legacyCatalog = await captureCatalog(legacyClient);
       const drizzleCatalog = await captureCatalog(drizzleClient);
       const catalogDiffs = diffCatalogs(legacyCatalog, drizzleCatalog, {
@@ -171,7 +183,7 @@ async function main() {
         console.error(formatCatalogDiffs(catalogDiffs, "Catalog fingerprint differs"));
         failed = true;
       } else {
-        console.log("Catalog equivalence OK (ACLs, policies, roles, proconfig, RLS).");
+        console.log("Catalog equivalence OK (ACLs, policies, roles, proconfig, RLS, ownership).");
       }
 
       // Keep committed expected-catalog.json in sync with the drizzle baseline path.
