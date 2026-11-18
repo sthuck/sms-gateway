@@ -53,6 +53,7 @@ node docs/contracts/examples/gen-test-vector.mjs
 
 - [Architecture / stack](docs/architecture.md)
 - [Local development](docs/local-dev.md)
+- [Pairing & device auth](docs/pairing.md)
 - [Docs index](docs/README.md)
 - [Device API contract](docs/contracts/device-api.yaml) (STH-5 v1 draft 2)
 - [Contract changelog (draft 2)](docs/contracts/CHANGES-draft2.md)

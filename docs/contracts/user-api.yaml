@@ -1,18 +1,22 @@
 openapi: 3.1.0
 info:
   title: SMS Gateway User / Web API
-  summary: Browser session auth and owner-facing endpoints (STH-9 fragment)
+  summary: Browser session auth and owner-facing endpoints (STH-9 / STH-14)
   description: |
-    User authentication for the web UI and bearer-JWT API access.
+    User authentication for the web UI and bearer-JWT API access, plus
+    owner-facing device management (pairing code issue, revoke).
 
     Login uses a generic OIDC provider (Authentik in production/homelab)
     via authorization code + PKCE. The browser holds an httpOnly session
     cookie; API clients may send `Authorization: Bearer` JWTs from the
     same issuer.
 
+    Device-signed requests are **not** accepted on these endpoints.
+    Pairing completion and device status live in `device-api.yaml`.
+
     Errors use RFC 9457 `application/problem+json` with `code` and
     `retryable`, consistent with `docs/contracts/semantics.md`.
-  version: 0.1.0
+  version: 0.2.0
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -22,10 +26,14 @@ servers:
     description: Homelab production origin (HTTPS)
   - url: http://127.0.0.1:8080
     description: Local API
+  - url: http://10.0.2.2:8080
+    description: Android emulator → host backend
 
 tags:
   - name: Auth
     description: OIDC login, callback, logout, and session introspection
+  - name: Devices
+    description: Owner-facing device pairing and revocation
 
 paths:
   /v1/auth/login:
@@ -115,6 +123,69 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /v1/pairing-codes:
+    post:
+      operationId: createPairingCode
+      tags: [Devices]
+      summary: Issue a single-use device pairing code
+      description: |
+        Authenticated owners receive a short Crockford Base32 code (8
+        characters, optionally displayed as `XXXX-XXXX`) and a QR payload
+        `smsgw://pair?code=<code>` with optional `server=<url-encoded base URL>`.
+
+        The plaintext code is returned once; the server stores only a
+        SHA-256 hash. Codes expire after 5 minutes and are burned on the
+        first successful `POST /v1/devices/pair` (see device-api.yaml).
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      responses:
+        "201":
+          description: Pairing code issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairingCodeResponse"
+              examples:
+                issued:
+                  value:
+                    code: 7K3M-9Q2P
+                    qr_payload: smsgw://pair?code=7K3M-9Q2P&server=http%3A%2F%2F10.0.2.2%3A8080
+                    expires_at: "2026-11-18T10:00:00.000Z"
+                    ttl_seconds: 300
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+
+  /v1/devices/{id}/revoke:
+    post:
+      operationId: revokeDevice
+      tags: [Devices]
+      summary: Revoke a device owned by the current user
+      description: |
+        Marks the device `status=revoked` and sets `device_credentials.revoked_at`.
+        Takes effect on the next device-authenticated request (status is
+        read from Postgres on every request; not cached). Other owners'
+        devices return `404 not_found` (RLS).
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Device revoked (idempotent if already revoked)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -150,6 +221,33 @@ components:
           type: [string, "null"]
           enum: [session, bearer, null]
 
+    PairingCodeResponse:
+      type: object
+      additionalProperties: false
+      required: [code, qr_payload, expires_at, ttl_seconds]
+      properties:
+        code:
+          type: string
+          description: |
+            8 Crockford Base32 characters, hyphenated as `XXXX-XXXX`.
+            Case-insensitive when redeemed. Returned only once.
+          pattern: "^[A-HJ-NP-TV-Z0-9]{4}-[A-HJ-NP-TV-Z0-9]{4}$"
+          examples: ["7K3M-9Q2P"]
+        qr_payload:
+          type: string
+          description: |
+            `smsgw://pair?code=<code>` plus optional `server` query
+            parameter (URL-encoded API base URL for the Android app).
+          examples:
+            - "smsgw://pair?code=7K3M-9Q2P&server=http%3A%2F%2F10.0.2.2%3A8080"
+        expires_at:
+          type: string
+          format: date-time
+        ttl_seconds:
+          type: integer
+          minimum: 1
+          examples: [300]
+
     Problem:
       type: object
       additionalProperties: true
@@ -174,6 +272,7 @@ components:
             - mfa_required
             - csrf_rejected
             - auth_misconfigured
+            - not_found
             - internal_error
             - service_unavailable
         retryable:
@@ -216,6 +315,21 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: Resource not found for this owner
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            missing:
+              value:
+                type: https://sms-gateway.example/problems/not_found
+                title: Not found
+                status: 404
+                detail: Device not found
+                code: not_found
+                retryable: false
     AuthMisconfigured:
       description: OIDC env not configured
       content:

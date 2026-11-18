@@ -97,8 +97,8 @@ function errMessage(err: unknown): string {
 
 /**
  * Authenticate via session cookie or Authorization: Bearer JWT, then expose
- * `request.ownerId` and `request.withOwner`. Device-signed and agent routes
- * are out of scope for STH-9.
+ * `request.ownerId` and `request.withOwner`. Device-signed requests are not
+ * accepted here (see `requireDeviceAuth`); agent routes remain separate.
  */
 export async function requireUserAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const app = request.server;

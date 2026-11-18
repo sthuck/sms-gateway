@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { loadOidcAuthConfig, type OidcAuthConfig } from "./auth/oidc-config.js";
+import { loadDeviceAuthConfig, type DeviceAuthConfig } from "./device/config.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -23,6 +24,7 @@ const envSchema = z.object({
 export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS"> & {
   corsAllowedOrigins: string[];
   oidc: OidcAuthConfig | null;
+  deviceAuth: DeviceAuthConfig;
 };
 
 export function parseCorsAllowedOrigins(raw: string | undefined): string[] {
@@ -58,9 +60,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     oidc.corsAllowedOrigins = corsAllowedOrigins;
   }
 
+  const deviceAuth = loadDeviceAuthConfig(env, {
+    publicBaseUrl: oidc?.publicBaseUrl ?? null,
+  });
+
   return {
     ...rest,
     corsAllowedOrigins,
     oidc,
+    deviceAuth,
   };
 }

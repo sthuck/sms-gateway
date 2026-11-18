@@ -38,9 +38,11 @@ describe.skipIf(!migratorOk)("migrations up/down/up", () => {
     );
     expect(Number(afterUp.rows[0]?.count)).toBeGreaterThan(0);
 
-    await runMigrations("down"); // auth-sessions
-    await runMigrations("down"); // rls-policies
-    await runMigrations("down"); // initial-schema
+    // One `down` per applied migration (device-auth, auth-sessions, rls, initial).
+    await runMigrations("down");
+    await runMigrations("down");
+    await runMigrations("down");
+    await runMigrations("down");
 
     tables = await listOwnedTables(admin);
     expect(tables).toHaveLength(0);
