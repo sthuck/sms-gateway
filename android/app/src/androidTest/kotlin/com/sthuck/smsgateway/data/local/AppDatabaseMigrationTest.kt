@@ -29,10 +29,10 @@ class AppDatabaseMigrationTest {
         // Creates DB at the committed current schema and validates it against
         // the entities Room would open today (MIGRATIONS is empty until the
         // next bump).
-        helper.createDatabase(TEST_DB, AppDatabase.CURRENT_VERSION).close()
+        helper.createDatabase(TEST_DB, APP_DATABASE_VERSION).close()
         helper.runMigrationsAndValidate(
             TEST_DB,
-            AppDatabase.CURRENT_VERSION,
+            APP_DATABASE_VERSION,
             true,
             *AppDatabase.MIGRATIONS,
         )
