@@ -41,6 +41,8 @@ let out = input
   .replace(/^\\restrict.*$/gm, "")
   .replace(/^\\unrestrict.*$/gm, "")
   .replace(/^ALTER .* OWNER TO .*;$/gm, "")
+  // Postgres 16.16+ dumps ephemeral per-column attver OIDs that differ across DBs.
+  .replace(/^ALTER TABLE ONLY .+ ALTER COLUMN .+ SET \(pg_attver=\d+\);$/gm, "")
   .replace(/^SET .*;$/gm, "")
   .replace(/^SELECT pg_catalog\.set_config.*;$/gm, "");
 
