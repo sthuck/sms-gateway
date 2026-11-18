@@ -26,7 +26,3 @@ jobs:
           version: v3.16.3
       - run: helm lint deploy/helm/sms-gateway
       - run: helm template sms-gateway deploy/helm/sms-gateway >/dev/null
-      - name: helm template (homelab values)
-        run: helm template sms-gateway deploy/helm/sms-gateway -f deploy/helm/sms-gateway/values-homelab.yaml >/dev/null
-      - name: helm lint (homelab values)
-        run: helm lint deploy/helm/sms-gateway -f deploy/helm/sms-gateway/values-homelab.yaml

@@ -18,6 +18,13 @@ config:
   LLM_BASE_URL: ""
   LLM_MODEL: ""
   # OIDC (Authentik or any generic provider) — see docs/deployment-auth.md
+  # Homelab production examples (wire later; leave empty until deploy):
+  #   OIDC_ISSUER_URL: "https://auth.sthuck.info/application/o/sms-gateway/"
+  #   OIDC_CLIENT_ID: "sms-gateway"
+  #   OIDC_REDIRECT_URI: "https://sms.sthuck.info/v1/auth/callback"
+  #   PUBLIC_BASE_URL: "https://sms.sthuck.info"
+  #   CORS_ALLOWED_ORIGINS: "https://sms.sthuck.info"
+  # Authentik application slug (issuer path segment): sms-gateway
   OIDC_ISSUER_URL: ""
   OIDC_CLIENT_ID: ""
   OIDC_REDIRECT_URI: ""
@@ -30,13 +37,11 @@ config:
   MFA_CLAIMS_MISSING: deny
   AUTO_LINK_BY_EMAIL: "false"
   PUBLIC_BASE_URL: ""
-  # Comma-separated browser origins for CORS + CSRF Origin checks (e.g. https://sms.sthuck.info)
+  # Comma-separated browser origins for CORS + CSRF Origin checks
   CORS_ALLOWED_ORIGINS: ""
   SESSION_COOKIE_NAME: sms_session
   CSRF_COOKIE_NAME: sms_csrf
   SESSION_TTL_SECONDS: "604800"
-  # Authentik application slug used in the issuer path (.../application/o/<slug>/).
-  # Documented for operators; the chart does not call Authentik APIs.
   OIDC_APPLICATION_SLUG: sms-gateway
 
 # Secret-backed references. Create these Secrets out-of-band; nothing is generated.
@@ -114,6 +119,7 @@ ingress:
   className: ""
   annotations: {}
   hosts:
+    # Homelab example (deferred): sms.sthuck.info
     - host: api.sms-gateway.example
       paths:
         - path: /
@@ -121,7 +127,7 @@ ingress:
   tls: []
   # - secretName: sms-gateway-tls
   #   hosts:
-  #     - api.sms-gateway.example
+  #     - sms.sthuck.info
 
 podAnnotations: {}
 podSecurityContext:
