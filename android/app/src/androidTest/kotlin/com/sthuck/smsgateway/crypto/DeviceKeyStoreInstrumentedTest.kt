@@ -71,7 +71,13 @@ class DeviceKeyStoreInstrumentedTest {
             nonce = "V1nQe4r0sK8mP2yL6dF9TQ",
         ).toByteArray(Charsets.UTF_8)
 
-        val signature = store.requireSigner().sign(canonical)
+        try {
+            store.requireSigner()
+            fail("requireSigner must not use the pending key")
+        } catch (_: Exception) {
+            // expected — committed key only
+        }
+        val signature = store.requirePendingSigner().sign(canonical)
         assertEquals(64, signature.size)
         assertTrue(verifyEs256P1363(publicKey, canonical, signature))
         assertNotNull(Base64Url.encode(signature))
@@ -120,6 +126,36 @@ class DeviceKeyStoreInstrumentedTest {
         assertNotNull(signer)
         assertTrue(again.hasKey())
         assertFalse(again.hasPendingKey())
+    }
+
+    @Test
+    fun commitKeepsPreviousAliasUntilDeleteAndPreferredSurvivesProcessDeath() {
+        store.createPendingKeypair()
+        val firstAlias = store.commitPendingKey()
+        assertEquals(firstAlias, store.currentActiveAlias())
+        val firstSpki = store.activePublicKeySpkiBase64Url()
+
+        store.createPendingKeypair()
+        val previousBeforeCommit = store.currentActiveAlias()
+        assertEquals(firstAlias, previousBeforeCommit)
+        val secondAlias = store.commitPendingKey()
+        assertTrue(secondAlias != firstAlias)
+
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        assertTrue(ks.containsAlias(firstAlias))
+        assertTrue(ks.containsAlias(secondAlias))
+
+        // Crash window: both aliases exist; preferred must win after "process death".
+        val restored = DeviceKeyStore()
+        restored.restorePreferredActiveAlias(secondAlias)
+        assertEquals(secondAlias, restored.currentActiveAlias())
+        assertTrue(restored.activePublicKeySpkiBase64Url() != firstSpki)
+
+        store.deleteKeyAlias(firstAlias)
+        val ksAfter = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        assertFalse(ksAfter.containsAlias(firstAlias))
+        assertTrue(ksAfter.containsAlias(secondAlias))
+        assertEquals(secondAlias, store.currentActiveAlias())
     }
 
     private companion object {

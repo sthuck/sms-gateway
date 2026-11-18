@@ -1,9 +1,10 @@
 package com.sthuck.smsgateway.data.remote
 
 import com.sthuck.smsgateway.BuildConfig
-import com.sthuck.smsgateway.pairing.PairingCredentialStore
+import com.sthuck.smsgateway.pairing.PairingCredentialsReader
 import com.sthuck.smsgateway.pairing.ServerUrlValidator
 import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -11,21 +12,21 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Rewrites the request host/scheme/port to the configured backend
- * (pairing override, stored URL, or flavour default). Path prefixes on the
- * base URL are not preserved (contract hosts are origin-only).
+ * Rewrites placeholder Retrofit base URLs (`localhost`) to the stored
+ * backend origin. Absolute URLs (e.g. pairing `@Url`) are left untouched
+ * so a candidate pair host never hijacks uploader/status traffic.
  */
 @Singleton
 class BackendUrlInterceptor @Inject constructor(
-    private val credentialStore: PairingCredentialStore,
-    private val backendUrlOverride: BackendUrlOverride,
+    private val credentialStore: PairingCredentialsReader,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val override = backendUrlOverride.peek()
-        val stored = runBlocking { credentialStore.current() }.serverUrl
-        val raw = override ?: stored
-        val base = resolveBase(raw)
         val original = chain.request()
+        if (!isPlaceholderBase(original.url)) {
+            return chain.proceed(original)
+        }
+        val stored = runBlocking { credentialStore.current() }.serverUrl
+        val base = resolveBase(stored)
         val rewritten = original.url.newBuilder()
             .scheme(base.scheme)
             .host(base.host)
@@ -42,4 +43,10 @@ class BackendUrlInterceptor @Inject constructor(
             is ServerUrlValidator.Result.Err ->
                 BuildConfig.BACKEND_URL.toHttpUrlOrNull()!!
         }
+
+    companion object {
+        /** Retrofit NetworkModule placeholder host. */
+        fun isPlaceholderBase(url: HttpUrl): Boolean =
+            url.host.equals("localhost", ignoreCase = true)
+    }
 }

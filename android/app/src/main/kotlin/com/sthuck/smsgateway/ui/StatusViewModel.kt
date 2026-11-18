@@ -6,6 +6,8 @@ import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.pairing.PairingRepository
+import com.sthuck.smsgateway.upload.UploadScheduler
+import androidx.work.ExistingWorkPolicy
 import com.sthuck.smsgateway.sms.SmsPermissionSnapshot
 import com.sthuck.smsgateway.sms.SmsPermissionState
 import com.sthuck.smsgateway.sms.smsPermissionState
@@ -23,6 +25,7 @@ data class QueuedMessagePreview(
     val sender: String,
     val receivedAt: String,
     val simSlot: Int?,
+    val lastError: String? = null,
 )
 
 data class StatusUiState(
@@ -33,7 +36,9 @@ data class StatusUiState(
     val deviceId: String? = null,
     val smsPermission: SmsPermissionState = SmsPermissionState.NotRequested,
     val queuedCount: Int = 0,
+    val parkedCount: Int = 0,
     val recentQueued: List<QueuedMessagePreview> = emptyList(),
+    val recentParked: List<QueuedMessagePreview> = emptyList(),
     val unpairConfirmVisible: Boolean = false,
 )
 
@@ -42,6 +47,7 @@ class StatusViewModel @Inject constructor(
     private val queuedMessageDao: QueuedMessageDao,
     private val credentialStore: PairingCredentialStore,
     private val pairingRepository: PairingRepository,
+    private val uploadScheduler: UploadScheduler,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
         StatusUiState(
@@ -56,27 +62,40 @@ class StatusViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             combine(
-                queuedMessageDao.observeCount(),
-                queuedMessageDao.observeRecent(5),
+                queuedMessageDao.observePendingCount(),
+                queuedMessageDao.observeParkedCount(),
+                queuedMessageDao.observePendingRecent(5),
+                queuedMessageDao.observeParkedRecent(5),
                 credentialStore.credentials,
-            ) { count, recent, creds ->
-                Triple(count, recent, creds)
-            }.collect { (count, recent, creds) ->
+            ) { pending, parked, recentPending, recentParked, creds ->
+                StatusSnapshot(pending, parked, recentPending, recentParked, creds)
+            }.collect { snap ->
                 _uiState.update { state ->
                     state.copy(
-                        queuedCount = count,
-                        recentQueued = recent.map { row ->
+                        queuedCount = snap.pending,
+                        parkedCount = snap.parked,
+                        recentQueued = snap.recentPending.map { row ->
                             QueuedMessagePreview(
                                 deviceMsgId = row.deviceMsgId,
                                 sender = row.sender,
                                 receivedAt = row.receivedAt,
                                 simSlot = row.simSlot,
+                                lastError = row.lastError,
                             )
                         },
-                        backendUrl = creds.serverUrl,
-                        deviceId = creds.deviceId,
-                        pairingStatus = if (creds.isPaired) {
-                            "Paired (${creds.deviceId})"
+                        recentParked = snap.recentParked.map { row ->
+                            QueuedMessagePreview(
+                                deviceMsgId = row.deviceMsgId,
+                                sender = row.sender,
+                                receivedAt = row.receivedAt,
+                                simSlot = row.simSlot,
+                                lastError = row.lastError,
+                            )
+                        },
+                        backendUrl = snap.creds.serverUrl,
+                        deviceId = snap.creds.deviceId,
+                        pairingStatus = if (snap.creds.isPaired) {
+                            "Paired (${snap.creds.deviceId})"
                         } else {
                             "Not paired"
                         },
@@ -104,4 +123,19 @@ class StatusViewModel @Inject constructor(
             _uiState.update { it.copy(unpairConfirmVisible = false) }
         }
     }
+
+    fun retryParked() {
+        viewModelScope.launch {
+            queuedMessageDao.unparkAll(System.currentTimeMillis())
+            uploadScheduler.enqueueUpload(ExistingWorkPolicy.REPLACE)
+        }
+    }
+
+    private data class StatusSnapshot(
+        val pending: Int,
+        val parked: Int,
+        val recentPending: List<com.sthuck.smsgateway.data.local.QueuedMessageEntity>,
+        val recentParked: List<com.sthuck.smsgateway.data.local.QueuedMessageEntity>,
+        val creds: com.sthuck.smsgateway.pairing.PairingCredentials,
+    )
 }

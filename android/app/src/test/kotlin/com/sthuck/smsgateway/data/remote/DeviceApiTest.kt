@@ -65,7 +65,8 @@ class DeviceApiTest {
         DeviceApiMock.enqueuePairCreated(server)
 
         val response = api.pair(
-            PairRequest(
+            url = server.url("/v1/devices/pair").toString(),
+            body = PairRequest(
                 pairingCode = "7K3M-9Q2P",
                 publicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyl6LQOh0Vol6Y7eUeYprtMPD_cB9oVwRFBAQ6BpcRbXZAXLl745jKd-uxX4bwUlHxH-jHsMc___m3WlOguxwRQ",
                 deviceInfo = DeviceInfo(
@@ -117,6 +118,17 @@ class DeviceApiTest {
         val recorded = server.takeRequest()
         assertEquals("POST", recorded.method)
         assertEquals("/v1/messages:batch", recorded.path)
+        val body = recorded.body.readUtf8()
+        assertTrue(body.contains("\"messages\""))
+        assertTrue(body.contains("\"device_msg_id\""))
+        assertTrue(body.contains("\"sender\""))
+        assertTrue(body.contains("\"body\""))
+        assertTrue(body.contains("\"received_at\""))
+        assertTrue(body.contains("\"direction\""))
+        assertTrue(body.contains("\"sim_slot\""))
+        assertFalse(body.contains("\"deviceMsgId\""))
+        assertFalse(body.contains("\"receivedAt\""))
+        assertFalse(body.contains("\"simSlot\""))
     }
 
     @Test

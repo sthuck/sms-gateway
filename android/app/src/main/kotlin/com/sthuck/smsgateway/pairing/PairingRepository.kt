@@ -4,7 +4,6 @@ import android.os.Build
 import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
-import com.sthuck.smsgateway.data.remote.BackendUrlOverride
 import com.sthuck.smsgateway.data.remote.DeviceApi
 import com.sthuck.smsgateway.data.remote.dto.DeviceInfo
 import com.sthuck.smsgateway.data.remote.dto.PairRequest
@@ -27,12 +26,17 @@ class PairingRepository @Inject constructor(
     private val deviceKeyStore: DeviceKeyAccess,
     private val credentialStore: PairingStateAccess,
     private val queuedMessageDao: QueuedMessageDao,
-    private val backendUrlOverride: BackendUrlOverride,
     private val json: Json,
 ) {
     /**
      * Pair using a validated server URL. Does not mutate existing credentials
      * or the active Keystore key until the server returns success (STH-44).
+     *
+     * The candidate server is passed as an absolute Retrofit `@Url` for this
+     * call only — never via a process-global override.
+     *
+     * On success the pending Keystore key is committed before credentials are
+     * saved, so a crash cannot leave a device id without its signing key.
      */
     suspend fun pair(code: String, serverUrl: String): PairingResult {
         val validated = when (val result = ServerUrlValidator.validate(serverUrl)) {
@@ -52,30 +56,39 @@ class PairingRepository @Inject constructor(
         }
 
         return try {
-            val response = backendUrlOverride.withUrl(validated.url) {
-                deviceApi.pair(
-                    PairRequest(
-                        pairingCode = code,
-                        publicKey = publicKey,
-                        deviceInfo = DeviceInfo(
-                            appVersion = BuildConfig.VERSION_NAME,
-                            name = listOf(Build.MANUFACTURER, Build.MODEL)
-                                .joinToString(" ")
-                                .trim()
-                                .ifEmpty { Build.MODEL },
-                            manufacturer = Build.MANUFACTURER,
-                            model = Build.MODEL,
-                            osVersion = Build.VERSION.RELEASE,
-                            sdkInt = Build.VERSION.SDK_INT,
-                        ),
+            val response = deviceApi.pair(
+                url = pairEndpoint(validated.url),
+                body = PairRequest(
+                    pairingCode = code,
+                    publicKey = publicKey,
+                    deviceInfo = DeviceInfo(
+                        appVersion = BuildConfig.VERSION_NAME,
+                        name = listOf(Build.MANUFACTURER, Build.MODEL)
+                            .joinToString(" ")
+                            .trim()
+                            .ifEmpty { Build.MODEL },
+                        manufacturer = Build.MANUFACTURER,
+                        model = Build.MODEL,
+                        osVersion = Build.VERSION.RELEASE,
+                        sdkInt = Build.VERSION.SDK_INT,
                     ),
-                )
-            }
-            deviceKeyStore.commitPendingKey()
+                ),
+            )
+            // Promote key, persist alias+credentials, then retire the previous
+            // Keystore alias — never delete the old key before savePairing.
+            val previousAlias = deviceKeyStore.currentActiveAlias()
+            val activeAlias = deviceKeyStore.commitPendingKey()
             credentialStore.savePairing(
                 deviceId = response.deviceId,
                 serverUrl = validated.url,
+                activeKeyAlias = activeAlias,
             )
+            deviceKeyStore.restorePreferredActiveAlias(activeAlias)
+            if (previousAlias != null && previousAlias != activeAlias) {
+                deviceKeyStore.deleteKeyAlias(previousAlias)
+            }
+            // Re-pair must drain rows left pending / parked (e.g. after invalid_signature).
+            queuedMessageDao.unparkAll(System.currentTimeMillis())
             PairingResult.Success(deviceId = response.deviceId, serverUrl = validated.url)
         } catch (e: CancellationException) {
             deviceKeyStore.discardPendingKey()
@@ -109,5 +122,10 @@ class PairingRepository @Inject constructor(
         if (clearQueue) {
             queuedMessageDao.deleteAll()
         }
+    }
+
+    companion object {
+        fun pairEndpoint(baseUrl: String): String =
+            baseUrl.trimEnd('/') + "/v1/devices/pair"
     }
 }

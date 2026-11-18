@@ -5,8 +5,9 @@ import com.sthuck.smsgateway.crypto.DeviceSigner
 import com.sthuck.smsgateway.crypto.PrivateKeyDeviceSigner
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.data.local.QueuedMessageEntity
-import com.sthuck.smsgateway.data.remote.BackendUrlOverride
 import com.sthuck.smsgateway.data.remote.DeviceApi
+import com.sthuck.smsgateway.data.remote.dto.PairRequest
+import com.sthuck.smsgateway.data.remote.dto.PairResponse
 import com.sthuck.smsgateway.testing.DeviceApiMock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -24,12 +25,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
-import java.security.KeyPairGenerator
-import java.security.spec.ECGenParameterSpec
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class PairingRepositoryTest {
 
@@ -38,15 +40,18 @@ class PairingRepositoryTest {
     private lateinit var keys: FakeKeys
     private lateinit var dao: FakeQueuedDao
     private lateinit var repo: PairingRepository
+    private lateinit var recordingApi: RecordingDeviceApi
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
         encodeDefaults = true
         namingStrategy = JsonNamingStrategy.SnakeCase
     }
+    private val events = mutableListOf<String>()
 
     @Before
     fun setUp() {
+        events.clear()
         val privateKey = KeyPairGenerator.getInstance("EC").apply {
             initialize(ECGenParameterSpec("secp256r1"))
         }.generateKeyPair().private
@@ -55,21 +60,23 @@ class PairingRepositoryTest {
         server.start()
         credentials = FakeCredentials(
             PairingCredentials(deviceId = "existing-device", serverUrl = "https://sms.sthuck.info"),
+            events,
         )
-        keys = FakeKeys(PrivateKeyDeviceSigner(privateKey), initiallyHasKey = true)
+        keys = FakeKeys(PrivateKeyDeviceSigner(privateKey), initiallyHasKey = true, events)
         dao = FakeQueuedDao()
-        val api = Retrofit.Builder()
-            .baseUrl(server.url("/"))
-            .client(OkHttpClient())
-            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(DeviceApi::class.java)
+        recordingApi = RecordingDeviceApi(
+            delegate = Retrofit.Builder()
+                .baseUrl(server.url("/"))
+                .client(OkHttpClient())
+                .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+                .build()
+                .create(DeviceApi::class.java),
+        )
         repo = PairingRepository(
-            deviceApi = api,
+            deviceApi = recordingApi,
             deviceKeyStore = keys,
             credentialStore = credentials,
             queuedMessageDao = dao,
-            backendUrlOverride = BackendUrlOverride(),
             json = json,
         )
     }
@@ -81,10 +88,7 @@ class PairingRepositoryTest {
 
     @Test
     fun failedPairLeavesExistingPairingUntouched() = runBlocking {
-        assumeTrue(
-            "dev flavour required for http://10.0.2.2 mock URL",
-            com.sthuck.smsgateway.BuildConfig.FLAVOR == "dev",
-        )
+        assumeTrue(com.sthuck.smsgateway.BuildConfig.FLAVOR == "dev")
         DeviceApiMock.enqueueProblem(
             server,
             httpCode = 400,
@@ -95,7 +99,8 @@ class PairingRepositoryTest {
             instance = "/v1/devices/pair",
         )
         val before = credentials.current()
-        val result = repo.pair("7K3M-9Q2P", "http://10.0.2.2:4010")
+        val candidate = server.url("/").toString().trimEnd('/')
+        val result = repo.pair("7K3M-9Q2P", candidate)
         assertTrue(result is PairingResult.Failure)
         assertEquals(before.deviceId, credentials.current().deviceId)
         assertEquals(before.serverUrl, credentials.current().serverUrl)
@@ -105,20 +110,45 @@ class PairingRepositoryTest {
         assertEquals(1, keys.discardCount.get())
         assertEquals(0, keys.commitCount.get())
         assertEquals(1, server.requestCount)
+        assertFalse(events.contains("save"))
+        assertFalse(events.contains("commit"))
     }
 
     @Test
-    fun successfulPairCommitsOnlyAfterResponse() = runBlocking {
+    fun successfulPairCommitsKeyBeforeSavingCredentials() = runBlocking {
         assumeTrue(com.sthuck.smsgateway.BuildConfig.FLAVOR == "dev")
         DeviceApiMock.enqueuePairCreated(server)
-        val result = repo.pair("7K3M-9Q2P", "http://10.0.2.2:4010")
+        val candidate = server.url("/").toString().trimEnd('/')
+        val result = repo.pair("7K3M-9Q2P", candidate)
         assertTrue("got $result", result is PairingResult.Success)
         assertEquals(DeviceApiMock.SAMPLE_DEVICE_ID, credentials.current().deviceId)
-        assertEquals("http://10.0.2.2:4010", credentials.current().serverUrl)
+        assertEquals(candidate, credentials.current().serverUrl)
+        assertEquals("alias_b", credentials.current().activeKeyAlias)
         assertEquals(1, keys.commitCount.get())
         assertEquals(0, keys.discardCount.get())
         assertTrue(keys.hasKey())
         assertFalse(keys.hasPendingKey())
+        val commitIdx = events.indexOf("commit")
+        val saveIdx = events.indexOf("save")
+        val deleteIdx = events.indexOf("delete:alias_a")
+        assertTrue("commit before save: $events", commitIdx >= 0 && saveIdx > commitIdx)
+        assertTrue("delete previous after save: $events", deleteIdx > saveIdx)
+        assertEquals(listOf("alias_a"), keys.deletedAliases)
+    }
+
+    @Test
+    fun pairPassesAbsoluteCandidateUrlOnlyOnThatCall() = runBlocking {
+        assumeTrue(com.sthuck.smsgateway.BuildConfig.FLAVOR == "dev")
+        DeviceApiMock.enqueuePairCreated(server)
+        val candidate = server.url("/").toString().trimEnd('/')
+        repo.pair("7K3M-9Q2P", candidate)
+        assertEquals(
+            PairingRepository.pairEndpoint(candidate),
+            recordingApi.lastPairUrl.get(),
+        )
+        // Stored credentials were https://sms.sthuck.info until save; the pair
+        // call did not go through a process-global override — only @Url.
+        assertEquals(1, recordingApi.pairCallCount.get())
     }
 
     @Test
@@ -139,15 +169,30 @@ class PairingRepositoryTest {
         assertEquals(1, dao.deleteAllCount.get())
     }
 
+    private class RecordingDeviceApi(
+        private val delegate: DeviceApi,
+    ) : DeviceApi by delegate {
+        val lastPairUrl = AtomicReference<String?>(null)
+        val pairCallCount = AtomicInteger(0)
+
+        override suspend fun pair(url: String, body: PairRequest): PairResponse {
+            pairCallCount.incrementAndGet()
+            lastPairUrl.set(url)
+            return delegate.pair(url, body)
+        }
+    }
+
     private class FakeCredentials(
         private var value: PairingCredentials,
+        private val events: MutableList<String>,
     ) : PairingStateAccess {
         override suspend fun current() = value
         override suspend fun clearDeviceId() {
             value = value.copy(deviceId = null)
         }
-        override suspend fun savePairing(deviceId: String, serverUrl: String) {
-            value = PairingCredentials(deviceId, serverUrl)
+        override suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String) {
+            events += "save"
+            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias)
         }
         override suspend fun clearAll() {
             value = PairingCredentials(null, "https://sms.sthuck.info")
@@ -157,33 +202,55 @@ class PairingRepositoryTest {
     private class FakeKeys(
         private val signer: DeviceSigner,
         initiallyHasKey: Boolean,
+        private val events: MutableList<String>,
     ) : DeviceKeyAccess {
         private val active = AtomicBoolean(initiallyHasKey)
         private val pending = AtomicBoolean(false)
+        private var activeAlias: String? = if (initiallyHasKey) "alias_a" else null
+        private var pendingAlias: String? = null
         val createCount = AtomicInteger(0)
         val commitCount = AtomicInteger(0)
         val discardCount = AtomicInteger(0)
+        val deletedAliases = mutableListOf<String>()
 
         override fun hasKey() = active.get()
         override fun hasPendingKey() = pending.get()
         override fun deleteKey() {
             active.set(false)
             pending.set(false)
+            activeAlias = null
+            pendingAlias = null
         }
         override fun requireSigner() = signer
+        override fun requirePendingSigner() = signer
         override fun createPendingKeypair(): String {
             createCount.incrementAndGet()
             pending.set(true)
+            pendingAlias = "alias_b"
             return "pending-spki"
         }
-        override fun commitPendingKey() {
+        override fun commitPendingKey(): String {
+            events += "commit"
             commitCount.incrementAndGet()
+            val next = pendingAlias ?: error("no pending")
             pending.set(false)
+            pendingAlias = null
             active.set(true)
+            activeAlias = next
+            return next
+        }
+        override fun currentActiveAlias(): String? = activeAlias
+        override fun restorePreferredActiveAlias(alias: String?) {
+            if (alias != null) activeAlias = alias
+        }
+        override fun deleteKeyAlias(alias: String) {
+            events += "delete:$alias"
+            deletedAliases += alias
         }
         override fun discardPendingKey() {
             discardCount.incrementAndGet()
             pending.set(false)
+            pendingAlias = null
         }
     }
 
@@ -192,17 +259,34 @@ class PairingRepositoryTest {
         val deleteAllCount = AtomicInteger(0)
 
         override suspend fun getAll(): List<QueuedMessageEntity> = emptyList()
-        override fun observeCount(): Flow<Int> = flowOf(rows.get())
-        override fun observeRecent(limit: Int): Flow<List<QueuedMessageEntity>> = flowOf(emptyList())
+        override fun observePendingCount(): Flow<Int> = flowOf(rows.get())
+        override fun observeParkedCount(): Flow<Int> = flowOf(0)
+        override fun observePendingRecent(limit: Int): Flow<List<QueuedMessageEntity>> =
+            flowOf(emptyList())
+        override fun observeParkedRecent(limit: Int): Flow<List<QueuedMessageEntity>> =
+            flowOf(emptyList())
         override suspend fun countByContentKey(contentKey: String): Int = 0
+        override suspend fun getReadyForUpload(
+            nowEpochMs: Long,
+            limit: Int,
+        ): List<QueuedMessageEntity> = emptyList()
+        override suspend fun earliestPendingAttemptAtEpochMs(): Long? = null
         override suspend fun insert(message: QueuedMessageEntity): Long {
             rows.incrementAndGet()
             return 1L
         }
         override suspend fun deleteById(deviceMsgId: String) = Unit
+        override suspend fun deleteByIds(deviceMsgIds: List<String>) = Unit
         override suspend fun deleteAll() {
             deleteAllCount.incrementAndGet()
             rows.set(0)
         }
+        override suspend fun park(deviceMsgId: String, error: String, nowEpochMs: Long) = Unit
+        override suspend fun markRetry(
+            deviceMsgIds: List<String>,
+            nextAttemptAtEpochMs: Long,
+            error: String?,
+        ) = Unit
+        override suspend fun unparkAll(nowEpochMs: Long) = Unit
     }
 }

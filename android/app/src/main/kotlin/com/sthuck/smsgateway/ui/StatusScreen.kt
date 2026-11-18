@@ -38,6 +38,7 @@ fun StatusScreen(
     onConfirmUnpairClearQueue: () -> Unit = {},
     onConfirmUnpairKeepQueue: () -> Unit = {},
     onDismissUnpair: () -> Unit = {},
+    onRetryParked: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -103,19 +104,54 @@ fun StatusScreen(
                 state.recentQueued.forEach { item ->
                     StatusRow(
                         label = item.sender,
-                        value = buildString {
-                            append(item.receivedAt)
-                            append(" · ")
-                            append(item.deviceMsgId)
-                            if (item.simSlot != null) {
-                                append(" · slot ")
-                                append(item.simSlot)
-                            }
-                        },
+                        value = formatQueuedPreview(item),
+                    )
+                }
+            }
+            StatusRow(
+                stringResource(R.string.status_parked),
+                pluralStringResource(
+                    R.plurals.status_parked_count,
+                    state.parkedCount,
+                    state.parkedCount,
+                ),
+            )
+            if (state.parkedCount > 0) {
+                OutlinedButton(
+                    onClick = onRetryParked,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.status_parked_retry))
+                }
+            }
+            if (state.recentParked.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.status_parked_recent),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                state.recentParked.forEach { item ->
+                    StatusRow(
+                        label = item.sender,
+                        value = formatQueuedPreview(item),
                     )
                 }
             }
         }
+    }
+}
+
+private fun formatQueuedPreview(item: QueuedMessagePreview): String = buildString {
+    append(item.receivedAt)
+    append(" · ")
+    append(item.deviceMsgId)
+    if (item.simSlot != null) {
+        append(" · slot ")
+        append(item.simSlot)
+    }
+    if (!item.lastError.isNullOrBlank()) {
+        append(" · ")
+        append(item.lastError)
     }
 }
 

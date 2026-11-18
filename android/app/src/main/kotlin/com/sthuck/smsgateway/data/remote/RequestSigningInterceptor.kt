@@ -49,7 +49,7 @@ class RequestSigningInterceptor @Inject constructor(
             return chain.proceed(original)
         }
 
-        if (!isPair && credentials.isPaired && !deviceKeyStore.hasKey() && !deviceKeyStore.hasPendingKey()) {
+        if (!isPair && credentials.isPaired && !deviceKeyStore.hasKey()) {
             runBlocking {
                 credentialStore.clearDeviceId()
                 clockSkewStore.clear()
@@ -73,6 +73,7 @@ class RequestSigningInterceptor @Inject constructor(
             original = original.newBuilder().method(original.method, rebuiltBody).build(),
             bodyBytes = bodyBytes,
             deviceId = if (isPair) null else credentials.deviceId,
+            usePendingKey = isPair,
         )
         var response = chain.proceed(request)
 
@@ -96,6 +97,7 @@ class RequestSigningInterceptor @Inject constructor(
                             original = original.newBuilder().method(original.method, retryBody).build(),
                             bodyBytes = bodyBytes,
                             deviceId = if (isPair) null else credentials.deviceId,
+                            usePendingKey = isPair,
                         )
                         response = chain.proceed(request)
                     }
@@ -127,6 +129,7 @@ class RequestSigningInterceptor @Inject constructor(
         original: Request,
         bodyBytes: ByteArray,
         deviceId: String?,
+        usePendingKey: Boolean,
     ): Request {
         val contentSha = sha256Hex(bodyBytes)
         val timestamp = clockSkewStore.nowUnixSeconds().toString()
@@ -144,8 +147,13 @@ class RequestSigningInterceptor @Inject constructor(
             contentSha256 = contentSha,
             nonce = nonce,
         )
+        val signer = if (usePendingKey) {
+            deviceKeyStore.requirePendingSigner()
+        } else {
+            signerProvider.get()
+        }
         val signature = Base64Url.encode(
-            signerProvider.get().sign(canonical.toByteArray(Charsets.UTF_8)),
+            signer.sign(canonical.toByteArray(Charsets.UTF_8)),
         )
         val builder = original.newBuilder()
             .header(DeviceHeaders.TIMESTAMP, timestamp)

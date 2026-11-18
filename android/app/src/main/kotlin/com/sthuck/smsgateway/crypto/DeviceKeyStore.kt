@@ -20,16 +20,31 @@ import javax.inject.Singleton
  * generated under a pending alias and only promoted after a successful
  * `POST /v1/devices/pair`. [requireSigner] never creates a key.
  *
- * The active alias is rediscovered from Keystore after process death
- * (in-memory [activeAlias] is only a cache).
+ * The active alias is persisted with pairing credentials and restored via
+ * [restorePreferredActiveAlias] after process death (both A/B may briefly
+ * exist until the previous alias is retired after [savePairing]).
  */
 interface DeviceKeyAccess {
     fun hasKey(): Boolean
     fun hasPendingKey(): Boolean
     fun deleteKey()
+    /** Committed (active) key only — never the in-flight pending pair key. */
     fun requireSigner(): DeviceSigner
+    /** Pending pair key only; used exclusively while signing `POST .../pair`. */
+    fun requirePendingSigner(): DeviceSigner
     fun createPendingKeypair(): String
-    fun commitPendingKey()
+    /**
+     * Promote the pending key to active without deleting the previous alias.
+     * Returns the new active alias; callers must persist it then call
+     * [deleteKeyAlias] on the previous alias.
+     */
+    fun commitPendingKey(): String
+    /** Current committed alias, or null when unpaired / only pending exists. */
+    fun currentActiveAlias(): String?
+    /** Prefer this alias after process death when both A/B survive. */
+    fun restorePreferredActiveAlias(alias: String?)
+    /** Delete a retired Keystore alias (no-op if missing or still active). */
+    fun deleteKeyAlias(alias: String)
     fun discardPendingKey()
 }
 
@@ -38,22 +53,43 @@ class DeviceKeyStore @Inject constructor() : DeviceKeyAccess {
 
     private val pendingAlias = AtomicReference<String?>(null)
     private val activeAlias = AtomicReference<String?>(null)
+    private val preferredActiveAlias = AtomicReference<String?>(null)
 
     override fun hasKey(): Boolean = committedAlias() != null
 
     override fun hasPendingKey(): Boolean = pendingAlias.get()?.let { contains(it) } == true
 
+    override fun currentActiveAlias(): String? = committedAlias()
+
+    override fun restorePreferredActiveAlias(alias: String?) {
+        preferredActiveAlias.set(alias?.takeIf { it.isNotBlank() })
+        if (alias != null && contains(alias)) {
+            activeAlias.set(alias)
+        }
+    }
+
+    override fun deleteKeyAlias(alias: String) {
+        synchronized(this) {
+            if (alias == activeAlias.get() || alias == pendingAlias.get()) return
+            deleteAlias(alias)
+        }
+    }
+
     /**
-     * Returns a signer for the active key, or the pending key while a
-     * pairing attempt is in flight. Never creates a key.
+     * Signer for the committed key only. Never creates a key and never
+     * returns the in-flight pending pair key (uploader/status stay on the
+     * previously committed key).
      */
     override fun requireSigner(): DeviceSigner {
+        val alias = committedAlias() ?: error("Device signing key missing")
+        return signerForAlias(alias)
+    }
+
+    /** Signer for the pending pair key. Never creates a key. */
+    override fun requirePendingSigner(): DeviceSigner {
         val alias = pendingAlias.get()?.takeIf { contains(it) }
-            ?: committedAlias()
-            ?: error("Device signing key missing")
-        val privateKey = androidKeyStore().getKey(alias, null) as? PrivateKey
-            ?: error("Device signing key missing for alias=$alias")
-        return PrivateKeyDeviceSigner(privateKey)
+            ?: error("Pending device signing key missing")
+        return signerForAlias(alias)
     }
 
     fun publicKey(): PublicKey {
@@ -61,6 +97,12 @@ class DeviceKeyStore @Inject constructor() : DeviceKeyAccess {
             ?: committedAlias()
             ?: error("Device public key missing")
         return requirePublicKey(alias)
+    }
+
+    private fun signerForAlias(alias: String): DeviceSigner {
+        val privateKey = androidKeyStore().getKey(alias, null) as? PrivateKey
+            ?: error("Device signing key missing for alias=$alias")
+        return PrivateKeyDeviceSigner(privateKey)
     }
 
     /** SPKI of the active (committed) key only. */
@@ -89,20 +131,19 @@ class DeviceKeyStore @Inject constructor() : DeviceKeyAccess {
         return Base64Url.encode(requirePublicKey(next).encoded)
     }
 
-    /** Promote the pending key to active and delete the previous active key. */
+    /**
+     * Promote the pending key to active. Keeps the previous alias in Keystore
+     * until [deleteKeyAlias] so a crash before credential save cannot leave
+     * the old device id pointing at a deleted key.
+     */
     @Synchronized
-    override fun commitPendingKey() {
+    override fun commitPendingKey(): String {
         val pending = pendingAlias.get() ?: error("No pending key to commit")
-        val previous = committedAlias()
+        if (!contains(pending)) error("Pending device signing key missing")
         activeAlias.set(pending)
+        preferredActiveAlias.set(pending)
         pendingAlias.set(null)
-        if (previous != null && previous != pending) {
-            deleteAlias(previous)
-        }
-        // Drop pre-STH-44 single alias if it somehow remained.
-        if (pending != LEGACY_ALIAS) {
-            deleteAlias(LEGACY_ALIAS)
-        }
+        return pending
     }
 
     /** Drop a failed pairing attempt's pending key; leave active key alone. */
@@ -118,6 +159,7 @@ class DeviceKeyStore @Inject constructor() : DeviceKeyAccess {
             deleteAlias(ALIAS_B)
             deleteAlias(LEGACY_ALIAS)
             activeAlias.set(null)
+            preferredActiveAlias.set(null)
         }
     }
 
@@ -131,10 +173,16 @@ class DeviceKeyStore @Inject constructor() : DeviceKeyAccess {
 
     /**
      * Committed (non-pending) alias present in Keystore. Rediscovers after
-     * process death; prefers the cached [activeAlias] when still valid.
+     * process death; prefers persisted [preferredActiveAlias], then the
+     * in-memory cache, then first surviving alias.
      */
     private fun committedAlias(): String? {
         val pending = pendingAlias.get()
+        val preferred = preferredActiveAlias.get()
+        if (preferred != null && preferred != pending && contains(preferred)) {
+            activeAlias.set(preferred)
+            return preferred
+        }
         val cached = activeAlias.get()
         if (cached != null && cached != pending && contains(cached)) {
             return cached
