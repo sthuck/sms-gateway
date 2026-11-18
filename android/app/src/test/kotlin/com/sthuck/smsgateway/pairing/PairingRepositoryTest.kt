@@ -192,17 +192,32 @@ class PairingRepositoryTest {
         val deleteAllCount = AtomicInteger(0)
 
         override suspend fun getAll(): List<QueuedMessageEntity> = emptyList()
-        override fun observeCount(): Flow<Int> = flowOf(rows.get())
-        override fun observeRecent(limit: Int): Flow<List<QueuedMessageEntity>> = flowOf(emptyList())
+        override fun observePendingCount(): Flow<Int> = flowOf(rows.get())
+        override fun observeParkedCount(): Flow<Int> = flowOf(0)
+        override fun observePendingRecent(limit: Int): Flow<List<QueuedMessageEntity>> =
+            flowOf(emptyList())
+        override fun observeParkedRecent(limit: Int): Flow<List<QueuedMessageEntity>> =
+            flowOf(emptyList())
         override suspend fun countByContentKey(contentKey: String): Int = 0
+        override suspend fun getReadyForUpload(
+            nowEpochMs: Long,
+            limit: Int,
+        ): List<QueuedMessageEntity> = emptyList()
         override suspend fun insert(message: QueuedMessageEntity): Long {
             rows.incrementAndGet()
             return 1L
         }
         override suspend fun deleteById(deviceMsgId: String) = Unit
+        override suspend fun deleteByIds(deviceMsgIds: List<String>) = Unit
         override suspend fun deleteAll() {
             deleteAllCount.incrementAndGet()
             rows.set(0)
         }
+        override suspend fun park(deviceMsgId: String, error: String, nowEpochMs: Long) = Unit
+        override suspend fun markRetry(
+            deviceMsgIds: List<String>,
+            nextAttemptAtEpochMs: Long,
+            error: String?,
+        ) = Unit
     }
 }
