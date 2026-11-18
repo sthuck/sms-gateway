@@ -47,8 +47,12 @@ export function csrfTokensMatch(
 export function allowedOriginsFromConfig(opts: {
   publicBaseUrl: string | null;
   redirectUri: string;
+  corsAllowedOrigins?: string[] | undefined;
 }): string[] {
   const origins = new Set<string>();
+  for (const origin of opts.corsAllowedOrigins ?? []) {
+    origins.add(origin);
+  }
   if (opts.publicBaseUrl) {
     origins.add(new URL(opts.publicBaseUrl).origin);
   }

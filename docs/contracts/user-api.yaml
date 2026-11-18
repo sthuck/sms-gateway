@@ -18,8 +18,8 @@ info:
     identifier: LicenseRef-Proprietary
 
 servers:
-  - url: https://api.sms-gateway.example
-    description: Placeholder production origin (HTTPS)
+  - url: https://sms.sthuck.info
+    description: Homelab production origin (HTTPS)
   - url: http://127.0.0.1:8080
     description: Local API
 

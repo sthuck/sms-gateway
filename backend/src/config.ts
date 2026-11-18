@@ -16,11 +16,22 @@ const envSchema = z.object({
   LLM_BASE_URL: z.string().url().optional().or(z.literal("")),
   LLM_MODEL: z.string().optional(),
   LLM_API_KEY: z.string().optional(),
+  /** Comma-separated browser origins allowed for CORS (and CSRF Origin checks). */
+  CORS_ALLOWED_ORIGINS: z.string().optional().default(""),
 });
 
-export type Config = z.infer<typeof envSchema> & {
+export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS"> & {
+  corsAllowedOrigins: string[];
   oidc: OidcAuthConfig | null;
 };
+
+export function parseCorsAllowedOrigins(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = envSchema.safeParse(env);
@@ -31,10 +42,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Invalid configuration: ${details}`);
   }
 
-  const oidc = loadOidcAuthConfig(env, { nodeEnv: parsed.data.NODE_ENV });
+  const { CORS_ALLOWED_ORIGINS: corsRaw, ...rest } = parsed.data;
+  const corsAllowedOrigins = parseCorsAllowedOrigins(corsRaw);
+  for (const origin of corsAllowedOrigins) {
+    try {
+      // Validate each entry is an absolute origin URL.
+      void new URL(origin);
+    } catch {
+      throw new Error(`Invalid configuration: CORS_ALLOWED_ORIGINS entry is not a URL: ${origin}`);
+    }
+  }
+
+  const oidc = loadOidcAuthConfig(env, { nodeEnv: rest.NODE_ENV });
+  if (oidc && corsAllowedOrigins.length > 0) {
+    oidc.corsAllowedOrigins = corsAllowedOrigins;
+  }
 
   return {
-    ...parsed.data,
+    ...rest,
+    corsAllowedOrigins,
     oidc,
   };
 }

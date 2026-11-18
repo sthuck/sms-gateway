@@ -24,11 +24,18 @@ kubectl create secret generic sms-gateway-oidc \
   --from-literal=OIDC_CLIENT_SECRET='replace-me' \
   --from-literal=SESSION_SECRET='replace-with-32+-random-bytes'
 
+# Generic / empty OIDC
 helm upgrade --install sms-gateway ./deploy/helm/sms-gateway \
   --set image.repository=ghcr.io/sthuck/sms-gateway-backend \
   --set image.tag=latest \
   --set config.LLM_BASE_URL=https://llm.example/v1 \
   --set config.LLM_MODEL=classifier
+
+# Homelab (sms.sthuck.info + Authentik at auth.sthuck.info)
+helm upgrade --install sms-gateway ./deploy/helm/sms-gateway \
+  -f deploy/helm/sms-gateway/values-homelab.yaml \
+  --set image.repository=ghcr.io/sthuck/sms-gateway-backend \
+  --set image.tag=latest
 ```
 
 Validate locally:
@@ -36,16 +43,20 @@ Validate locally:
 ```bash
 helm lint deploy/helm/sms-gateway
 helm template sms-gateway deploy/helm/sms-gateway >/dev/null
+helm template sms-gateway deploy/helm/sms-gateway \
+  -f deploy/helm/sms-gateway/values-homelab.yaml >/dev/null
 ```
 
 ## Configuration
 
-See `values.yaml`. Notable knobs:
+See `values.yaml` and the homelab overlay `values-homelab.yaml`. Notable knobs:
 
-- `config.*` — non-secret env (`HOST`, `PORT`, `LOG_LEVEL`, `LLM_*`, `OIDC_*`, MFA)
+- `config.*` — non-secret env (`HOST`, `PORT`, `LOG_LEVEL`, `LLM_*`, `OIDC_*`, MFA, CORS)
+- `config.OIDC_APPLICATION_SLUG` — Authentik app slug (`sms-gateway`); issuer path segment
+- `config.CORS_ALLOWED_ORIGINS` — comma-separated browser origins
 - `secrets.*` — Secret names/keys for `DATABASE_URL`, `ENCRYPTION_KEY`, `LLM_API_KEY`, OIDC
-- `secrets.oidcEnabled` — when true, injects OIDC client secret + session secret refs
-- `ingress.enabled` — optional Ingress for the API Service
+- `secrets.oidcEnabled` — default **false** in `values.yaml`; **true** in `values-homelab.yaml`
+- `ingress.*` — host, TLS secret name, optional cert-manager annotations
 - `api` / `worker` / `mcp` — replicas, resources, commands
 
 Authentik itself is installed separately; see `docs/deployment-auth.md`.

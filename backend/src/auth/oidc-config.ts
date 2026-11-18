@@ -61,6 +61,8 @@ export type OidcAuthConfig = {
   sessionSecret: string;
   publicBaseUrl: string | null;
   allowInsecure: boolean;
+  /** Populated from CORS_ALLOWED_ORIGINS when set; used for CSRF Origin checks. */
+  corsAllowedOrigins: string[];
 };
 
 export type LoadOidcAuthConfigOptions = {
@@ -141,5 +143,6 @@ export function loadOidcAuthConfig(
     sessionSecret: data.SESSION_SECRET!,
     publicBaseUrl: data.PUBLIC_BASE_URL ?? null,
     allowInsecure: data.OIDC_ALLOW_INSECURE,
+    corsAllowedOrigins: [],
   };
 }

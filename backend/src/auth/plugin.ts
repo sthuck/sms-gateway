@@ -146,6 +146,7 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
     const origins = allowedOriginsFromConfig({
       publicBaseUrl: config.publicBaseUrl,
       redirectUri: config.redirectUri,
+      corsAllowedOrigins: config.corsAllowedOrigins,
     });
     if (!originAllowed(request, origins)) {
       sendProblem(reply, "csrf_rejected", 403, "Origin check failed", {

@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import cors from "@fastify/cors";
 import type { Pool } from "pg";
 import type { Config } from "./config.js";
 import { buildLoggerOptions } from "./logger.js";
@@ -30,6 +31,20 @@ export async function buildApp(
       },
     });
   });
+
+  if (config.corsAllowedOrigins.length > 0) {
+    const allowed = new Set(config.corsAllowedOrigins);
+    await app.register(cors, {
+      origin(origin, cb) {
+        if (!origin || allowed.has(origin)) {
+          cb(null, true);
+          return;
+        }
+        cb(null, false);
+      },
+      credentials: true,
+    });
+  }
 
   const pool =
     options.pool !== undefined

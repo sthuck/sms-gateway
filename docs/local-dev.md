@@ -144,25 +144,29 @@ reuse them outside local development.
 
 ### Create the OIDC application (manual steps)
 
-If the blueprint does not import cleanly for your Authentik version:
+Application **slug** is always `sms-gateway` (same as homelab
+`https://auth.sthuck.info/application/o/sms-gateway/`). Prefer importing
+`deploy/authentik/blueprints/sms-gateway-oidc.yaml`. If import fails for your
+Authentik version, create the app manually:
 
 1. Open `http://127.0.0.1:9000` and sign in as the bootstrap admin
    (`akadmin@example.com` / `dev-only-akadmin-password`).
 2. Create an **OAuth2/OpenID Provider**:
-   - Name: `SMS Gateway (dev)`
+   - Name: `SMS Gateway`
    - Client type: Confidential
-   - Client ID: `sms-gateway-dev`
-   - Client secret: `dev-only-oidc-client-secret`
-   - Redirect URIs:
+   - Client ID: `sms-gateway`
+   - Client secret: `dev-only-oidc-client-secret` (DEV-ONLY)
+   - Redirect URIs (include prod + localhost; matches the blueprint):
+     - `https://sms.sthuck.info/v1/auth/callback`
      - `http://127.0.0.1:8080/v1/auth/callback`
      - `http://localhost:8080/v1/auth/callback`
      - (web Vite, if used) `http://localhost:5173/v1/auth/callback`
    - Scopes: `openid`, `profile`, `email`
-3. Create an **Application** `sms-gateway` pointing at that provider.
+3. Create an **Application** with slug **`sms-gateway`** pointing at that provider.
 4. Create a test user (e.g. `sms-dev` / `dev-only-sms-user-password`) and
    enrol TOTP/WebAuthn on the default authentication flow (MFA is enforced
    in Authentik; the API also checks `amr`/`acr` when `REQUIRE_MFA=true`).
-5. Issuer URL is typically:
+5. Local issuer URL:
 
 ```text
 http://127.0.0.1:9000/application/o/sms-gateway/
@@ -174,13 +178,15 @@ Confirm discovery:
 curl -sS "http://127.0.0.1:9000/application/o/sms-gateway/.well-known/openid-configuration" | head
 ```
 
+Homelab hostnames and Helm wiring: `docs/deployment-auth.md`.
+
 ### Backend env for local OIDC
 
 Copy `backend/.env.example` and set (DEV-ONLY values shown):
 
 ```bash
 OIDC_ISSUER_URL=http://127.0.0.1:9000/application/o/sms-gateway/
-OIDC_CLIENT_ID=sms-gateway-dev
+OIDC_CLIENT_ID=sms-gateway
 OIDC_CLIENT_SECRET=dev-only-oidc-client-secret
 OIDC_REDIRECT_URI=http://127.0.0.1:8080/v1/auth/callback
 OIDC_SCOPES=openid profile email
@@ -189,6 +195,7 @@ OIDC_ALLOW_INSECURE=true
 REQUIRE_MFA=true
 MFA_CLAIMS_MISSING=deny
 PUBLIC_BASE_URL=http://127.0.0.1:8080/
+CORS_ALLOWED_ORIGINS=http://127.0.0.1:8080,http://localhost:5173
 DATABASE_URL=postgres://sms_app:sms_app@localhost:5432/sms
 ```
 

@@ -1,0 +1,50 @@
+# Homelab production overlay for sthuck.info.
+# Usage:
+#   helm upgrade --install sms-gateway ./deploy/helm/sms-gateway \
+#     -f deploy/helm/sms-gateway/values-homelab.yaml \
+#     --set image.tag=<tag>
+#
+# Secrets (DATABASE_URL, ENCRYPTION_KEY, LLM_API_KEY, OIDC_CLIENT_SECRET,
+# SESSION_SECRET) are still created out-of-band — never committed.
+#
+# Authentik application slug (per-provider issuer path segment): sms-gateway
+# Issuer: https://auth.sthuck.info/application/o/sms-gateway/
+
+config:
+  NODE_ENV: production
+  OIDC_ISSUER_URL: "https://auth.sthuck.info/application/o/sms-gateway/"
+  OIDC_CLIENT_ID: "sms-gateway"
+  OIDC_REDIRECT_URI: "https://sms.sthuck.info/v1/auth/callback"
+  OIDC_SCOPES: "openid profile email"
+  OIDC_AUDIENCE: "sms-gateway"
+  REQUIRE_MFA: "true"
+  MFA_CLAIMS_MISSING: deny
+  AUTO_LINK_BY_EMAIL: "false"
+  PUBLIC_BASE_URL: "https://sms.sthuck.info"
+  # Comma-separated browser origins for CORS + CSRF Origin checks
+  CORS_ALLOWED_ORIGINS: "https://sms.sthuck.info"
+
+secrets:
+  # Homelab always wires OIDC; create sms-gateway-oidc Secret first.
+  oidcEnabled: true
+  oidcSecretName: sms-gateway-oidc
+  oidcClientSecretKey: OIDC_CLIENT_SECRET
+  sessionSecretKey: SESSION_SECRET
+
+ingress:
+  enabled: true
+  className: ""
+  # Cert issuer / ACME annotations are environment-specific — set explicitly.
+  annotations: {}
+  # Example (uncomment and adjust for your cluster):
+  # annotations:
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: sms.sthuck.info
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: sms-sthuck-info-tls
+      hosts:
+        - sms.sthuck.info

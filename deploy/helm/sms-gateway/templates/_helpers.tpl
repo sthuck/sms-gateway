@@ -95,6 +95,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ .Values.config.AUTO_LINK_BY_EMAIL | quote }}
 - name: PUBLIC_BASE_URL
   value: {{ .Values.config.PUBLIC_BASE_URL | quote }}
+- name: CORS_ALLOWED_ORIGINS
+  value: {{ .Values.config.CORS_ALLOWED_ORIGINS | quote }}
 - name: SESSION_COOKIE_NAME
   value: {{ .Values.config.SESSION_COOKIE_NAME | quote }}
 - name: CSRF_COOKIE_NAME
