@@ -8,6 +8,12 @@ describe("loadConfig", () => {
     expect(config.PORT).toBe(8080);
     expect(config.LOG_LEVEL).toBe("info");
     expect(config.encryption.enabled).toBe(false);
+    expect(config.webDistDir).toBeNull();
+  });
+
+  it("parses and trims WEB_DIST_DIR", () => {
+    expect(loadConfig({ WEB_DIST_DIR: "   " }).webDistDir).toBeNull();
+    expect(loadConfig({ WEB_DIST_DIR: "  /app/web-dist  " }).webDistDir).toBe("/app/web-dist");
   });
 
   it("requires KEK_FILE when encryption is enabled", () => {

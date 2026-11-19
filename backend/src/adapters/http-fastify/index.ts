@@ -50,3 +50,10 @@ export {
   type SendProblemOptions,
 } from "./problems.js";
 export { allowedOriginsFromConfig, csrfTokensMatch, isSafeMethod, originAllowed } from "./csrf.js";
+export {
+  webStaticPlugin,
+  loadStaticManifest,
+  type WebStaticPluginOptions,
+  type StaticAsset,
+  type StaticManifest,
+} from "./web-static.js";

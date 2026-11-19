@@ -73,6 +73,9 @@ Session boot uses `GET /v1/auth/me`; server/network errors during boot show
 
 ## Deploy
 
-Helm currently ships API/worker/MCP only — no web image yet. Build static
-output with `pnpm --filter @sms-gateway/web build` (`web/dist`) when wiring
-ingress same-origin serving later.
+`backend/Dockerfile` builds `web/dist` and bundles it at `/app/web-dist`, which
+the Fastify API serves on the same origin when `WEB_DIST_DIR` is set.
+`deploy/helm/sms-gateway` configures `config.WEB_DIST_DIR=/app/web-dist` on the
+API Deployment by default (set `config.WEB_DIST_DIR=""` to run API-only). Build
+standalone static output anytime with `pnpm --filter @sms-gateway/web build`
+(`web/dist`).

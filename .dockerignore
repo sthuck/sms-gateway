@@ -7,7 +7,6 @@ node_modules
 **/.env.*
 !**/.env.example
 android
-web
 coverage
 *.md
 !backend/migrations/README.md

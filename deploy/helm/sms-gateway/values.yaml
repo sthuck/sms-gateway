@@ -14,6 +14,9 @@ config:
   HOST: "0.0.0.0"
   PORT: "8080"
   LOG_LEVEL: info
+  # Built web UI bundle served by the API on the same origin (`/` -> SPA, `/v1/*` -> API).
+  # Matches the bundle baked into backend/Dockerfile; set to "" to run API-only.
+  WEB_DIST_DIR: /app/web-dist
   # OpenAI-compatible classifier provider (non-secret pieces)
   LLM_BASE_URL: ""
   LLM_MODEL: ""
@@ -122,6 +125,10 @@ mcp:
       cpu: 500m
       memory: 512Mi
 
+# Single `/` Ingress routes both the bundled Web UI and `/v1/*` API to `<release>-api`
+# on the same origin. For nginx Ingress, consider setting
+# `nginx.ingress.kubernetes.io/proxy-body-size: "2m"` for 1 MiB SMS batches, and
+# preserve the external `Host` header for ES256 device signing.
 ingress:
   enabled: false
   className: ""

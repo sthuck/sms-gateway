@@ -9,6 +9,7 @@ data:
   HOST: {{ .Values.config.HOST | quote }}
   PORT: {{ .Values.config.PORT | quote }}
   LOG_LEVEL: {{ .Values.config.LOG_LEVEL | quote }}
+  WEB_DIST_DIR: {{ .Values.config.WEB_DIST_DIR | quote }}
   LLM_BASE_URL: {{ .Values.config.LLM_BASE_URL | quote }}
   LLM_MODEL: {{ .Values.config.LLM_MODEL | quote }}
   OIDC_ISSUER_URL: {{ .Values.config.OIDC_ISSUER_URL | quote }}

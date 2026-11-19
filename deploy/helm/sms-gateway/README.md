@@ -1,11 +1,12 @@
 # sms-gateway Helm chart
 
-Deploys the SMS Gateway backend as three Deployments that share one container
-image with different commands:
+Deploys SMS Gateway as three Deployments that share one container image with
+different commands (the API Deployment serves both `/v1/*` and the bundled Web
+UI SPA on port 8080 behind the single `/` Ingress):
 
 | Component | Command | Service |
 | --- | --- | --- |
-| API | `node dist/index.js` | ClusterIP (default port 8080) |
+| API + Web UI | `node dist/index.js` | ClusterIP (default port 8080) |
 | Worker | `node dist/worker.js` | none |
 | MCP | `node dist/mcp.js` | ClusterIP (default port 8081) |
 
@@ -45,7 +46,8 @@ helm template sms-gateway deploy/helm/sms-gateway >/dev/null
 
 See `values.yaml`. Notable knobs:
 
-- `config.*` — non-secret env (`HOST`, `PORT`, `LOG_LEVEL`, `LLM_*`, `OIDC_*`, MFA, CORS)
+- `config.*` — non-secret env (`HOST`, `PORT`, `LOG_LEVEL`, `WEB_DIST_DIR`, `LLM_*`, `OIDC_*`, MFA, CORS)
+- `config.WEB_DIST_DIR` — path to built `web/dist` served by the API on the same origin (default `/app/web-dist`; set `""` to run API-only)
 - `config.OIDC_APPLICATION_SLUG` — Authentik app slug (`sms-gateway`); issuer path segment
 - `config.CORS_ALLOWED_ORIGINS` — comma-separated browser origins
 - `secrets.*` — Secret names/keys for `DATABASE_URL`, KEK file, `LLM_API_KEY`, OIDC

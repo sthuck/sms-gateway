@@ -17,6 +17,7 @@ import {
   streamPlugin,
   streamRoutes,
   tokenRoutes,
+  webStaticPlugin,
   type AuthPluginOptions,
   type DeviceUseCases,
   type StreamUseCases,
@@ -40,6 +41,8 @@ export type BuildAppOptions = {
   ingest?: IngestConfig;
   /** Override body codec (tests). When omitted, built from encryption config. */
   bodyCodec?: BodyCodec;
+  /** Optional directory of built web UI assets (`web/dist`) served by the API. */
+  webDistDir?: string | null;
 };
 
 export async function buildApp(
@@ -191,6 +194,19 @@ export async function buildApp(
   await app.register(messageRoutes);
   await app.register(streamRoutes);
   await app.register(tokenRoutes);
+
+  const webDistDir = options.webDistDir !== undefined ? options.webDistDir : config.webDistDir;
+  if (webDistDir) {
+    try {
+      await app.register(webStaticPlugin, { rootDir: webDistDir });
+    } catch (err) {
+      app.log.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        "Web static asset configuration failed at startup",
+      );
+      throw err;
+    }
+  }
 
   return app;
 }

@@ -42,6 +42,8 @@ spec:
               protocol: TCP
           env:
             {{- include "sms-gateway.env" . | nindent 12 }}
+            - name: WEB_DIST_DIR
+              value: {{ .Values.config.WEB_DIST_DIR | quote }}
           volumeMounts:
             {{- include "sms-gateway.kekVolumeMount" . | nindent 12 }}
           livenessProbe:

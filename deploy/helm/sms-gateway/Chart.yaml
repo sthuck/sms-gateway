@@ -1,6 +1,6 @@
 apiVersion: v2
 name: sms-gateway
-description: SMS Gateway backend (API, worker, MCP) for homelab Kubernetes
+description: SMS Gateway (API + bundled Web UI, worker, MCP) for homelab Kubernetes
 type: application
 version: 0.1.0
 appVersion: "0.0.0"

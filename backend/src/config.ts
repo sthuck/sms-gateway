@@ -34,6 +34,8 @@ const envSchema = z.object({
    * Never parse X-Forwarded-For by hand.
    */
   TRUST_PROXY: z.string().optional().default("false"),
+  /** Optional directory of built web UI assets (`web/dist`) served by the API. */
+  WEB_DIST_DIR: z.string().optional().default(""),
 });
 
 export type TrustProxyOption = boolean | number | string | string[];
@@ -42,9 +44,13 @@ export type TrustProxyOption = boolean | number | string | string[];
 export type FastifyTrustProxy =
   boolean | string | string[] | ((address: string, hop: number) => boolean);
 
-export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS" | "TRUST_PROXY"> & {
+export type Config = Omit<
+  z.infer<typeof envSchema>,
+  "CORS_ALLOWED_ORIGINS" | "TRUST_PROXY" | "WEB_DIST_DIR"
+> & {
   corsAllowedOrigins: string[];
   trustProxy: TrustProxyOption;
+  webDistDir: string | null;
   oidc: OidcAuthConfig | null;
   deviceAuth: DeviceAuthConfig;
   ingest: IngestConfig;
@@ -132,7 +138,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Invalid configuration: ${details}`);
   }
 
-  const { CORS_ALLOWED_ORIGINS: corsRaw, TRUST_PROXY: trustProxyRaw, ...rest } = parsed.data;
+  const {
+    CORS_ALLOWED_ORIGINS: corsRaw,
+    TRUST_PROXY: trustProxyRaw,
+    WEB_DIST_DIR: webDistDirRaw,
+    ...rest
+  } = parsed.data;
+  const webDistDir = webDistDirRaw.trim() || null;
   const corsAllowedOrigins = parseCorsAllowedOrigins(corsRaw);
   for (const origin of corsAllowedOrigins) {
     try {
@@ -169,6 +181,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ...rest,
     corsAllowedOrigins,
     trustProxy,
+    webDistDir,
     oidc,
     deviceAuth,
     ingest,
