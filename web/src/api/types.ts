@@ -31,6 +31,7 @@ export type Me = {
 export type PairingCodeResponse = {
   code: string;
   qr_payload: string;
+  has_access_headers?: boolean;
   expires_at: string;
   ttl_seconds: number;
 };
@@ -76,6 +77,7 @@ export type OwnerAccessToken = {
 
 export type OwnerAccessTokenCreated = OwnerAccessToken & {
   token: string;
+  access_headers?: Record<string, string>;
 };
 
 export type OwnerAccessTokenList = {

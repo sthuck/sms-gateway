@@ -7,15 +7,42 @@ describe("useCreatedTokenSecret", () => {
     const { result } = renderHook(() => useCreatedTokenSecret());
 
     expect(result.current.secret).toBeNull();
+    expect(result.current.accessHeaders).toBeNull();
 
     act(() => {
       result.current.showSecret("smsg_pat_00000000-0000-4000-8000-000000000000_abcd");
     });
     expect(result.current.secret).toBe("smsg_pat_00000000-0000-4000-8000-000000000000_abcd");
+    expect(result.current.accessHeaders).toBeNull();
 
     act(() => {
       result.current.dismissSecret();
     });
     expect(result.current.secret).toBeNull();
+    expect(result.current.accessHeaders).toBeNull();
+  });
+
+  it("holds accessHeaders alongside token in React state and clears both on dismiss", () => {
+    const { result } = renderHook(() => useCreatedTokenSecret());
+    const headers = {
+      "CF-Access-Client-Id": "id-1",
+      "CF-Access-Client-Secret": "sec-1",
+    };
+
+    act(() => {
+      result.current.showSecret("smsg_pat_00000000-0000-4000-8000-000000000000_abcd", headers);
+    });
+    expect(result.current.created).toEqual({
+      token: "smsg_pat_00000000-0000-4000-8000-000000000000_abcd",
+      accessHeaders: headers,
+    });
+    expect(result.current.accessHeaders).toEqual(headers);
+
+    act(() => {
+      result.current.dismissSecret();
+    });
+    expect(result.current.created).toBeNull();
+    expect(result.current.secret).toBeNull();
+    expect(result.current.accessHeaders).toBeNull();
   });
 });

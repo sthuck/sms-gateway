@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  loadClientAccessConfig,
+  type ClientAccessConfig,
+} from "./adapters/access-headers/index.js";
 import { loadOidcAuthConfig, type OidcAuthConfig } from "./adapters/auth-oidc/oidc-config.js";
 import { loadDeviceAuthConfig, type DeviceAuthConfig } from "./adapters/device-crypto/config.js";
 import { loadIngestConfig, type IngestConfig } from "./adapters/ingest/index.js";
@@ -55,6 +59,7 @@ export type Config = Omit<
   deviceAuth: DeviceAuthConfig;
   ingest: IngestConfig;
   encryption: EncryptionConfig;
+  clientAccess: ClientAccessConfig;
 };
 
 /** Loose IPv4 / IPv6 / CIDR check for TRUST_PROXY list entries. */
@@ -176,6 +181,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   });
   const ingest = loadIngestConfig(env);
   const encryption = loadEncryptionConfig(env, { nodeEnv: rest.NODE_ENV });
+  const clientAccess = loadClientAccessConfig(env);
 
   return {
     ...rest,
@@ -186,5 +192,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     deviceAuth,
     ingest,
     encryption,
+    clientAccess,
   };
 }

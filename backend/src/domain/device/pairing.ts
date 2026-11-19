@@ -1,3 +1,5 @@
+import { encodeAccessHeadersParam, type AccessHeadersMap } from "../access-headers.js";
+
 /**
  * Crockford Base32 alphabet (excludes I, L, O, U). Pure string helpers only —
  * CSPRNG generation and hashing live in adapters (node:crypto).
@@ -17,11 +19,18 @@ export function normalizePairingCode(raw: string): string | null {
   return raw.replace(/-/g, "").toUpperCase();
 }
 
-export function formatPairingQrPayload(code: string, serverBaseUrl?: string | null): string {
+export function formatPairingQrPayload(
+  code: string,
+  serverBaseUrl?: string | null,
+  accessHeaders?: AccessHeadersMap | null,
+): string {
   const params = new URLSearchParams();
   params.set("code", code);
   if (serverBaseUrl) {
     params.set("server", serverBaseUrl);
+  }
+  if (accessHeaders && Object.keys(accessHeaders).length > 0) {
+    params.set("headers", encodeAccessHeadersParam(accessHeaders));
   }
   return `smsgw://pair?${params.toString()}`;
 }

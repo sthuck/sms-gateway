@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { AccessHeadersMap } from "../domain/access-headers.js";
 import {
   DeleteMessage,
   GetDeviceMe,
@@ -50,6 +51,7 @@ export type BuildDeviceStackOptions = {
   queuePublisher?: QueuePublisher | null;
   ingestConfig?: IngestConfig;
   bodyCodec?: BodyCodec;
+  deviceAccessHeaders?: AccessHeadersMap | null;
 };
 
 export function buildDeviceStack(options: BuildDeviceStackOptions): DeviceStack {
@@ -86,6 +88,7 @@ export function buildDeviceStack(options: BuildDeviceStackOptions): DeviceStack 
       hashCode: hashPairingCode,
       ttlSeconds: config.pairingCodeTtlSeconds,
       apiPublicUrl: config.apiPublicUrl,
+      deviceAccessHeaders: options.deviceAccessHeaders ?? null,
     }),
     pairDevice: new PairDevice({
       devices,

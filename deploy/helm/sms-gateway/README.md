@@ -59,6 +59,7 @@ See `values.yaml`. Notable knobs:
   - `databaseSecretName` (`DATABASE_URL`) — mounted on `api` and `worker`
   - `encryptionKekSecretName` — mounted at `/var/run/secrets/sms-gateway/` (mode `0440`) on `api` and `worker` when `ENCRYPTION_ENABLED != "false"`
   - `oidcEnabled` (default **false**) — mounts `OIDC_CLIENT_SECRET` + `SESSION_SECRET` on `api` only
+  - `cfAccessEnabled` (default **false**) — mounts optional Cloudflare Access service token keys (`CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`, `DEVICE_CF_ACCESS_CLIENT_ID`/`DEVICE_CF_ACCESS_CLIENT_SECRET`, `AGENT_CF_ACCESS_CLIENT_ID`/`AGENT_CF_ACCESS_CLIENT_SECRET`, all with `optional: true`) from `secrets.cfAccessSecretName` on `api` only
   - `llmEnabled` (default **false**) — mounts `LLM_API_KEY` on `api` and `worker` when enabled
   - `migrateSecretName` (`MIGRATE_DATABASE_URL`, `SMS_APP_PASSWORD`) — mounted **only** on the hook Job when `migrations.enabled=true`
 - `migrations.enabled` — default **false**; set **true** to run `node scripts/migrate.mjs up` as a `pre-install,pre-upgrade` Helm hook Job before API/worker pods start

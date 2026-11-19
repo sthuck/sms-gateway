@@ -148,7 +148,9 @@ paths:
       description: |
         Authenticated owners receive a short Crockford Base32 code (8
         characters, optionally displayed as `XXXX-XXXX`) and a QR payload
-        `smsgw://pair?code=<code>` with optional `server=<url-encoded base URL>`.
+        `smsgw://pair?code=<code>` with optional `server=<url-encoded base URL>`
+        and optional `headers=<unpadded base64url JSON>` when device tunnel
+        access headers are configured.
 
         The plaintext code is returned once; the server stores only a
         SHA-256 hash. Codes expire after 5 minutes and are burned on the
@@ -159,6 +161,11 @@ paths:
       responses:
         "201":
           description: Pairing code issued
+          headers:
+            Cache-Control:
+              description: Always `no-store`; `qr_payload` may embed tunnel access credentials.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -168,6 +175,7 @@ paths:
                   value:
                     code: 7K3M-9Q2P
                     qr_payload: smsgw://pair?code=7K3M-9Q2P&server=http%3A%2F%2F10.0.2.2%3A8080
+                    has_access_headers: false
                     expires_at: "2026-11-18T10:00:00.000Z"
                     ttl_seconds: 300
         "401":
@@ -690,6 +698,11 @@ paths:
       responses:
         "201":
           description: Token created; secret included once
+          headers:
+            Cache-Control:
+              description: Always `no-store`; response contains a one-time PAT secret and optional tunnel credentials.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -802,7 +815,7 @@ components:
     PairingCodeResponse:
       type: object
       additionalProperties: false
-      required: [code, qr_payload, expires_at, ttl_seconds]
+      required: [code, qr_payload, has_access_headers, expires_at, ttl_seconds]
       properties:
         code:
           type: string
@@ -815,9 +828,18 @@ components:
           type: string
           description: |
             `smsgw://pair?code=<code>` plus optional `server` query
-            parameter (URL-encoded API base URL for the Android app).
+            parameter (URL-encoded API base URL for the Android app) and
+            optional `headers` query parameter (unpadded base64url JSON of
+            device tunnel headers when configured).
           examples:
             - "smsgw://pair?code=7K3M-9Q2P&server=http%3A%2F%2F10.0.2.2%3A8080"
+        has_access_headers:
+          type: boolean
+          description: |
+            True when device tunnel access headers are embedded in `qr_payload`.
+            When true, scanning the QR code or opening the full pairing URI is
+            required (a bare short code cannot carry tunnel headers).
+          examples: [false]
         expires_at:
           type: string
           format: date-time
@@ -1231,6 +1253,14 @@ components:
             Full secret (`smsg_pat_<uuid>_<secret>`). Returned only on create;
             never listed again.
           pattern: "^smsg_pat_[0-9a-fA-F-]{36}_[A-Za-z0-9_-]+$"
+        access_headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Optional tunnel access headers (for example Cloudflare Access service
+            token headers) that agent clients must include on API requests.
+            Omitted when agent access headers are not configured.
 
     OwnerAccessTokenList:
       type: object

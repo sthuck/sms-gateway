@@ -7,9 +7,11 @@ Companion to Linear **STH-14** and the STH-5 contracts in
 ## Flow
 
 1. **Owner** (session cookie or bearer JWT) calls `POST /v1/pairing-codes`.
-2. API returns a Crockford Base32 code (`XXXX-XXXX`) and
-   `qr_payload` = `smsgw://pair?code=…` with optional `server=<url-encoded
-   API base URL>` (from `DEVICE_API_PUBLIC_URL` / `PUBLIC_BASE_URL`).
+2. API returns (`Cache-Control: no-store`) a Crockford Base32 code (`XXXX-XXXX`),
+   `has_access_headers`, and `qr_payload` = `smsgw://pair?code=…` with optional
+   `server=<url-encoded API base URL>` (from `DEVICE_API_PUBLIC_URL` /
+   `PUBLIC_BASE_URL`) and optional `headers=<unpadded base64url JSON>` when
+   device tunnel access headers are configured.
 3. Only a **SHA-256 hash** of the normalized code (uppercase, no hyphen)
    is stored in `pairing_codes`. TTL default **5 minutes**.
 4. **Device** calls `POST /v1/devices/pair` with the code, ES256 SPKI
@@ -110,5 +112,26 @@ matches. See `docs/local-dev.md`.
 
 ## Logging
 
-Never log pairing codes, public/private keys, signatures, or message
-bodies. Device id, owner id, error codes, and hash prefixes are fine.
+Never log pairing codes, `qr_payload`, tunnel access headers/secrets,
+public/private keys, signatures, or message bodies. Device id, owner id,
+error codes, and hash prefixes are fine.
+
+## Tunnel access headers (`headers=` / Cloudflare Access)
+
+When the API sits behind a zero-trust tunnel (for example Cloudflare Access),
+configure service token credentials for devices using either the shared pair
+(`CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`) or the device-specific
+override (`DEVICE_CF_ACCESS_CLIENT_ID`, `DEVICE_CF_ACCESS_CLIENT_SECRET`):
+
+- Precedence: `deviceHeaders = deviceOverride ?? shared`. Leaving the shared
+  pair unset and setting only `DEVICE_CF_ACCESS_*` provisions headers for
+  paired devices without exposing them on `POST /v1/tokens`.
+- Setting only one half of any `*_ID` / `*_SECRET` pair fails fast at startup.
+- When configured, `POST /v1/pairing-codes` sets `has_access_headers: true`
+  and appends `&headers=<ENCODED>` (unpadded base64url of compact UTF-8 JSON,
+  max 2048 bytes / 8 headers, reserved hop-by-hop and signing headers denied)
+  to `qr_payload`.
+- Devices must scan the QR code or open the full `smsgw://pair?...` URI;
+  entering only the bare `XXXX-XXXX` short code does not carry tunnel headers.
+- Custom tunnel headers are attached to HTTP requests only and are **not**
+  included in the ES256 canonical signing string.

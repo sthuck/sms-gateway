@@ -1,3 +1,4 @@
+import type { AccessHeadersMap } from "../../domain/access-headers.js";
 import {
   buildOwnerPatSecret,
   MAX_TOKEN_EXPIRES_IN_DAYS,
@@ -28,6 +29,8 @@ export type CreateOwnerAccessTokenResult = {
   token: OwnerAccessToken;
   /** Full secret; returned once and never stored. */
   secret: string;
+  /** Optional access headers (e.g. Cloudflare Access) required for agent requests. */
+  accessHeaders?: AccessHeadersMap;
 };
 
 export type CreateOwnerAccessTokenDeps = {
@@ -35,6 +38,7 @@ export type CreateOwnerAccessTokenDeps = {
   audit: AuditRepository;
   ids: IdGenerator;
   hasher: TokenHasher;
+  agentAccessHeaders?: AccessHeadersMap | null;
 };
 
 export class CreateOwnerAccessToken {
@@ -70,6 +74,11 @@ export class CreateOwnerAccessToken {
       throw InfrastructureError.wrap(err, "create owner access token failed");
     }
 
+    const accessHeaders =
+      this.deps.agentAccessHeaders && Object.keys(this.deps.agentAccessHeaders).length > 0
+        ? { ...this.deps.agentAccessHeaders }
+        : undefined;
+
     return {
       token: {
         id,
@@ -81,6 +90,7 @@ export class CreateOwnerAccessToken {
         revokedAt: null,
       },
       secret,
+      ...(accessHeaders ? { accessHeaders } : {}),
     };
   }
 }

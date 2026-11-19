@@ -105,3 +105,57 @@ secrets:
 ```
 
 Do not set `OIDC_ALLOW_INSECURE` outside local HTTP IdPs.
+
+## Cloudflare Access / Zero-Trust Tunnel (STH-60)
+
+When exposing the API behind Cloudflare Access (for example via `cloudflared`),
+human browser logins still use OIDC interactive auth, while non-interactive
+clients (paired Android devices and PAT agent scripts) need Cloudflare Access
+service token headers (`CF-Access-Client-Id` / `CF-Access-Client-Secret`).
+
+### Environment variables & precedence
+
+| Scope | Env vars | Used by |
+| --- | --- | --- |
+| Shared fallback | `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | Both devices and agents unless overridden |
+| Device override | `DEVICE_CF_ACCESS_CLIENT_ID`, `DEVICE_CF_ACCESS_CLIENT_SECRET` | `POST /v1/pairing-codes` (`qr_payload` `&headers=…`) |
+| Agent override | `AGENT_CF_ACCESS_CLIENT_ID`, `AGENT_CF_ACCESS_CLIENT_SECRET` | `POST /v1/tokens` (`access_headers`) |
+
+- Precedence: `deviceHeaders = deviceOverride ?? shared`; `agentHeaders = agentOverride ?? shared`.
+- Leaving the shared pair unset and configuring only one override provisions
+  headers for that client type only.
+- Startup (`loadConfig`) fails fast if only one half (`*_ID` or `*_SECRET`) of
+  any pair is set, or if header values fail validation (printable ASCII, no
+  leading/trailing whitespace).
+- In Helm (`deploy/helm/sms-gateway/`), set `secrets.cfAccessEnabled: true` and
+  populate `sms-gateway-cf-access` with the shared and/or scoped keys.
+
+### Proxy, `Host` header, and `TRUST_PROXY`
+
+- **`TRUST_PROXY`:** Set `config.TRUST_PROXY` to the `cloudflared` (or Ingress)
+  pod/node CIDR (e.g. `"10.42.0.0/16"`) so Fastify `request.ip` resolves the
+  real client IP for pairing rate limits and audit logs rather than the tunnel
+  pod IP.
+- **`Host` header preservation:** Configure `cloudflared` / Ingress to preserve
+  the external `Host` header (`sms.sthuck.info`), and ensure
+  `DEVICE_ALLOWED_HOSTS` (or derived `PUBLIC_BASE_URL` /
+  `DEVICE_API_PUBLIC_URL`) includes `sms.sthuck.info` so ES256 device signatures
+  verify against the canonical `HOST` field.
+
+### Service token rotation runbook (re-pair flow)
+
+Because paired Android devices store their service token credentials locally
+after scanning the pairing QR/URI, rotating the device service token requires
+re-pairing devices:
+
+1. Create a **new** Cloudflare Access service token and allow **both** the old
+   and new service tokens in the Access policy during cutover.
+2. Update the backend secret (`DEVICE_CF_ACCESS_CLIENT_ID` /
+   `DEVICE_CF_ACCESS_CLIENT_SECRET`, or shared `CF_ACCESS_*`) and roll the API
+   Deployment.
+3. For each active Android device: issue a fresh pairing code in the Web UI
+   (`/devices/pair`), scan the QR code (or open the copied pairing URI) on the
+   device to provision the new tunnel headers, and revoke the superseded device
+   entry if a new device record was created.
+4. Once all devices and agent scripts have migrated to the new credentials,
+   remove/revoke the old Cloudflare Access service token from the Access policy.

@@ -13,9 +13,29 @@ function expiryDays(choice: ExpiryChoice): number | null {
   return Number(choice);
 }
 
+function escapeDoubleQuotedShell(value: string): string {
+  return value.replace(/[\\"$`]/g, "\\$&");
+}
+
+function buildCurlSnippet(
+  token: string,
+  accessHeaders: Record<string, string>,
+  baseUrl: string,
+): string {
+  const lines = [
+    `curl -sS -H "Authorization: Bearer ${escapeDoubleQuotedShell(token)}" \\`,
+    ...Object.entries(accessHeaders).map(
+      ([header, value]) =>
+        `  -H "${escapeDoubleQuotedShell(header)}: ${escapeDoubleQuotedShell(value)}" \\`,
+    ),
+    `  "${escapeDoubleQuotedShell(baseUrl)}/v1/messages?limit=100"`,
+  ];
+  return lines.join("\n");
+}
+
 export function TokensPage() {
   const { api } = useAuth();
-  const { secret, showSecret, dismissSecret } = useCreatedTokenSecret();
+  const { secret, accessHeaders, showSecret, dismissSecret } = useCreatedTokenSecret();
   const [tokens, setTokens] = useState<OwnerAccessToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +44,7 @@ export function TokensPage() {
   const [creating, setCreating] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedCurl, setCopiedCurl] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,12 +73,13 @@ export function TokensPage() {
     setCreating(true);
     setError(null);
     setCopied(false);
+    setCopiedCurl(false);
     try {
       const created = await api.post<OwnerAccessTokenCreated>("/v1/tokens", {
         name: trimmed,
         expires_in_days: expiryDays(expiry),
       });
-      showSecret(created.token);
+      showSecret(created.token, created.access_headers);
       setName("");
       setTokens((prev) => [
         {
@@ -110,6 +132,31 @@ export function TokensPage() {
     }
   };
 
+  const baseUrl =
+    typeof window !== "undefined" && window.location.origin && window.location.origin !== "null"
+      ? window.location.origin
+      : "https://your-gateway.example";
+  const curlSnippet =
+    secret && accessHeaders ? buildCurlSnippet(secret, accessHeaders, baseUrl) : null;
+
+  const onCopyCurl = async () => {
+    if (!curlSnippet) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(curlSnippet);
+      setCopiedCurl(true);
+    } catch {
+      setCopiedCurl(false);
+    }
+  };
+
+  const onDismiss = () => {
+    setCopied(false);
+    setCopiedCurl(false);
+    dismissSecret();
+  };
+
   return (
     <main className="page wide">
       <h1>Access tokens</h1>
@@ -125,11 +172,38 @@ export function TokensPage() {
             <strong>Copy this token now.</strong> It will not be shown again.
           </p>
           <pre className="secret-value">{secret}</pre>
+          {accessHeaders ? (
+            <>
+              <p>
+                <strong>Required tunnel access headers:</strong>
+              </p>
+              <pre className="secret-value" aria-label="Required access headers">
+                {Object.entries(accessHeaders)
+                  .map(([header, value]) => `${header}: ${value}`)
+                  .join("\n")}
+              </pre>
+              {curlSnippet ? (
+                <>
+                  <p>
+                    <strong>Example curl command:</strong>
+                  </p>
+                  <pre className="secret-value" aria-label="Example curl command">
+                    {curlSnippet}
+                  </pre>
+                </>
+              ) : null}
+            </>
+          ) : null}
           <div className="filters-actions">
             <button type="button" className="btn" onClick={() => void onCopy()}>
               {copied ? "Copied" : "Copy to clipboard"}
             </button>
-            <button type="button" className="btn btn-primary" onClick={dismissSecret}>
+            {curlSnippet ? (
+              <button type="button" className="btn" onClick={() => void onCopyCurl()}>
+                {copiedCurl ? "Copied curl" : "Copy curl snippet"}
+              </button>
+            ) : null}
+            <button type="button" className="btn btn-primary" onClick={onDismiss}>
               Dismiss
             </button>
           </div>

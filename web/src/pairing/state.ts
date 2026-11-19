@@ -7,6 +7,7 @@ export type PairingViewState =
       kind: "active";
       code: string;
       qrPayload: string;
+      hasAccessHeaders: boolean;
       expiresAt: number;
       knownDeviceIds: ReadonlySet<string>;
     }
@@ -38,6 +39,7 @@ export function reducePairingState(state: PairingViewState, event: PairingEvent)
         kind: "active",
         code: event.response.code,
         qrPayload: event.response.qr_payload,
+        hasAccessHeaders: Boolean(event.response.has_access_headers),
         expiresAt: Number.isFinite(expiresAt)
           ? expiresAt
           : Date.now() + event.response.ttl_seconds * 1000,

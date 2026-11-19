@@ -71,6 +71,27 @@ paths:
         The request `Host` must be the host (and port, if any) of that
         base URL, must match the HOST field in the signed canonical
         string, and must be one of the server's allowed backend hosts.
+
+        When the server sits behind a zero-trust tunnel (for example
+        Cloudflare Access), an optional `headers` query parameter may also
+        be present (`smsgw://pair?code=<code>&server=<URL>&headers=<ENCODED>`),
+        omitted when unconfigured. `<ENCODED>` is unpadded base64url
+        (RFC 4648 §5, `^[A-Za-z0-9_-]+$`, no `=`) of compact UTF-8 JSON
+        (`Record<string, string>`), e.g.
+        `{"CF-Access-Client-Id":"<id>","CF-Access-Client-Secret":"<secret>"}`.
+        Decoded JSON must be a non-empty plain object with string values only,
+        at most 2048 UTF-8 bytes, and at most 8 headers; header names must be
+        1..128 RFC 7230 token characters (`^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$`)
+        with no case-insensitive duplicates; header values must be 1..1024
+        printable ASCII characters (`^[\x20-\x7E]+$`) with no leading or
+        trailing whitespace. The following 17 header names are reserved
+        (case-insensitive denylist) and must be rejected: `host`,
+        `authorization`, `proxy-authorization`, `cookie`, `origin`, `referer`,
+        `content-type`, `content-length`, `content-encoding`,
+        `transfer-encoding`, `connection`, `x-csrf-token`, `x-device-id`,
+        `x-timestamp`, `x-nonce`, `x-content-sha256`, `x-signature`. Custom
+        access headers are sent on HTTP requests only and are not included in
+        the ES256 canonical signing string.
       security: []
       parameters:
         - $ref: "#/components/parameters/XTimestamp"
