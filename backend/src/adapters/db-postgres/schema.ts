@@ -413,6 +413,8 @@ export const ownerAccessTokens = pgTable(
     tokenHash: text("token_hash").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    /** Null = no expiry. Compared to DB/server time at Bearer auth. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
   (t) => [

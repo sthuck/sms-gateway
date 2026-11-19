@@ -3,12 +3,17 @@ export const OWNER_PAT_PREFIX = "smsg_pat_";
 
 export const MAX_TOKEN_NAME_LEN = 120;
 
+/** Maximum `expires_in_days` accepted on create (inclusive). */
+export const MAX_TOKEN_EXPIRES_IN_DAYS = 366;
+
 export type OwnerAccessToken = {
   id: string;
   ownerId: string;
   name: string;
   createdAt: Date;
   lastUsedAt: Date | null;
+  /** Null means the token does not expire. */
+  expiresAt: Date | null;
   revokedAt: Date | null;
 };
 
@@ -19,6 +24,7 @@ export type OwnerAccessTokenLookup = {
   tokenHash: string;
   revokedAt: Date | null;
   lastUsedAt: Date | null;
+  expiresAt: Date | null;
 };
 
 export function isOwnerPatFormat(token: string): boolean {

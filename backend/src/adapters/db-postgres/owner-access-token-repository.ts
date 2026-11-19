@@ -14,6 +14,7 @@ type TokenRow = {
   name: string;
   created_at: Date;
   last_used_at: Date | null;
+  expires_at: Date | null;
   revoked_at: Date | null;
 };
 
@@ -24,9 +25,9 @@ export class PgOwnerAccessTokenRepository implements OwnerAccessTokenRepository 
     return withDbInfra("owner access token insert failed", () =>
       withOwner(this.pool, input.ownerId, async (client) => {
         await client.query(
-          `INSERT INTO owner_access_tokens (id, owner_id, name, token_hash)
-           VALUES ($1, $2, $3, $4)`,
-          [input.id, input.ownerId, input.name, input.tokenHash],
+          `INSERT INTO owner_access_tokens (id, owner_id, name, token_hash, expires_at)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [input.id, input.ownerId, input.name, input.tokenHash, input.expiresAt],
         );
       }),
     );
@@ -36,7 +37,7 @@ export class PgOwnerAccessTokenRepository implements OwnerAccessTokenRepository 
     return withDbInfra("owner access token list failed", () =>
       withOwner(this.pool, ownerId, async (client) => {
         const { rows } = await client.query<TokenRow>(
-          `SELECT id, owner_id, name, created_at, last_used_at, revoked_at
+          `SELECT id, owner_id, name, created_at, last_used_at, expires_at, revoked_at
            FROM owner_access_tokens
            ORDER BY created_at DESC, id DESC`,
         );
@@ -92,6 +93,7 @@ function mapRow(row: TokenRow): OwnerAccessToken {
     name: row.name,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
+    expiresAt: row.expires_at,
     revokedAt: row.revoked_at,
   };
 }

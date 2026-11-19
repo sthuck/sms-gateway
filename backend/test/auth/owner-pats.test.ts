@@ -490,4 +490,96 @@ describe.skipIf(!migratorOk)("owner personal access tokens", () => {
     expect(qNul.statusCode).toBe(400);
     expect((qNul.json() as { code: string }).code).toBe("invalid_request");
   });
+
+  it("expires_in_days sets expires_at; expired PAT → same 401; no-expiry accepted", async () => {
+    const withExpiry = await app.inject({
+      method: "POST",
+      url: "/v1/tokens",
+      headers: { ...sessionHeaders(), "content-type": "application/json" },
+      payload: { name: "ninety", expires_in_days: 90 },
+    });
+    expect(withExpiry.statusCode).toBe(201);
+    expectOpenApiResponse(userApi, "/v1/tokens", "post", withExpiry, {
+      status: 201,
+      contentType: "application/json",
+    });
+    const expiryBody = withExpiry.json() as {
+      id: string;
+      token: string;
+      expires_at: string | null;
+    };
+    expect(expiryBody.expires_at).toBeTruthy();
+    const expiresMs = Date.parse(expiryBody.expires_at!);
+    expect(expiresMs).toBeGreaterThan(Date.now() + 80 * 24 * 60 * 60 * 1000);
+    expect(expiresMs).toBeLessThan(Date.now() + 100 * 24 * 60 * 60 * 1000);
+
+    const ok = await app.inject({
+      method: "GET",
+      url: "/v1/messages?limit=1",
+      headers: { authorization: `Bearer ${expiryBody.token}` },
+    });
+    expect(ok.statusCode).toBe(200);
+
+    await admin.query(
+      `UPDATE owner_access_tokens SET expires_at = now() - interval '1 minute' WHERE id = $1`,
+      [expiryBody.id],
+    );
+    const expired = await app.inject({
+      method: "GET",
+      url: "/v1/messages?limit=1",
+      headers: { authorization: `Bearer ${expiryBody.token}` },
+    });
+    expectAuthProblem(userApi, "/v1/messages", "get", expired, 401);
+    expect((expired.json() as { code: string }).code).toBe("unauthorized");
+
+    const noExpiry = await app.inject({
+      method: "POST",
+      url: "/v1/tokens",
+      headers: { ...sessionHeaders(), "content-type": "application/json" },
+      payload: { name: "forever", expires_in_days: null },
+    });
+    expect(noExpiry.statusCode).toBe(201);
+    const noExpiryBody = noExpiry.json() as { token: string; expires_at: string | null };
+    expect(noExpiryBody.expires_at).toBeNull();
+    const noExpiryOk = await app.inject({
+      method: "GET",
+      url: "/v1/messages?limit=1",
+      headers: { authorization: `Bearer ${noExpiryBody.token}` },
+    });
+    expect(noExpiryOk.statusCode).toBe(200);
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/tokens",
+      headers: sessionHeaders(),
+    });
+    expect(listed.statusCode).toBe(200);
+    expectOpenApiResponse(userApi, "/v1/tokens", "get", listed, {
+      status: 200,
+      contentType: "application/json",
+    });
+    const tokens = (listed.json() as { tokens: Array<{ id: string; expires_at: string | null }> })
+      .tokens;
+    expect(tokens.find((t) => t.id === expiryBody.id)?.expires_at).toBeTruthy();
+    expect(tokens.find((t) => t.expires_at === null)).toBeTruthy();
+  });
+
+  it("invalid expires_in_days returns 400", async () => {
+    for (const payload of [
+      { name: "bad", expires_in_days: 0 },
+      { name: "bad", expires_in_days: 367 },
+      { name: "bad", expires_in_days: 1.5 },
+      { name: "bad", expires_in_days: -1 },
+      { name: "bad", expires_in_days: "90" },
+    ]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/tokens",
+        headers: { ...sessionHeaders(), "content-type": "application/json" },
+        payload,
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { code: string }).code).toBe("invalid_request");
+    }
+  });
 });

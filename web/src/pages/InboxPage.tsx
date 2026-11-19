@@ -31,6 +31,7 @@ export function InboxPage() {
   const [devices, setDevices] = useState<DeviceList["devices"]>([]);
   const [messages, setMessages] = useState<OwnerMessage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [lastPageCount, setLastPageCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +62,7 @@ export function InboxPage() {
       const data = await api.get<OwnerMessageList>(path);
       setMessages((prev) => (replace ? data.messages : [...prev, ...data.messages]));
       setNextCursor(data.next_cursor);
+      setLastPageCount(data.messages.length);
     },
     [api, applied],
   );
@@ -73,6 +75,7 @@ export function InboxPage() {
     } catch (err) {
       setMessages([]);
       setNextCursor(null);
+      setLastPageCount(0);
       setError(err instanceof ApiError ? err.message : "Failed to load messages.");
     } finally {
       setLoading(false);
@@ -110,7 +113,7 @@ export function InboxPage() {
 
   const pagination = inboxPaginationAction({
     nextCursor,
-    messageCount: messages.length,
+    lastPageCount,
     limit: PAGE_LIMIT,
     searchQuery: applied.q,
   });

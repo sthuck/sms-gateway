@@ -5,6 +5,8 @@ export type InsertOwnerAccessTokenInput = {
   ownerId: string;
   name: string;
   tokenHash: string;
+  /** Null = no expiry. */
+  expiresAt: Date | null;
 };
 
 /**

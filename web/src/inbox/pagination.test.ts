@@ -6,7 +6,7 @@ describe("inboxPaginationAction", () => {
     expect(
       inboxPaginationAction({
         nextCursor: null,
-        messageCount: 0,
+        lastPageCount: 0,
         limit: 50,
         searchQuery: "otp",
       }),
@@ -17,7 +17,7 @@ describe("inboxPaginationAction", () => {
     expect(
       inboxPaginationAction({
         nextCursor: "abc",
-        messageCount: 50,
+        lastPageCount: 50,
         limit: 50,
         searchQuery: "",
       }),
@@ -28,7 +28,7 @@ describe("inboxPaginationAction", () => {
     expect(
       inboxPaginationAction({
         nextCursor: "abc",
-        messageCount: 0,
+        lastPageCount: 0,
         limit: 50,
         searchQuery: "bank",
       }),
@@ -39,7 +39,7 @@ describe("inboxPaginationAction", () => {
     expect(
       inboxPaginationAction({
         nextCursor: "xyz",
-        messageCount: 3,
+        lastPageCount: 3,
         limit: 50,
         searchQuery: "code",
       }),
@@ -50,10 +50,21 @@ describe("inboxPaginationAction", () => {
     expect(
       inboxPaginationAction({
         nextCursor: "xyz",
-        messageCount: 50,
+        lastPageCount: 50,
         limit: 50,
         searchQuery: "code",
       }),
     ).toEqual({ show: true, label: "Load more" });
+  });
+
+  it('keeps "Keep searching" based on last page, not cumulative list size', () => {
+    expect(
+      inboxPaginationAction({
+        nextCursor: "more",
+        lastPageCount: 2,
+        limit: 50,
+        searchQuery: "otp",
+      }),
+    ).toEqual({ show: true, label: "Keep searching" });
   });
 });
