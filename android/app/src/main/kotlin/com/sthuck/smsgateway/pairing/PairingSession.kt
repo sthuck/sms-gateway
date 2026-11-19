@@ -9,10 +9,10 @@ import javax.inject.Singleton
 /** Signals UI to return to the pairing screen after credential wipe. */
 @Singleton
 class PairingSession @Inject constructor() {
-    private val _rePairRequired = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val rePairRequired: SharedFlow<Unit> = _rePairRequired.asSharedFlow()
+    private val _rePairRequired = MutableSharedFlow<RePairReason>(extraBufferCapacity = 1)
+    val rePairRequired: SharedFlow<RePairReason> = _rePairRequired.asSharedFlow()
 
-    fun notifyRePairRequired() {
-        _rePairRequired.tryEmit(Unit)
+    fun notifyRePairRequired(reason: RePairReason = RePairReason.OTHER) {
+        _rePairRequired.tryEmit(reason)
     }
 }

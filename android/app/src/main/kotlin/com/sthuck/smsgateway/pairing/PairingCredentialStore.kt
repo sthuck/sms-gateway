@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.sthuck.smsgateway.BuildConfig
@@ -23,6 +24,10 @@ data class PairingCredentials(
     val serverUrl: String,
     /** Android Keystore alias for the committed signing key (STH-11 residual). */
     val activeKeyAlias: String? = null,
+    /** Server-assigned device display name from pair / devices/me (STH-18). */
+    val deviceName: String? = null,
+    /** Epoch ms of the last accepted/duplicate batch upload (STH-18). */
+    val lastSuccessfulSyncAtEpochMs: Long? = null,
 ) {
     val isPaired: Boolean get() = !deviceId.isNullOrBlank()
 }
@@ -34,7 +39,14 @@ interface PairingCredentialsReader {
 
 interface PairingStateAccess : PairingCredentialsReader {
     suspend fun clearDeviceId()
-    suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String)
+    suspend fun savePairing(
+        deviceId: String,
+        serverUrl: String,
+        activeKeyAlias: String,
+        deviceName: String,
+    )
+    suspend fun updateDeviceName(deviceName: String)
+    suspend fun recordSuccessfulSync(atEpochMs: Long)
     suspend fun clearAll()
 }
 
@@ -45,12 +57,16 @@ class PairingCredentialStore @Inject constructor(
     private val deviceIdKey = stringPreferencesKey("device_id")
     private val serverUrlKey = stringPreferencesKey("server_url")
     private val activeKeyAliasKey = stringPreferencesKey("active_key_alias")
+    private val deviceNameKey = stringPreferencesKey("device_name")
+    private val lastSuccessfulSyncKey = longPreferencesKey("last_successful_sync_at")
 
     val credentials: Flow<PairingCredentials> = context.pairingDataStore.data.map { prefs ->
         PairingCredentials(
             deviceId = prefs[deviceIdKey]?.takeIf { it.isNotBlank() },
             serverUrl = prefs[serverUrlKey] ?: BuildConfig.BACKEND_URL,
             activeKeyAlias = prefs[activeKeyAliasKey]?.takeIf { it.isNotBlank() },
+            deviceName = prefs[deviceNameKey]?.takeIf { it.isNotBlank() },
+            lastSuccessfulSyncAtEpochMs = prefs[lastSuccessfulSyncKey],
         )
     }
 
@@ -62,11 +78,30 @@ class PairingCredentialStore @Inject constructor(
         }
     }
 
-    override suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String) {
+    override suspend fun savePairing(
+        deviceId: String,
+        serverUrl: String,
+        activeKeyAlias: String,
+        deviceName: String,
+    ) {
         context.pairingDataStore.edit { prefs ->
             prefs[deviceIdKey] = deviceId
             prefs[serverUrlKey] = normalizeBaseUrl(serverUrl)
             prefs[activeKeyAliasKey] = activeKeyAlias
+            prefs[deviceNameKey] = deviceName
+        }
+    }
+
+    override suspend fun updateDeviceName(deviceName: String) {
+        if (deviceName.isBlank()) return
+        context.pairingDataStore.edit { prefs ->
+            prefs[deviceNameKey] = deviceName
+        }
+    }
+
+    override suspend fun recordSuccessfulSync(atEpochMs: Long) {
+        context.pairingDataStore.edit { prefs ->
+            prefs[lastSuccessfulSyncKey] = atEpochMs
         }
     }
 
@@ -75,6 +110,8 @@ class PairingCredentialStore @Inject constructor(
         context.pairingDataStore.edit { prefs ->
             prefs.remove(deviceIdKey)
             prefs.remove(activeKeyAliasKey)
+            prefs.remove(deviceNameKey)
+            prefs.remove(lastSuccessfulSyncKey)
         }
     }
 

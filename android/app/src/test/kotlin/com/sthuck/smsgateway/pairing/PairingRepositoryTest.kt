@@ -193,9 +193,20 @@ class PairingRepositoryTest {
         override suspend fun clearDeviceId() {
             value = value.copy(deviceId = null)
         }
-        override suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String) {
+        override suspend fun savePairing(
+            deviceId: String,
+            serverUrl: String,
+            activeKeyAlias: String,
+            deviceName: String,
+        ) {
             events += "save"
-            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias)
+            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias, deviceName)
+        }
+        override suspend fun updateDeviceName(deviceName: String) {
+            value = value.copy(deviceName = deviceName)
+        }
+        override suspend fun recordSuccessfulSync(atEpochMs: Long) {
+            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs)
         }
         override suspend fun clearAll() {
             value = PairingCredentials(null, "https://sms.sthuck.info")

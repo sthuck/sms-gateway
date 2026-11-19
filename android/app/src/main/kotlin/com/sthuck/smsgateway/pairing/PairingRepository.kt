@@ -82,6 +82,7 @@ class PairingRepository @Inject constructor(
                 deviceId = response.deviceId,
                 serverUrl = validated.url,
                 activeKeyAlias = activeAlias,
+                deviceName = response.name,
             )
             deviceKeyStore.restorePreferredActiveAlias(activeAlias)
             if (previousAlias != null && previousAlias != activeAlias) {

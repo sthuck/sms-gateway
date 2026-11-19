@@ -4,10 +4,13 @@ import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.data.local.QueuedMessageEntity
 import com.sthuck.smsgateway.data.remote.DeviceApi
 import com.sthuck.smsgateway.data.remote.dto.BatchItemStatus
+import com.sthuck.smsgateway.data.remote.dto.DeviceStatusValue
 import com.sthuck.smsgateway.data.remote.dto.Problem
 import com.sthuck.smsgateway.data.remote.dto.ProblemCodes
-import com.sthuck.smsgateway.pairing.PairingCredentialsReader
+import com.sthuck.smsgateway.pairing.DeviceRevocationHandler
 import com.sthuck.smsgateway.pairing.PairingSession
+import com.sthuck.smsgateway.pairing.PairingStateAccess
+import com.sthuck.smsgateway.pairing.RePairReason
 import com.sthuck.smsgateway.sms.IncomingSmsMapper
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException
@@ -31,24 +34,49 @@ sealed class UploadPassResult {
 
 /**
  * Drains ready outbox rows via `POST /v1/messages:batch`.
- * Signing / clock-skew / credential wipe are handled by OkHttp interceptors.
+ * Signing / clock-skew are handled by OkHttp interceptors.
+ * Each cycle probes `GET /v1/devices/me` so a web-UI revoke is noticed
+ * even when the outbox is empty (STH-18).
  *
  * Request-level parking is reserved for explicit non-retryable 4xx problem
  * codes. Missing/unparsable bodies, 5xx/408/429, and `invalid_signature`
- * never park the batch (STH-49).
+ * never park the batch and never wipe pairing (STH-18 / STH-49).
  */
 @Singleton
 class OutboxUploader @Inject constructor(
     private val dao: QueuedMessageDao,
     private val deviceApi: DeviceApi,
-    private val credentialStore: PairingCredentialsReader,
+    private val credentialStore: PairingStateAccess,
     private val pairingSession: PairingSession,
+    private val revocationHandler: DeviceRevocationHandler,
     private val json: Json,
     private val housekeeping: OutboxHousekeeping,
 ) {
     suspend fun runOnce(nowEpochMs: Long = System.currentTimeMillis()): UploadPassResult {
         if (!credentialStore.current().isPaired) {
             return UploadPassResult.NothingToDo
+        }
+
+        when (val probe = probeDeviceMe()) {
+            is DeviceMeProbe.Revoked -> {
+                revocationHandler.wipeAndPromptRePair(RePairReason.REVOKED)
+                return UploadPassResult.StopForRePair(ProblemCodes.DEVICE_REVOKED)
+            }
+            is DeviceMeProbe.StopForRePair -> {
+                // Interceptor already wiped on device_revoked / device_unknown.
+                pairingSession.notifyRePairRequired(
+                    if (probe.code == ProblemCodes.DEVICE_REVOKED) {
+                        RePairReason.REVOKED
+                    } else {
+                        RePairReason.UNKNOWN
+                    },
+                )
+                return UploadPassResult.StopForRePair(probe.code)
+            }
+            is DeviceMeProbe.Ok -> {
+                credentialStore.updateDeviceName(probe.name)
+            }
+            DeviceMeProbe.Continue -> Unit
         }
 
         housekeeping.enforceLimits(nowEpochMs)
@@ -115,6 +143,7 @@ class OutboxUploader @Inject constructor(
             }
             if (toDelete.isNotEmpty()) {
                 dao.deleteByIds(toDelete)
+                credentialStore.recordSuccessfulSync(nowEpochMs)
             }
             if (dao.getReadyForUpload(nowEpochMs, 1).isNotEmpty()) {
                 UploadPassResult.MorePending
@@ -132,6 +161,29 @@ class OutboxUploader @Inject constructor(
         }
     }
 
+    private suspend fun probeDeviceMe(): DeviceMeProbe {
+        return try {
+            val me = deviceApi.getDeviceMe()
+            if (me.status == DeviceStatusValue.Revoked) {
+                DeviceMeProbe.Revoked
+            } else {
+                DeviceMeProbe.Ok(me.name)
+            }
+        } catch (e: HttpException) {
+            val problem = parseProblem(e)
+            when (problem?.code) {
+                ProblemCodes.DEVICE_REVOKED, ProblemCodes.DEVICE_UNKNOWN ->
+                    DeviceMeProbe.StopForRePair(problem.code)
+                // Transient / signature issues: continue; batch path will retry.
+                else -> DeviceMeProbe.Continue
+            }
+        } catch (_: IOException) {
+            DeviceMeProbe.Continue
+        } catch (_: Exception) {
+            DeviceMeProbe.Continue
+        }
+    }
+
     private suspend fun handleHttp(
         e: HttpException,
         rows: List<QueuedMessageEntity>,
@@ -142,12 +194,21 @@ class OutboxUploader @Inject constructor(
         when (code) {
             ProblemCodes.DEVICE_UNKNOWN,
             ProblemCodes.DEVICE_REVOKED,
-            ProblemCodes.INVALID_SIGNATURE,
             -> {
-                // Interceptor clears credentials for these; leave outbox pending
-                // so a later re-pair can drain it (do not park).
-                pairingSession.notifyRePairRequired()
+                // Interceptor clears credentials for these; leave outbox pending.
+                pairingSession.notifyRePairRequired(
+                    if (code == ProblemCodes.DEVICE_REVOKED) {
+                        RePairReason.REVOKED
+                    } else {
+                        RePairReason.UNKNOWN
+                    },
+                )
                 return UploadPassResult.StopForRePair(code)
+            }
+            ProblemCodes.INVALID_SIGNATURE -> {
+                // Keep pairing and rows pending; retry with a fresh signature (STH-18).
+                scheduleRetry(rows, nowEpochMs, code, delayMs = 0L)
+                return UploadPassResult.RetryLater(code)
             }
             ProblemCodes.INVALID_TIMESTAMP, ProblemCodes.REPLAY_DETECTED -> {
                 scheduleRetry(rows, nowEpochMs, code, delayMs = 0L)
@@ -225,7 +286,10 @@ class OutboxUploader @Inject constructor(
                     null -> scheduleRetry(listOf(row), nowEpochMs, "missing_result")
                 }
             }
-            if (toDelete.isNotEmpty()) dao.deleteByIds(toDelete)
+            if (toDelete.isNotEmpty()) {
+                dao.deleteByIds(toDelete)
+                credentialStore.recordSuccessfulSync(nowEpochMs)
+            }
             UploadPassResult.MorePending
         } catch (e: HttpException) {
             handleHttp(e, pack.rows, nowEpochMs)
@@ -253,6 +317,13 @@ class OutboxUploader @Inject constructor(
     private fun parseProblem(e: HttpException): Problem? {
         val body = e.response()?.errorBody()?.string() ?: return null
         return runCatching { json.decodeFromString(Problem.serializer(), body) }.getOrNull()
+    }
+
+    private sealed class DeviceMeProbe {
+        data object Revoked : DeviceMeProbe()
+        data class Ok(val name: String) : DeviceMeProbe()
+        data class StopForRePair(val code: String) : DeviceMeProbe()
+        data object Continue : DeviceMeProbe()
     }
 
     companion object {

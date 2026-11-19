@@ -41,6 +41,8 @@ data class StatusUiState(
     val versionName: String,
     val pairingStatus: String,
     val deviceId: String? = null,
+    val deviceName: String? = null,
+    val lastSuccessfulSyncAtEpochMs: Long? = null,
     val smsPermission: SmsPermissionState = SmsPermissionState.NotRequested,
     val queuedCount: Int = 0,
     val parkedCount: Int = 0,
@@ -108,8 +110,10 @@ class StatusViewModel @Inject constructor(
                         },
                         backendUrl = snap.creds.serverUrl,
                         deviceId = snap.creds.deviceId,
+                        deviceName = snap.creds.deviceName,
+                        lastSuccessfulSyncAtEpochMs = snap.creds.lastSuccessfulSyncAtEpochMs,
                         pairingStatus = if (snap.creds.isPaired) {
-                            "Paired (${snap.creds.deviceId})"
+                            "Paired"
                         } else {
                             "Not paired"
                         },

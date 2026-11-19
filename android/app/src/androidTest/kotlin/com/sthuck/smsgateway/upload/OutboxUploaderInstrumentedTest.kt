@@ -3,13 +3,17 @@ package com.sthuck.smsgateway.upload
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.sthuck.smsgateway.crypto.ClockSkewStore
+import com.sthuck.smsgateway.crypto.DeviceKeyAccess
+import com.sthuck.smsgateway.crypto.DeviceSigner
 import com.sthuck.smsgateway.data.local.AppDatabase
 import com.sthuck.smsgateway.data.local.QueuedMessageEntity
 import com.sthuck.smsgateway.data.remote.DeviceApi
 import com.sthuck.smsgateway.data.remote.dto.ProblemCodes
+import com.sthuck.smsgateway.pairing.DeviceRevocationHandler
 import com.sthuck.smsgateway.pairing.PairingCredentials
-import com.sthuck.smsgateway.pairing.PairingCredentialsReader
 import com.sthuck.smsgateway.pairing.PairingSession
+import com.sthuck.smsgateway.pairing.PairingStateAccess
 import com.sthuck.smsgateway.testing.DeviceApiMock
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -53,18 +57,25 @@ class OutboxUploaderInstrumentedTest {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(DeviceApi::class.java)
-        val credentials = object : PairingCredentialsReader {
-            override suspend fun current() = PairingCredentials(
+        val credentials = FakeStateAccess(
+            PairingCredentials(
                 deviceId = DeviceApiMock.SAMPLE_DEVICE_ID,
                 serverUrl = server.url("/").toString(),
-            )
-        }
+            ),
+        )
+        val pairingSession = PairingSession()
         val dao = db.queuedMessageDao()
         uploader = OutboxUploader(
             dao = dao,
             deviceApi = api,
             credentialStore = credentials,
-            pairingSession = PairingSession(),
+            pairingSession = pairingSession,
+            revocationHandler = DeviceRevocationHandler(
+                credentialStore = credentials,
+                deviceKeyStore = FakeKeys(),
+                clockSkewStore = ClockSkewStore(),
+                pairingSession = pairingSession,
+            ),
             json = json,
             housekeeping = OutboxHousekeeping(dao),
         )
@@ -89,6 +100,7 @@ class OutboxUploaderInstrumentedTest {
                 createdAtEpochMs = 1L,
             ),
         )
+        DeviceApiMock.enqueueDeviceMe(server)
         DeviceApiMock.enqueueProblem(
             server,
             httpCode = 503,
@@ -101,6 +113,7 @@ class OutboxUploaderInstrumentedTest {
         assertTrue(first is UploadPassResult.RetryLater)
         assertEquals(1, db.queuedMessageDao().getAll().single().attemptCount)
 
+        DeviceApiMock.enqueueDeviceMe(server)
         DeviceApiMock.enqueueBatchAccepted(server, deviceMsgId = "sms-42")
         // Force ready by using a future "now".
         val row = db.queuedMessageDao().getAll().single()
@@ -122,16 +135,52 @@ class OutboxUploaderInstrumentedTest {
                 createdAtEpochMs = 1L,
             ),
         )
-        DeviceApiMock.enqueueProblem(
-            server,
-            httpCode = 403,
-            code = ProblemCodes.DEVICE_REVOKED,
-            title = "revoked",
-            detail = "gone",
-            retryable = false,
-        )
+        DeviceApiMock.enqueueDeviceMe(server, status = "revoked")
         val result = uploader.runOnce(nowEpochMs = 1_000L)
         assertTrue(result is UploadPassResult.StopForRePair)
         assertEquals(1, db.queuedMessageDao().getAll().size)
+    }
+
+    private class FakeStateAccess(
+        private var value: PairingCredentials,
+    ) : PairingStateAccess {
+        override suspend fun current() = value
+        override suspend fun clearDeviceId() {
+            value = value.copy(deviceId = null, deviceName = null, lastSuccessfulSyncAtEpochMs = null)
+        }
+        override suspend fun savePairing(
+            deviceId: String,
+            serverUrl: String,
+            activeKeyAlias: String,
+            deviceName: String,
+        ) {
+            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias, deviceName)
+        }
+        override suspend fun updateDeviceName(deviceName: String) {
+            value = value.copy(deviceName = deviceName)
+        }
+        override suspend fun recordSuccessfulSync(atEpochMs: Long) {
+            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs)
+        }
+        override suspend fun clearAll() {
+            value = PairingCredentials(null, value.serverUrl)
+        }
+    }
+
+    private class FakeKeys : DeviceKeyAccess {
+        var deleted = false
+        override fun hasKey() = !deleted
+        override fun hasPendingKey() = false
+        override fun deleteKey() {
+            deleted = true
+        }
+        override fun requireSigner(): DeviceSigner = error("unused")
+        override fun requirePendingSigner(): DeviceSigner = error("unused")
+        override fun createPendingKeypair() = error("unused")
+        override fun commitPendingKey(): String = error("unused")
+        override fun currentActiveAlias(): String? = if (deleted) null else "alias_a"
+        override fun restorePreferredActiveAlias(alias: String?) = Unit
+        override fun deleteKeyAlias(alias: String) = Unit
+        override fun discardPendingKey() = Unit
     }
 }
