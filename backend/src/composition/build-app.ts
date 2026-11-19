@@ -10,6 +10,7 @@ import {
   authRoutes,
   devicePlugin,
   deviceRoutes,
+  messageRoutes,
   pairingCodeRoutes,
   rawBodyPlugin,
   sendProblem,
@@ -17,6 +18,8 @@ import {
   type DeviceUseCases,
 } from "../adapters/http-fastify/index.js";
 import type { DeviceAuthConfig } from "../adapters/device-crypto/config.js";
+import type { IngestConfig } from "../adapters/ingest/index.js";
+import type { QueuePublisher } from "../ports/outbound/queue-publisher.js";
 import { buildAuthStack } from "./build-auth.js";
 import { buildDeviceStack } from "./build-device.js";
 
@@ -25,6 +28,8 @@ export type BuildAppOptions = {
   auth?: Partial<AuthPluginOptions>;
   deviceAuth?: DeviceAuthConfig | null;
   deviceUseCases?: DeviceUseCases | null;
+  queuePublisher?: QueuePublisher | null;
+  ingest?: IngestConfig;
 };
 
 export async function buildApp(
@@ -107,7 +112,13 @@ export async function buildApp(
   });
 
   const deviceConfig = options.deviceAuth !== undefined ? options.deviceAuth : config.deviceAuth;
-  const deviceStack = buildDeviceStack({ config: deviceConfig, pool });
+  const queuePublisher = options.queuePublisher !== undefined ? options.queuePublisher : null;
+  const deviceStack = buildDeviceStack({
+    config: deviceConfig,
+    pool,
+    queuePublisher,
+    ingestConfig: options.ingest ?? config.ingest,
+  });
 
   await app.register(devicePlugin, {
     config: deviceStack.config,
@@ -141,6 +152,7 @@ export async function buildApp(
   await app.register(authRoutes);
   await app.register(pairingCodeRoutes);
   await app.register(deviceRoutes);
+  await app.register(messageRoutes);
 
   return app;
 }

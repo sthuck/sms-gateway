@@ -3,6 +3,7 @@ import fp from "fastify-plugin";
 import type { Pool, PoolClient } from "pg";
 import type {
   GetDeviceMe,
+  IngestMessageBatch,
   IssuePairingCode,
   PairDevice,
   ResolveDeviceAuth,
@@ -27,6 +28,7 @@ export type DeviceUseCases = {
   revokeDevice: RevokeDevice | null;
   getDeviceMe: GetDeviceMe | null;
   resolveDeviceAuth: ResolveDeviceAuth | null;
+  ingestMessageBatch: IngestMessageBatch | null;
 };
 
 declare module "fastify" {

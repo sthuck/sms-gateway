@@ -29,6 +29,8 @@ object DeviceApiMock {
                     batchAccepted(batchDeviceMsgId)
                 request.method == "GET" && path == "/v1/devices/me" ->
                     deviceMe(deviceStatus)
+                request.method == "POST" && path == "/v1/devices/me/heartbeat" ->
+                    heartbeatNoContent()
                 else -> problem(
                     httpCode = 404,
                     code = "invalid_request",
@@ -52,6 +54,9 @@ object DeviceApiMock {
         server: MockWebServer,
         status: String = "active",
     ): Unit = server.enqueue(deviceMe(status))
+
+    fun enqueueHeartbeatNoContent(server: MockWebServer): Unit =
+        server.enqueue(heartbeatNoContent())
 
     fun enqueueProblem(
         server: MockWebServer,
@@ -93,6 +98,9 @@ object DeviceApiMock {
         }
         """.trimIndent(),
     )
+
+    fun heartbeatNoContent(): MockResponse =
+        MockResponse().setResponseCode(204)
 
     fun deviceMe(status: String = "active"): MockResponse {
         val revoked = if (status == "revoked") {

@@ -3,6 +3,7 @@ package com.sthuck.smsgateway.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sthuck.smsgateway.BuildConfig
+import com.sthuck.smsgateway.keepalive.KeepaliveController
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.pairing.PairingRepository
 import com.sthuck.smsgateway.pairing.PairingResult
@@ -40,6 +41,7 @@ class PairingViewModel @Inject constructor(
     private val pairingRepository: PairingRepository,
     private val credentialStore: PairingCredentialStore,
     private val uploadScheduler: UploadScheduler,
+    private val keepaliveController: KeepaliveController,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(PairingUiState())
     val uiState: StateFlow<PairingUiState> = _uiState.asStateFlow()
@@ -87,6 +89,7 @@ class PairingViewModel @Inject constructor(
             when (val result = pairingRepository.pair(pending.code, pending.serverUrl)) {
                 is PairingResult.Success -> {
                     uploadScheduler.enqueueUpload(ExistingWorkPolicy.REPLACE)
+                    keepaliveController.ensureStarted()
                     _uiState.update {
                         it.copy(
                             inProgress = false,

@@ -6,6 +6,7 @@ export type DeviceErrorCode =
   | "invalid_request"
   | "content_hash_mismatch"
   | "payload_too_large"
+  | "batch_too_large"
   | "invalid_timestamp"
   | "device_unknown"
   | "invalid_signature"

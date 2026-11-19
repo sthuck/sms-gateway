@@ -5,6 +5,8 @@ import com.sthuck.smsgateway.data.remote.dto.MessageBatchRequest
 import com.sthuck.smsgateway.data.remote.dto.MessageBatchResponse
 import com.sthuck.smsgateway.data.remote.dto.PairRequest
 import com.sthuck.smsgateway.data.remote.dto.PairResponse
+import okhttp3.RequestBody
+import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -28,4 +30,12 @@ interface DeviceApi {
 
     @GET("v1/devices/me")
     suspend fun getDeviceMe(): DeviceStatus
+
+    /**
+     * Proposed heartbeat (STH-47). Backend may 404 until the draft ships;
+     * [com.sthuck.smsgateway.keepalive.HeartbeatClient] treats that as ignore.
+     * Pass an empty [RequestBody] so `X-Content-SHA256` is the empty digest.
+     */
+    @POST("v1/devices/me/heartbeat")
+    suspend fun postHeartbeat(@Body body: RequestBody): Response<Unit>
 }

@@ -26,6 +26,9 @@ android {
         // Hilt 2.60+ removed HiltTestRunner; AndroidJUnitRunner + @HiltAndroidTest
         // / HiltAndroidRule is the supported path.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Heartbeat endpoint is draft-only; keep off until the backend ships.
+        buildConfigField("boolean", "HEARTBEAT_ENABLED", "false")
     }
 
     flavorDimensions += "environment"

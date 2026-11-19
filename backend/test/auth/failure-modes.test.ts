@@ -275,13 +275,7 @@ describe.skipIf(!migratorOk)("auth failure-mode parity (STH-46)", () => {
       pool: exploding,
       auth: { config: config.oidc, jwtVerifier, skipDiscovery: false },
     });
-    const { deviceAuthPreHandler } = await import("../../src/device/plugin.js");
     const { signDeviceRequest } = await import("../helpers/device-signing.js");
-    broken.post(
-      "/v1/messages:batch",
-      { preHandler: deviceAuthPreHandler({ rejectRevoked: true }) },
-      async () => ({ ok: true }),
-    );
     await broken.ready();
 
     const deviceId = "00000000-0000-4000-8000-000000000099";

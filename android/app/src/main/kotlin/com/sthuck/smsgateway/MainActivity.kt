@@ -2,7 +2,9 @@ package com.sthuck.smsgateway
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -12,9 +14,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sthuck.smsgateway.keepalive.BatteryOptimization
+import com.sthuck.smsgateway.keepalive.OemSetupLauncher
 import com.sthuck.smsgateway.pairing.PairingSession
 import com.sthuck.smsgateway.sms.SmsPermissionStore
 import com.sthuck.smsgateway.ui.PairingScreen
@@ -34,6 +39,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var pairingSession: PairingSession
 
+    @Inject
+    lateinit var batteryOptimization: BatteryOptimization
+
     private val statusViewModel: StatusViewModel by viewModels()
     private val pairingViewModel: PairingViewModel by viewModels()
 
@@ -42,6 +50,12 @@ class MainActivity : ComponentActivity() {
     ) {
         smsPermissionStore.hasRequested = true
         refreshSmsPermission()
+    }
+
+    private val requestNotifications = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        refreshSetupSnapshot()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,6 +78,7 @@ class MainActivity : ComponentActivity() {
 
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                     refreshSmsPermission()
+                    refreshSetupSnapshot()
                 }
 
                 if (pairingState.pairedDeviceId == null) {
@@ -91,6 +106,27 @@ class MainActivity : ComponentActivity() {
                         },
                         onDismissUnpair = statusViewModel::dismissUnpair,
                         onRetryParked = statusViewModel::retryParked,
+                        onGrantNotificationsClick = {
+                            if (Build.VERSION.SDK_INT >= 33) {
+                                requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        },
+                        onRequestBatteryExemptClick = {
+                            startActivity(batteryOptimization.requestIgnoreIntent())
+                        },
+                        onOpenOemSetupClick = {
+                            startActivity(
+                                OemSetupLauncher.intentFor(this, statusState.oemSetup),
+                            )
+                        },
+                        onOpenOemFallbackClick = {
+                            startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse(statusState.oemSetup.fallbackWebUrl),
+                                ),
+                            )
+                        },
                     )
                 }
             }
@@ -116,13 +152,20 @@ class MainActivity : ComponentActivity() {
         statusViewModel.onPermissionSnapshot(smsPermissionStore.snapshot(this))
     }
 
+    private fun refreshSetupSnapshot() {
+        val notificationsGranted = if (Build.VERSION.SDK_INT < 33) {
+            true
+        } else {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        statusViewModel.onSetupSnapshot(notificationsGranted)
+    }
+
     private fun openAppSettings() {
-        startActivity(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.fromParts("package", packageName, null),
-            ),
-        )
+        startActivity(batteryOptimization.appSettingsIntent())
     }
 
     private companion object {

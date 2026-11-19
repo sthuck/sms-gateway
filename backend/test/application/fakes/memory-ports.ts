@@ -30,6 +30,13 @@ import type { PairingCodeRepository } from "../../../src/ports/outbound/pairing-
 import type { ReplayCache } from "../../../src/ports/outbound/replay-cache.js";
 import type { PairRateLimiter } from "../../../src/ports/outbound/pair-rate-limiter.js";
 import type { QueuePublisher } from "../../../src/ports/outbound/queue-publisher.js";
+import type { BodyCodec } from "../../../src/ports/outbound/body-codec.js";
+import type { IngestRateLimiter } from "../../../src/ports/outbound/ingest-rate-limiter.js";
+import type {
+  MessageInsert,
+  MessageRepository,
+  MessageUpsertRow,
+} from "../../../src/ports/outbound/message-repository.js";
 import type {
   DeviceAuthRecord,
   DeviceInfo,
@@ -418,5 +425,81 @@ export class MemoryQueuePublisher implements QueuePublisher {
     maybeFault(this.fault, "memory queue publish failed");
     this.published.push(event);
     return `job-${this.published.length}`;
+  }
+}
+
+export class MemoryBodyCodec implements BodyCodec {
+  encode(_ownerId: string, plaintext: string): Uint8Array {
+    return Buffer.from(plaintext, "utf8");
+  }
+}
+
+export class MemoryIngestRateLimiter implements IngestRateLimiter {
+  fault: FaultSwitch = { throwInfra: false };
+  allow = true;
+  requestHits = 0;
+  messageHits = 0;
+
+  async checkRequestAllowed(_deviceId: string): Promise<RateLimitDecision> {
+    maybeFault(this.fault, "memory ingest request rate limit failed");
+    this.requestHits += 1;
+    return {
+      allowed: this.allow,
+      limit: 60,
+      remaining: this.allow ? 59 : 0,
+      resetSec: 60,
+      retryAfterSec: this.allow ? 0 : 60,
+    };
+  }
+
+  async checkMessageVolumeAllowed(
+    _deviceId: string,
+    messageCount: number,
+  ): Promise<RateLimitDecision> {
+    maybeFault(this.fault, "memory ingest message rate limit failed");
+    this.messageHits += messageCount;
+    return {
+      allowed: this.allow,
+      limit: 10_000,
+      remaining: this.allow ? 10_000 - messageCount : 0,
+      resetSec: 3600,
+      retryAfterSec: this.allow ? 0 : 3600,
+    };
+  }
+}
+
+export class MemoryMessageRepository implements MessageRepository {
+  fault: FaultSwitch = { throwInfra: false };
+  readonly rows = new Map<string, { id: string; ownerId: string; message: MessageInsert }>();
+  published: Array<{ ownerId: string; deviceId: string; messageId: string }> = [];
+  lastSeenUpdates: string[] = [];
+  private n = 0;
+
+  async upsertBatch(input: {
+    ownerId: string;
+    deviceId: string;
+    messages: MessageInsert[];
+  }): Promise<MessageUpsertRow[]> {
+    maybeFault(this.fault, "memory message upsert failed");
+    const results: MessageUpsertRow[] = [];
+    for (const msg of input.messages) {
+      const key = `${input.deviceId}:${msg.deviceMsgId}`;
+      const existing = this.rows.get(key);
+      if (existing) {
+        results.push({ deviceMsgId: msg.deviceMsgId, status: "duplicate", id: existing.id });
+        continue;
+      }
+      this.n += 1;
+      const id = `00000000-0000-4000-8000-${String(this.n).padStart(12, "0")}`;
+      this.rows.set(key, { id, ownerId: input.ownerId, message: msg });
+      this.published.push({
+        ownerId: input.ownerId,
+        deviceId: input.deviceId,
+        messageId: id,
+      });
+      results.push({ deviceMsgId: msg.deviceMsgId, status: "accepted", id });
+    }
+    this.lastSeenUpdates.push(input.deviceId);
+    return results;
   }
 }
