@@ -15,6 +15,7 @@ spec:
   template:
     metadata:
       annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -36,14 +37,21 @@ spec:
             {{- toYaml .Values.worker.command | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sms-gateway.fullname" . }}-worker
           env:
-            {{- include "sms-gateway.env" . | nindent 12 }}
+            {{- include "sms-gateway.workerSecretEnv" . | nindent 12 }}
+          {{- if (include "sms-gateway.encryptionEnabled" .) }}
           volumeMounts:
             {{- include "sms-gateway.kekVolumeMount" . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
+      {{- if (include "sms-gateway.encryptionEnabled" .) }}
       volumes:
         {{- include "sms-gateway.kekVolume" . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

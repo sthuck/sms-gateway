@@ -17,6 +17,32 @@ config:
   # Built web UI bundle served by the API on the same origin (`/` -> SPA, `/v1/*` -> API).
   # Matches the bundle baked into backend/Dockerfile; set to "" to run API-only.
   WEB_DIST_DIR: /app/web-dist
+  # Fastify trustProxy for request.ip (`false`, `true`, hop count `"1"`, or Ingress pod CIDR e.g. `"10.42.0.0/16"`).
+  TRUST_PROXY: "false"
+  # Device auth & pairing (STH-14)
+  # Comma-separated Host values accepted in ES256 signed requests (e.g. `"sms.sthuck.info"`).
+  # Leave empty only locally (falls back to LOCAL_DEFAULT_HOSTS + derived PUBLIC_BASE_URL host).
+  DEVICE_ALLOWED_HOSTS: ""
+  # Base URL embedded as `server=` in pairing QR payloads (e.g. `"https://sms.sthuck.info"`).
+  DEVICE_API_PUBLIC_URL: ""
+  DEVICE_ALLOW_DERIVED_HOSTS: "true"
+  # Message ingestion (STH-15) — set e.g. `"IL"` for national-format senders
+  INGEST_DEFAULT_PHONE_REGION: "US"
+  INGEST_RATE_LIMIT_PER_DEVICE: "60"
+  INGEST_RATE_LIMIT_WINDOW_SEC: "60"
+  INGEST_MESSAGE_RATE_LIMIT: "10000"
+  INGEST_MESSAGE_RATE_WINDOW_SEC: "3600"
+  # Queue / worker (pg-boss)
+  QUEUE_SCHEMA: pgboss
+  QUEUE_RETRY_LIMIT: "5"
+  QUEUE_RETRY_DELAY_SECONDS: "1"
+  QUEUE_RETRY_BACKOFF: "true"
+  QUEUE_RETRY_DELAY_MAX_SECONDS: "300"
+  QUEUE_POLLING_INTERVAL_SECONDS: "1"
+  QUEUE_LOCAL_CONCURRENCY: "1"
+  QUEUE_SHUTDOWN_TIMEOUT_MS: "25000"
+  QUEUE_METRICS_PORT: "9090" # set "0" to disable worker Prometheus endpoint
+  QUEUE_METRICS_HOST: "0.0.0.0"
   # OpenAI-compatible classifier provider (non-secret pieces)
   LLM_BASE_URL: ""
   LLM_MODEL: ""
@@ -60,12 +86,14 @@ secrets:
   # Expected keys: DATABASE_URL
   databaseSecretName: sms-gateway-database
   databaseSecretKey: DATABASE_URL
-  # 32-byte KEK file mounted at config.KEK_FILE (key name below)
+  # All keys in encryptionKekSecretName mount under /var/run/secrets/sms-gateway/ (mode 0440)
+  # so additional keys (e.g. kek-previous) work with config.KEK_PREVIOUS during rotation.
   encryptionKekSecretName: sms-gateway-encryption
   encryptionKekSecretKey: kek
-  # Expected keys: LLM_API_KEY
+  # Expected keys: LLM_API_KEY (mounted only when llmEnabled=true)
   llmSecretName: sms-gateway-llm
   llmSecretKey: LLM_API_KEY
+  llmEnabled: false
   # Expected keys: OIDC_CLIENT_SECRET, SESSION_SECRET (min 32 chars)
   oidcSecretName: sms-gateway-oidc
   oidcClientSecretKey: OIDC_CLIENT_SECRET
@@ -110,7 +138,8 @@ worker:
       memory: 512Mi
 
 mcp:
-  enabled: true
+  # MCP entrypoint (dist/mcp.js) is currently a stub with no tools/transport yet.
+  enabled: false
   replicaCount: 1
   command: ["node", "dist/mcp.js"]
   service:

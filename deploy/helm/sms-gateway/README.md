@@ -1,38 +1,41 @@
 # sms-gateway Helm chart
 
-Deploys SMS Gateway as three Deployments that share one container image with
-different commands (the API Deployment serves both `/v1/*` and the bundled Web
-UI SPA on port 8080 behind the single `/` Ingress):
+Deploys SMS Gateway from OCI (`oci://ghcr.io/sthuck/charts/sms-gateway`) or
+local chart source. By default the API and worker Deployments are enabled (the
+API Deployment serves both `/v1/*` and the bundled Web UI SPA on port 8080
+behind the single `/` Ingress). The stub MCP Deployment defaults to disabled
+(`mcp.enabled: false`).
 
-| Component | Command | Service |
-| --- | --- | --- |
-| API + Web UI | `node dist/index.js` | ClusterIP (default port 8080) |
-| Worker | `node dist/worker.js` | none |
-| MCP | `node dist/mcp.js` | ClusterIP (default port 8081) |
+| Component | Command | Default enabled | Service |
+| --- | --- | --- | --- |
+| API + Web UI | `node dist/index.js` | `true` | ClusterIP (default port 8080) |
+| Worker | `node dist/worker.js` | `true` | none |
+| MCP | `node dist/mcp.js` | `false` | ClusterIP (default port 8081) |
 
 ## Install
 
 ```bash
-# Create secrets first (examples — do not commit real values)
+# Create required Secrets first (examples — do not commit real values)
 kubectl create secret generic sms-gateway-database \
-  --from-literal=DATABASE_URL='postgres://user:pass@postgres:5432/sms'
+  --from-literal=DATABASE_URL='postgres://sms_app:pass@postgres:5432/sms'
 # 32-byte KEK file (STH-20). Mounted at /var/run/secrets/sms-gateway/kek
 dd if=/dev/urandom bs=32 count=1 of=/tmp/kek
 kubectl create secret generic sms-gateway-encryption \
   --from-file=kek=/tmp/kek
 rm -f /tmp/kek
-kubectl create secret generic sms-gateway-llm \
-  --from-literal=LLM_API_KEY='replace-me'
+# Optional — only when secrets.llmEnabled=true:
+# kubectl create secret generic sms-gateway-llm \
+#   --from-literal=LLM_API_KEY='replace-me'
 # OIDC (when secrets.oidcEnabled=true) — see docs/deployment-auth.md
 kubectl create secret generic sms-gateway-oidc \
   --from-literal=OIDC_CLIENT_SECRET='replace-me' \
   --from-literal=SESSION_SECRET='replace-with-32+-random-bytes'
 
-helm upgrade --install sms-gateway ./deploy/helm/sms-gateway \
-  --set image.repository=ghcr.io/sthuck/sms-gateway-backend \
-  --set image.tag=latest \
-  --set config.LLM_BASE_URL=https://llm.example/v1 \
-  --set config.LLM_MODEL=classifier
+# Install from GHCR OCI (or pass ./deploy/helm/sms-gateway locally)
+echo <github-token> | helm registry login ghcr.io -u <github-user> --password-stdin
+helm upgrade --install sms-gateway oci://ghcr.io/sthuck/charts/sms-gateway \
+  --version <chart-version> \
+  -f my-values.yaml
 ```
 
 Validate locally:
@@ -46,15 +49,19 @@ helm template sms-gateway deploy/helm/sms-gateway >/dev/null
 
 See `values.yaml`. Notable knobs:
 
-- `config.*` — non-secret env (`HOST`, `PORT`, `LOG_LEVEL`, `WEB_DIST_DIR`, `LLM_*`, `OIDC_*`, MFA, CORS)
-- `config.WEB_DIST_DIR` — path to built `web/dist` served by the API on the same origin (default `/app/web-dist`; set `""` to run API-only)
-- `config.OIDC_APPLICATION_SLUG` — Authentik app slug (`sms-gateway`); issuer path segment
-- `config.CORS_ALLOWED_ORIGINS` — comma-separated browser origins
-- `secrets.*` — Secret names/keys for `DATABASE_URL`, KEK file, `LLM_API_KEY`, OIDC
-- `secrets.oidcEnabled` — default **false**; set true when wiring OIDC secrets
-- `config.ENCRYPTION_ENABLED` / `KEK_FILE` / `KEK_ID` — body encryption (STH-20)
-- `ingress.enabled` — optional Ingress for the API Service
-- `api` / `worker` / `mcp` — replicas, resources, commands
+- `config.*` — non-secret env split into per-component ConfigMaps (`-api`, `-worker`, `-mcp`, hashed into `checksum/config` pod annotations for automatic rollout on config edits):
+  - Web & proxy: `WEB_DIST_DIR` (default `/app/web-dist`; set `""` for API-only), `TRUST_PROXY` (`false`, hop count, or Ingress pod CIDR)
+  - Device auth & pairing: `DEVICE_ALLOWED_HOSTS`, `DEVICE_API_PUBLIC_URL`, `DEVICE_ALLOW_DERIVED_HOSTS`
+  - Ingestion: `INGEST_DEFAULT_PHONE_REGION`, `INGEST_RATE_LIMIT_*`, `INGEST_MESSAGE_RATE_*`
+  - Queue / worker: `QUEUE_SCHEMA`, `QUEUE_RETRY_*`, `QUEUE_POLLING_INTERVAL_SECONDS`, `QUEUE_LOCAL_CONCURRENCY`, `QUEUE_SHUTDOWN_TIMEOUT_MS`, `QUEUE_METRICS_*`
+  - OIDC & CORS: `OIDC_*`, `REQUIRE_MFA`, `MFA_CLAIMS_MISSING`, `AUTO_LINK_BY_EMAIL`, `PUBLIC_BASE_URL`, `CORS_ALLOWED_ORIGINS` (`OIDC_*` vars are scoped to `-api` only and omitted when `secrets.oidcEnabled=false`)
+- `secrets.*` — scoped per component:
+  - `databaseSecretName` (`DATABASE_URL`) — mounted on `api` and `worker`
+  - `encryptionKekSecretName` — mounted at `/var/run/secrets/sms-gateway/` (mode `0440`) on `api` and `worker` when `ENCRYPTION_ENABLED != "false"`
+  - `oidcEnabled` (default **false**) — mounts `OIDC_CLIENT_SECRET` + `SESSION_SECRET` on `api` only
+  - `llmEnabled` (default **false**) — mounts `LLM_API_KEY` on `api` and `worker` when enabled
+- `ingress.enabled` — optional Ingress for the API + Web UI Service
+- `api` / `worker` / `mcp` — replicas, resources, commands (`mcp.enabled` defaults to **false** until MCP transport is implemented)
 
 Homelab hostnames (`sms.sthuck.info` / `auth.sthuck.info`) are documented as
 commented examples in `values.yaml` and `docs/deployment-auth.md`. Homelab
@@ -77,9 +84,12 @@ broker is required; the worker Deployment is the consumer.
 
 ### Encryption KEK (STH-20)
 
-The chart mounts a **32-byte KEK file** from Secret
-`secrets.encryptionKekSecretName` (key `encryptionKekSecretKey`, default
-`kek`) at `config.KEK_FILE` (default `/var/run/secrets/sms-gateway/kek`).
-Set `ENCRYPTION_ENABLED=true` (default in values). Rotation and crypto-shred
-are documented in `docs/encryption.md`. A Vault/cloud-KMS adapter is future
-work behind the same `KeyWrapper` port — do not bake keys into chart values.
+When `config.ENCRYPTION_ENABLED` is not `"false"`, the chart mounts **all keys**
+from Secret `secrets.encryptionKekSecretName` (mode `0440`, readable by
+`fsGroup: 1001`) at `/var/run/secrets/sms-gateway/` on `api` and `worker`. Keep
+the active 32-byte key under `secrets.encryptionKekSecretKey` (default `kek`,
+matching `config.KEK_FILE`) and add old key entries (e.g. `kek-previous`) to the
+same Secret when using `config.KEK_PREVIOUS` during rotation. Rotation and
+crypto-shred are documented in `docs/encryption.md`. A Vault/cloud-KMS adapter is
+future work behind the same `KeyWrapper` port — do not bake keys into chart
+values.

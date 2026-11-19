@@ -10,3 +10,8 @@ keywords:
   - fastify
 maintainers:
   - name: sthuck
+home: https://github.com/sthuck/sms-gateway
+sources:
+  - https://github.com/sthuck/sms-gateway
+annotations:
+  org.opencontainers.image.source: https://github.com/sthuck/sms-gateway
