@@ -17,6 +17,9 @@ on:
       - "pnpm-lock.yaml"
       - ".github/workflows/web.yml"
 
+permissions:
+  contents: read
+
 concurrency:
   group: web-${{ github.ref }}
   cancel-in-progress: true

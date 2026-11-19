@@ -11,7 +11,7 @@ export const config = {
   apiBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, ""),
   apkDownloadUrl: import.meta.env.VITE_APK_DOWNLOAD_URL?.trim() || null,
   pairingPollIntervalMs: 2500,
-  csrfCookieName: "sms_csrf",
+  csrfCookieName: (import.meta.env.VITE_CSRF_COOKIE_NAME ?? "sms_csrf").trim() || "sms_csrf",
 } as const;
 
 export function apiUrl(path: string): string {

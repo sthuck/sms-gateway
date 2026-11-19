@@ -1,7 +1,6 @@
 import { Link, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
-/** Shell + nav placeholders for part B (inbox, devices, tokens). */
 export function AppLayout() {
   const { user, logout } = useAuth();
 
@@ -12,14 +11,10 @@ export function AppLayout() {
           SMS Gateway
         </Link>
         <nav className="nav" aria-label="Main">
+          <Link to="/inbox">Inbox</Link>
+          <Link to="/devices">Devices</Link>
+          <Link to="/tokens">Tokens</Link>
           <Link to="/devices/pair">Add device</Link>
-          {/* Part B: Inbox, Devices, Tokens */}
-          <span className="nav-muted" title="Coming in a later PR">
-            Inbox
-          </span>
-          <span className="nav-muted" title="Coming in a later PR">
-            Devices
-          </span>
         </nav>
         <div className="topbar-end">
           {user ? <span className="user-email">{user.email}</span> : null}

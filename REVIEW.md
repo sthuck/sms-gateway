@@ -202,7 +202,14 @@ Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed 
 
 | Date | Area | Location | Severity | Description | Suggestion |
 | --- | --- | --- | --- | --- | --- |
-| 2026-11-19 | Web | Pairing completion via GET /v1/devices poll | medium | No dedicated pairing-status / SSE endpoint; UI detects success by a new device id not in the pre-issue snapshot. A second owner tab that pairs another phone in the same window can look like success for this code; concurrent revoke+re-pair of an existing id is invisible. | Add owner-facing GET /v1/pairing-codes/{id} or SSE when product needs certainty. |
+| 2026-11-19 | Web | Pairing completion via GET /v1/devices poll | medium | No dedicated pairing-status / SSE endpoint; UI detects success by a new device id not in the pre-issue `GET /v1/devices?limit=100` snapshot (delta). A second owner tab that pairs another phone in the same window can look like success for this code; concurrent revoke+re-pair of an existing id is invisible. | Add owner-facing GET /v1/pairing-codes/{id} or SSE when product needs certainty. |
 | 2026-11-19 | Web | Deploy | medium | Helm still serves API only; production same-origin SPA serving (static + /v1) is not wired. Local Vite proxy is documented. | Add a web static deploy or ingress path when shipping to sms.sthuck.info. |
-| 2026-11-19 | Web | Logout CSRF | medium | POST /v1/auth/logout is called with credentials + CSRF header when the cookie exists, but the backend route does not enforce CSRF (pre-existing). | Align with other unsafe methods when backend hardens logout. |
 | 2026-11-19 | Web | VITE_APK_DOWNLOAD_URL | medium | Install/APK link is a config placeholder until Android release publishes a URL. | Set the env at build time once the APK is published. |
+
+## 2026-11-19 — Web UI part B (inbox, devices, tokens)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Web | `AuthContext.refresh` | info | Part B: `/v1/auth/me` 5xx or network errors no longer clear the session; only `401` (including `mfa_required`) sets anonymous. Boot failures surface `boot_error` + Retry in `RequireAuth` / login. | None. |
+| 2026-11-19 | Web | Inbox | medium | Inbox is poll-on-load / manual “Load more” only; no SSE or live updates when new SMS arrive. | Add SSE or periodic refresh when product needs a live inbox. |
+| 2026-11-19 | Web | Body search pagination | medium | With `q` set, short pages require explicit “Keep searching” while `next_cursor` is present (search scan cap). Easy to mistake for end-of-results without reading the button label. | Optional inbox hint when search is active; backend caps documented in contract. |

@@ -48,3 +48,36 @@ export type DeviceList = {
   devices: OwnerDevice[];
   limit: number;
 };
+
+export type OwnerMessage = {
+  id: string;
+  sender: string;
+  body: string;
+  received_at: string;
+  device_id: string;
+  sim_slot: number | null;
+  direction: "inbound" | "outbound";
+};
+
+export type OwnerMessageList = {
+  messages: OwnerMessage[];
+  next_cursor: string | null;
+  limit: number;
+};
+
+export type OwnerAccessToken = {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+};
+
+export type OwnerAccessTokenCreated = OwnerAccessToken & {
+  token: string;
+};
+
+export type OwnerAccessTokenList = {
+  tokens: OwnerAccessToken[];
+};
