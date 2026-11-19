@@ -191,6 +191,20 @@ Sending the same text twice in the same SMSC second produces ids that share a
 content key and differ by ordinal (`…-0`, `…-1`). Sending it again after a
 restart keeps using the next free ordinal already stored in the queue.
 
+## Release builds and distribution (STH-19)
+
+Prod `release` builds enable R8 minify/shrink. Signing uses env / Gradle
+properties (`ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`); if any are missing a **local/PR**
+build still succeeds with an unsigned APK and a clear log line. Tag workflow
+`.github/workflows/android-release.yml` (`v*` push only) **requires** the four
+GitHub secrets, runs `apksigner verify`, and fails without publishing if
+signing is incomplete.
+
+Version scheme, keystore generation, Obtainium (private-repo token), install
+page, and Play-policy notes: [`docs/android/`](../docs/android/). There is
+**no in-app update checker** — Obtainium notifications cover updates.
+
 ## Instrumented tests and CI
 
 `.github/workflows/android-ci.yml` (monorepo root) runs when `android/**` or

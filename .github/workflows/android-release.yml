@@ -1,0 +1,231 @@
+name: Android Release
+
+# Builds a signed prod release APK on version tags and attaches it to a
+# GitHub Release (STH-19). Signing is all-or-nothing: missing secrets or a
+# failed apksigner verify fails the job and publishes nothing (STH-54).
+# Tag-push only — no workflow_dispatch — so the checked-out commit is always
+# the tag tip (STH-56). See docs/android/releasing.md.
+#
+# Tag format: vMAJOR.MINOR.PATCH (e.g. v1.2.3).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Signed release APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          # github.ref is refs/tags/v… on tag push; pin explicitly.
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve tag and version
+        id: version
+        working-directory: .
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "Tag '$TAG' must match vMAJOR.MINOR.PATCH (e.g. v1.2.3)" >&2
+              exit 1
+              ;;
+          esac
+          VERSION_NAME="${TAG#v}"
+          # Strip an optional pre-release / build suffix for the numeric code.
+          VERSION_CORE="${VERSION_NAME%%[-+]*}"
+          MAJOR="${VERSION_CORE%%.*}"
+          REST="${VERSION_CORE#*.}"
+          MINOR="${REST%%.*}"
+          PATCH="${REST#*.}"
+          if ! [[ "$MAJOR" =~ ^[0-9]+$ && "$MINOR" =~ ^[0-9]+$ && "$PATCH" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse MAJOR.MINOR.PATCH from '$VERSION_NAME' (core=$VERSION_CORE)" >&2
+            exit 1
+          fi
+          # Monotonic for properly ordered semver tags. GITHUB_RUN_NUMBER is
+          # logged for diagnostics; override with -PAPP_VERSION_CODE if needed.
+          VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "Resolved $TAG → versionName=$VERSION_NAME versionCode=$VERSION_CODE (run=${GITHUB_RUN_NUMBER})"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+          dependency-graph: disabled
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Ensure Android SDK platform 37.2
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK" ]; then
+            echo "ANDROID_HOME / ANDROID_SDK_ROOT is not set" >&2
+            exit 1
+          fi
+          echo "Using Android SDK at $SDK"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK" -path '*cmdline-tools*' -name sdkmanager -type f | head -n 1)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found under $SDK" >&2
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-37.2" "build-tools;36.0.0"
+
+      - name: Require and decode release keystore
+        id: keystore
+        working-directory: .
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret: $name" >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "FATAL: release signing is all-or-nothing. Set all four secrets" >&2
+            echo "(ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS," >&2
+            echo "ANDROID_KEY_PASSWORD) before cutting a v* tag. No GitHub Release will be published." >&2
+            echo "See docs/android/releasing.md. (PR/debug CI does not need these secrets.)" >&2
+            exit 1
+          fi
+          KEYSTORE_PATH="$RUNNER_TEMP/sms-gateway-release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          echo "keystore_path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
+          echo "Decoded release keystore to $KEYSTORE_PATH"
+
+      - name: Assemble prod release APK
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          APP_VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          ./gradlew assembleProdRelease --stacktrace \
+            -PAPP_VERSION_NAME="$APP_VERSION_NAME" \
+            -PAPP_VERSION_CODE="$APP_VERSION_CODE"
+
+      - name: Locate and verify signed APK
+        id: apk
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          # Prefer the signed artifact; never publish *-unsigned.apk.
+          APK="$(ls -1 app/build/outputs/apk/prod/release/*.apk | grep -v -- '-unsigned\.apk$' | head -n 1 || true)"
+          if [ -z "${APK:-}" ] || [ ! -f "$APK" ]; then
+            echo "FATAL: no signed prod release APK found (only unsigned or missing)." >&2
+            ls -la app/build/outputs/apk/prod/release/ >&2 || true
+            echo "Signing secrets may be incomplete, or Gradle skipped signing." >&2
+            exit 1
+          fi
+          case "$APK" in
+            *-unsigned.apk)
+              echo "FATAL: refusing to publish unsigned APK: $APK" >&2
+              exit 1
+              ;;
+          esac
+
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          APKSIGNER="$SDK/build-tools/36.0.0/apksigner"
+          if [ ! -x "$APKSIGNER" ]; then
+            APKSIGNER="$(find "$SDK/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          fi
+          if [ -z "${APKSIGNER:-}" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "FATAL: apksigner not found under $SDK/build-tools" >&2
+            exit 1
+          fi
+          echo "Verifying APK signature with $APKSIGNER"
+          "$APKSIGNER" verify --verbose "$APK"
+
+          NAME="sms-gateway-${VERSION_NAME}-prod-release.apk"
+          cp "$APK" "$RUNNER_TEMP/$NAME"
+          echo "path=$RUNNER_TEMP/$NAME" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          # signed=true only after apksigner verify succeeds (STH-54).
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "Verified signed APK $APK → $NAME"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-prod-release-${{ steps.version.outputs.version_name }}
+          path: ${{ steps.apk.outputs.path }}
+
+      - name: Create or update GitHub Release
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          SIGNED: ${{ steps.apk.outputs.signed }}
+        run: |
+          set -euo pipefail
+          if [ "$SIGNED" != "true" ]; then
+            echo "FATAL: refusing to publish — APK was not verified signed." >&2
+            exit 1
+          fi
+          NOTES_FILE="$(mktemp)"
+          {
+            echo "Android prod release **${VERSION_NAME}** (\`versionCode=${VERSION_CODE}\`)."
+            echo
+            echo "APK is **signed** with the repository release keystore (apksigner verified)."
+            echo
+            echo "Install / update: [Obtainium setup](docs/android/obtainium.md) · [Install instructions](docs/android/install.md)"
+          } > "$NOTES_FILE"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK_PATH" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "Android ${VERSION_NAME}" \
+              --notes-file "$NOTES_FILE"
+          else
+            # --generate-notes appends commit changelog after our notes file body.
+            gh release create "$TAG" "$APK_PATH" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Android ${VERSION_NAME}" \
+              --notes-file "$NOTES_FILE" \
+              --generate-notes
+          fi
