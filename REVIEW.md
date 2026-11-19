@@ -189,3 +189,14 @@ Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed 
 | 2026-11-19 | Backend | DELETE vs ingest recreate | UX | Second DELETE returns 404; device resend of same `device_msg_id` recreates the deleted row and fires `message.created` again. | Document or keep a tombstone. |
 | 2026-11-19 | Backend | composition / message inbox UCs | minor | Message read/delete use cases exist only when a queue publisher is configured (owner reads return 503 without pg-boss). | Build the message repository independently of the queue. |
 | 2026-11-19 | Backend | tests | minor | Gaps: multi-value `q`, search scan cap, HTTP-level owner-read key outage, corrupt-row listing, renaming a revoked device, cascade delete of stream memberships. | Add them. |
+
+## 2026-11-19 — PR #37 review (STH-21 follow-up, approved/merged)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Backend | `message-repository.ts` `list` / query schema | minor | `sender=%00` (and similarly `q` with NUL) reaches Postgres and returns a retryable 503, so a client may retry forever. | Reject NUL in `sender` and `q` in the schema with a 400. |
+| 2026-11-19 | Backend | `list-messages.ts` `hitBudget` | minor | If the wall-clock budget fires before any row is processed, `next_cursor` is null though candidates remain. | Process at least one row before checking the budget; use `performance.now()`. |
+| 2026-11-19 | Backend | list query `limit` | minor | `Number(...)` accepts `1e2`, `0x10`, and ` 5 `. | Require `/^\d+$/` before parsing. |
+| 2026-11-19 | Backend | tests | minor | Time budget and its cursor continuation are not covered. | Inject a fake clock or a small `searchBudgetMs`. |
+| 2026-11-19 | Backend | stream list/messages/preview query parsing | minor | `/v1/streams`, `/v1/streams/{id}/messages`, and preview don't use the new single-valued query schema (no 500 today). | Apply the same schema for uniformity. |
+| 2026-11-19 | Backend | `q` search cost | note | Per-request cost is bounded (scan + wall-clock), but there is still no per-user rate limit on `q`, and a request can fetch ~16 MB of ciphertext. | Consider a per-user `q` rate limit if abused. |
