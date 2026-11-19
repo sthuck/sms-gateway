@@ -20,7 +20,7 @@ Entries are appended by the reviewer. HIGH-severity findings are tracked in Line
 | 2026-11-18 | Backend | docker-compose.yml:30 (PR #2) | minor | The API container gets `MIGRATE_DATABASE_URL` (superuser) and `SMS_APP_PASSWORD` in its runtime env. That's fine locally, but it teaches a pattern where the app process holds DDL credentials. | Run migrations in a separate one-shot `migrate` service and keep only `DATABASE_URL` on api/worker. |
 | 2026-11-18 | Backend | backend/src/auth/identity.ts:60 (PR #3) | minor | `AUTO_LINK_BY_EMAIL` links on any email claim and ignores `email_verified`. It's off by default and labelled dangerous, but turning it on allows takeover through any IdP that lets users set an unverified email. | Require `email_verified === true` before auto-linking. |
 | 2026-11-18 | Backend | backend/src/auth/jwt.ts:38-43 (PR #3) | minor | Bearer verification accepts any IdP JWT with `aud = client_id`, including ID tokens. ID tokens aren't meant to be API credentials. | Check `typ` (`at+jwt`) or a token-use claim, or set a distinct `OIDC_AUDIENCE` for API access tokens. |
-| 2026-11-18 | Backend | backend/src/routes/auth.ts (POST /v1/auth/logout) (PR #3) | minor | Logout skips the Origin/CSRF checks (logout CSRF). SameSite=Lax mitigates it in most browsers. | Run the same `originAllowed` + double-submit check as other unsafe methods. |
+| 2026-11-18 | Backend | backend/src/routes/auth.ts (POST /v1/auth/logout) (PR #3) | info | Resolved: `/v1/auth/logout` now uses `requireUserAuth` (session/JWT + CSRF). Earlier note that logout skipped Origin/CSRF is stale; SameSite=Lax was the prior mitigation. | None. |
 | 2026-11-18 | Backend | backend/src/auth/oauth-state.ts:11-19 (PR #3) | minor | SESSION_SECRET goes straight into the A256GCM key: it's truncated to 32 bytes, or zero-padded when short (zod enforces min 32 chars, so only truncation happens). Only the first 32 chars count. | Derive the key with HKDF-SHA256 over the whole secret. |
 | 2026-11-18 | Backend | backend/src/routes/auth.ts (configAsNodeEnv) (PR #3) | minor | The cookie `secure` flag reads `process.env.NODE_ENV` instead of the parsed config, so tests and `buildApp(config)` can disagree. | Pass `config.NODE_ENV` into authRoutes. |
 | 2026-11-18 | Backend | backend/src/auth/claims.ts (mapClaims) + users.email NOT NULL (PR #3) | UX | Login hard-fails with a generic 400/500 if the IdP omits `email` (for example, scope mapping not configured), and the user sees "Failed to complete login". | Return a clear `auth_misconfigured` problem naming the missing claim, and document the required Authentik scope mapping. |
@@ -214,3 +214,62 @@ Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed 
 | 2026-11-19 | Web | Inbox | medium | Inbox is poll-on-load / manual “Load more” only; no SSE or live updates when new SMS arrive. | Add SSE or periodic refresh when product needs a live inbox. |
 | 2026-11-19 | Web | Body search pagination | medium | With `q` set, short pages require explicit “Keep searching” while `next_cursor` is present (search scan cap). Easy to mistake for end-of-results without reading the button label. | Optional inbox hint when search is active; backend caps documented in contract. |
 | 2026-11-19 | Web / Backend | `GET /v1/devices` + devices/inbox/pairing UI | medium | Device list is capped at 100 with no cursor (`list-devices` / `?limit=100`). Devices beyond 100 cannot be listed, renamed, or revoked; inbox device filter and pairing snapshots are incomplete past that cap. | Add a cursor (or higher cap) on the owner devices list, or surface the cap in the UI. |
+
+## 2026-11-19 — PR #37 review (STH-21 follow-up, approved/merged)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Backend | `message-repository.ts` `list` / query schema | minor | `sender=%00` (and similarly `q` with NUL) reaches Postgres and returns a retryable 503, so a client may retry forever. | Reject NUL in `sender` and `q` in the schema with a 400. |
+| 2026-11-19 | Backend | `list-messages.ts` `hitBudget` | minor | If the wall-clock budget fires before any row is processed, `next_cursor` is null though candidates remain. | Process at least one row before checking the budget; use `performance.now()`. |
+| 2026-11-19 | Backend | list query `limit` | minor | `Number(...)` accepts `1e2`, `0x10`, and ` 5 `. | Require `/^\d+$/` before parsing. |
+| 2026-11-19 | Backend | tests | minor | Time budget and its cursor continuation are not covered. | Inject a fake clock or a small `searchBudgetMs`. |
+| 2026-11-19 | Backend | stream list/messages/preview query parsing | minor | `/v1/streams`, `/v1/streams/{id}/messages`, and preview don't use the new single-valued query schema (no 500 today). | Apply the same schema for uniformity. |
+| 2026-11-19 | Backend | `q` search cost | note | Per-request cost is bounded (scan + wall-clock), but there is still no per-user rate limit on `q`, and a request can fetch ~16 MB of ciphertext. | Consider a per-user `q` rate limit if abused. |
+
+## 2026-11-19 — Android signed release workflow (PR #38)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Android | `.github/workflows/android-release.yml:72` versionCode | medium | `MAJOR*1e6+MINOR*1e3+PATCH` collides if MINOR/PATCH > 999 (`v1.1000.0` = `v2.0.0`); pre-release tags share the final's code; no 32-bit cap. | Reject MINOR/PATCH > 999 and pre-release tags; fail above the max int. |
+| 2026-11-19 | Android | `android-release.yml:127-131` keystore cleanup | medium | Keystore is in `$RUNNER_TEMP` but has no `if: always()` cleanup. | Add `shred`/`rm` in an `if: always()` step for persistent runners. |
+| 2026-11-19 | Android | PR CI / R8 | medium | PR CI never runs `assembleProdRelease`, so R8 is ungated. `data.remote.dto.**` is kept, but there is no explicit `@Dao` keep; Retrofit `Continuation`/`Call`/`Response` keeps are missing; `-dontwarn retrofit2.**`/`okhttp3.**` can hide missing classes. | Add an unsigned `assembleProdRelease` to PR CI and tighten the keep rules. |
+| 2026-11-19 | Android | GitHub Actions pins | medium | Actions are tag-pinned (`@v4`), not SHA-pinned. | Pin actions by commit SHA. |
+| 2026-11-19 | Android | `build.gradle.kts` ~100-102 | minor | `logger.lifecycle` prints the keystore path and `keyAlias`; default `versionCode=1` collides with a future `v0.0.1`. | Drop the alias from the log; avoid colliding defaults. |
+| 2026-11-19 | Android | `play-policy.md` / `releasing.md` | minor | `play-policy.md` omits `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (Play hazard); `releasing.md` still mentions only `*.keystore` though `.gitignore` now has `*.jks`/`*.jks.b64`. | Document the Play hazard; align releasing docs with gitignore. |
+
+## 2026-11-19 — owner PATs review (PR #40)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Backend | PAT `expires_at` (migration / `ResolveOwnerPat`) | info | Resolved in PR #43: PATs previously had no `expires_at` (never expired). Nullable expiry with `ResolveOwnerPat` rejecting `expiresAt <= now` (same 401) is now in place. | None. |
+| 2026-11-19 | Backend | `create-owner-access-token.ts` / `revoke-owner-access-token.ts` audit | medium | Audit rows have no token id; PAT reads are not audited; audit append runs in a separate transaction after the change, so an audit failure can return 503 after commit (on create the secret is then lost while an active token exists). | Add a `target_id`/`meta` column, audit PAT reads, and use one transaction. |
+| 2026-11-19 | Backend | `token-routes.ts` `clientIp()` | medium | Takes the first `X-Forwarded-For` value from any client (spoofable audit IP); a garbage value fails the `::inet` cast with a 503 after commit. | Use `request.ip` with `trustProxy` and validate before insert. |
+| 2026-11-19 | Backend | `auth-plugin.ts` `schedulePatTouch` | minor | A burst in the first minute spawns N fire-and-forget UPDATEs on one row. | Dedupe in process. |
+| 2026-11-19 | Backend | Bearer PAT auth | minor | No rate limit or backoff on Bearer attempts (guessing is infeasible at 256 bits). | Add a per-IP limit on 401s or brief negative caching. |
+| 2026-11-19 | Backend | `token-routes.ts` create response | minor | The 201 that returns the secret has no `Cache-Control: no-store`. | Add the header. |
+| 2026-11-19 | Backend | `logger.ts` `REDACT_PATHS` | minor | Authorization header is not in the redact paths. | Add `req.headers.authorization` as defence in depth. |
+| 2026-11-19 | Backend | `owner_access_tokens` migration / `audit_log` | minor | `idx_owner_access_tokens_owner` is redundant with the partial `_owner_active` index; `sms_app` can UPDATE `token_hash`/`revoked_at`; `audit_log` is not append-only at the DB level. | Drop the redundant index; consider an immutability trigger; harden audit append-only. |
+| 2026-11-19 | Backend | PAT `/v1/auth/me` / `build-auth.ts` | minor | PATs get 403 on `/v1/auth/me`, so an agent cannot check its token; `useCases` is now non-null when OIDC is off. | Optional `GET /v1/tokens/me`; confirm no reader depends on null `useCases`. |
+| 2026-11-19 | Backend | PAT tests | minor | Missing: route-matrix (covered later by STH-57 fix), PAT combined with a session cookie, concurrent `last_used_at` touches, garbage `X-Forwarded-For`, audit failure after token insert. | Add them. |
+| 2026-11-19 | Backend | `POST /v1/auth/logout` with expired session | minor | After requiring session/JWT for logout, a logout with an already-expired session returns 401 instead of clearing the cookie. | Clear the cookie on expired-session logout, or document the UX. |
+
+## 2026-11-19 — Web UI PR #41 review
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Web | `config.ts` CSRF cookie name | medium | `sms_csrf` is hardcoded while the backend cookie name is configurable (`CSRF_COOKIE_NAME`). | Document the coupling in `web/README.md`, or expose `VITE_CSRF_COOKIE_NAME`. |
+| 2026-11-19 | Web | `RequireAuth.tsx:15` / `LoginPage.tsx:16` | minor | `state.from` is stored but never used. | Use it for post-login redirect, or drop it. |
+| 2026-11-19 | Web | `PairingPage.tsx:102-106` | minor | Two pairing codes are issued in dev under StrictMode. | Guard against double-issue in StrictMode. |
+| 2026-11-19 | Web | Pairing countdown | minor | The countdown uses the client clock against the server `expires_at`. | Derive remaining time from a server skew or refresh. |
+| 2026-11-19 | Web | `.github/workflows/web.yml` | minor | No `permissions:` block. | Set `contents: read`. |
+| 2026-11-19 | Web | root `README.md` Status section | minor | Status section is stale. | Update to match current shipped surface. |
+| 2026-11-19 | Web | Web auth/pairing tests | minor | No coverage for a missing CSRF cookie, a 403 `csrf_rejected`, a 204 logout, or the components (`AuthContext`, `LoginPage`, `PairingPage`). | Add them. |
+
+## 2026-11-19 — PAT expiry / tokens UI (PR #43)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Web | `created-secret.ts` | minor | No unmount cleanup of the token secret. | Clear the secret on unmount (optional). |
+| 2026-11-19 | Web | Tokens UI create flow | minor | Creating a second token while the banner is open silently replaces the first secret; leaving the page drops an uncopied one. | Warn before replacing or navigating away with an uncopied secret. |
+| 2026-11-19 | Web | Clipboard copy of PAT secret | minor | Clipboard failure is silent. | Show a short "copy failed, select the token" message. |
+| 2026-11-19 | Backend | PAT expiry tests | minor | Missing: omitted `expires_in_days` field, bounds 1 and 366, `expires_at === now`, and a unit test of `ResolveOwnerPat` with an injected `now`. | Add them. |
