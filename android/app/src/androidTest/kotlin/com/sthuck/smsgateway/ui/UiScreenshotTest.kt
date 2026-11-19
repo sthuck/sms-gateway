@@ -16,6 +16,9 @@ import java.util.concurrent.TimeUnit
 /**
  * Captures the main Compose surfaces for CI artifact / PR docs.
  * Uses synthetic UI state only — no real pairing codes, device ids, or SMS bodies.
+ *
+ * No Hilt: pure Compose setContent on an empty [ComponentActivity] from the
+ * compose ui-test-manifest, so capture does not depend on app DI.
  */
 @RunWith(AndroidJUnit4::class)
 class UiScreenshotTest {
