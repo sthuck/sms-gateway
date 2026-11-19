@@ -18,10 +18,19 @@ export type { ReplayCache } from "./replay-cache.js";
 export type { PairRateLimiter } from "./pair-rate-limiter.js";
 export type { PublishQueueOptions, QueueEventPayload, QueuePublisher } from "./queue-publisher.js";
 export type { BodyCodec } from "./body-codec.js";
-export type { MessageInsert, MessageRepository, MessageUpsertRow } from "./message-repository.js";
+export type {
+  MessageInsert,
+  MessageRecord,
+  MessageRepository,
+  MessageUpsertRow,
+} from "./message-repository.js";
 export type { IngestRateLimiter } from "./ingest-rate-limiter.js";
 export type {
   InsertStreamInput,
+  ListStreamMessagesInput,
+  ListStreamMessagesResult,
+  StreamMatchedBy,
+  StreamMessageRecord,
   StreamRepository,
   UpdateStreamPatch,
 } from "./stream-repository.js";

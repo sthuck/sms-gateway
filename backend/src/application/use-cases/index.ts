@@ -33,3 +33,21 @@ export {
 export { GetStream, type GetStreamDeps } from "./get-stream.js";
 export { UpdateStream, type UpdateStreamDeps, type UpdateStreamInput } from "./update-stream.js";
 export { DeleteStream, type DeleteStreamDeps } from "./delete-stream.js";
+export {
+  PreviewStream,
+  DEFAULT_PREVIEW_LIMIT,
+  MAX_PREVIEW_LIMIT,
+  type PreviewStreamDeps,
+  type PreviewStreamInput,
+  type PreviewStreamResult,
+  type PreviewMatch,
+} from "./preview-stream.js";
+export {
+  ListStreamMessages,
+  DEFAULT_STREAM_MESSAGES_LIMIT,
+  MAX_STREAM_MESSAGES_LIMIT,
+  type ListStreamMessagesDeps,
+  type ListStreamMessagesInput,
+  type ListStreamMessagesResult,
+  type StreamMessageDto,
+} from "./list-stream-messages.js";

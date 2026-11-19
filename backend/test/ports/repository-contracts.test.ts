@@ -201,6 +201,9 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
       const streams = new MemoryStreamRepository();
       await expect(streams.findById(OWNER, OWNER)).resolves.toBeNull();
       await expect(streams.delete(OWNER, OWNER)).resolves.toBe(false);
+      await expect(
+        streams.listMessages({ ownerId: OWNER, streamId: OWNER, limit: 10 }),
+      ).resolves.toEqual({ messages: null });
 
       streams.fault.throwInfra = true;
       await expect(
@@ -218,6 +221,16 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
         streams.update({ ownerId: OWNER, streamId: OWNER, patch: { name: "B" } }),
       ).rejects.toBeInstanceOf(InfrastructureError);
       await expect(streams.delete(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(
+        streams.listMessages({ ownerId: OWNER, streamId: OWNER, limit: 10 }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+    });
+
+    it("MessageRepository.listRecent throws InfrastructureError on fault", async () => {
+      const messages = new MemoryMessageRepository();
+      await expect(messages.listRecent(OWNER, 10)).resolves.toEqual([]);
+      messages.fault.throwInfra = true;
+      await expect(messages.listRecent(OWNER, 10)).rejects.toBeInstanceOf(InfrastructureError);
     });
   });
 
@@ -428,6 +441,7 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
           ],
         }),
       ).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(brokenMsgs.listRecent(OWNER, 10)).rejects.toBeInstanceOf(InfrastructureError);
 
       const brokenRl = new PgIngestRateLimiter(exploding, DEFAULT_INGEST_CONFIG);
       await expect(brokenRl.checkRequestAllowed(OWNER)).rejects.toBeInstanceOf(InfrastructureError);
@@ -441,6 +455,9 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
       const ok = new PgStreamRepository(appPool, queue);
       await expect(ok.findById(OWNER, OWNER)).resolves.toBeNull();
       await expect(ok.delete(OWNER, OWNER)).resolves.toBe(false);
+      await expect(
+        ok.listMessages({ ownerId: OWNER, streamId: OWNER, limit: 10 }),
+      ).resolves.toEqual({ messages: null });
 
       const broken = new PgStreamRepository(exploding, queue);
       await expect(
@@ -458,6 +475,9 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
         broken.update({ ownerId: OWNER, streamId: OWNER, patch: { name: "B" } }),
       ).rejects.toBeInstanceOf(InfrastructureError);
       await expect(broken.delete(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(
+        broken.listMessages({ ownerId: OWNER, streamId: OWNER, limit: 10 }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
     });
   });
 });

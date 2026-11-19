@@ -34,11 +34,15 @@ import type { BodyCodec } from "../../../src/ports/outbound/body-codec.js";
 import type { IngestRateLimiter } from "../../../src/ports/outbound/ingest-rate-limiter.js";
 import type {
   MessageInsert,
+  MessageRecord,
   MessageRepository,
   MessageUpsertRow,
 } from "../../../src/ports/outbound/message-repository.js";
 import type {
   InsertStreamInput,
+  ListStreamMessagesInput,
+  ListStreamMessagesResult,
+  StreamMessageRecord,
   StreamRepository,
   UpdateStreamPatch,
 } from "../../../src/ports/outbound/stream-repository.js";
@@ -438,6 +442,10 @@ export class MemoryBodyCodec implements BodyCodec {
   encode(_ownerId: string, plaintext: string): Uint8Array {
     return Buffer.from(plaintext, "utf8");
   }
+
+  decode(_ownerId: string, ciphertext: Uint8Array): string {
+    return Buffer.from(ciphertext).toString("utf8");
+  }
 }
 
 export class MemoryIngestRateLimiter implements IngestRateLimiter {
@@ -476,7 +484,10 @@ export class MemoryIngestRateLimiter implements IngestRateLimiter {
 
 export class MemoryMessageRepository implements MessageRepository {
   fault: FaultSwitch = { throwInfra: false };
-  readonly rows = new Map<string, { id: string; ownerId: string; message: MessageInsert }>();
+  readonly rows = new Map<
+    string,
+    { id: string; ownerId: string; deviceId: string; message: MessageInsert }
+  >();
   published: Array<{ ownerId: string; deviceId: string; messageId: string }> = [];
   lastSeenUpdates: string[] = [];
   private n = 0;
@@ -497,7 +508,7 @@ export class MemoryMessageRepository implements MessageRepository {
       }
       this.n += 1;
       const id = `00000000-0000-4000-8000-${String(this.n).padStart(12, "0")}`;
-      this.rows.set(key, { id, ownerId: input.ownerId, message: msg });
+      this.rows.set(key, { id, ownerId: input.ownerId, deviceId: input.deviceId, message: msg });
       this.published.push({
         ownerId: input.ownerId,
         deviceId: input.deviceId,
@@ -508,11 +519,52 @@ export class MemoryMessageRepository implements MessageRepository {
     this.lastSeenUpdates.push(input.deviceId);
     return results;
   }
+
+  async listRecent(ownerId: string, limit: number): Promise<MessageRecord[]> {
+    maybeFault(this.fault, "memory message list recent failed");
+    return [...this.rows.values()]
+      .filter((r) => r.ownerId === ownerId)
+      .map((r): MessageRecord => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        deviceId: r.deviceId,
+        sender: r.message.sender,
+        bodyCiphertext: r.message.bodyCiphertext,
+        receivedAt: r.message.receivedAt,
+        simSlot: r.message.simSlot,
+        direction: r.message.direction,
+      }))
+      .sort((a, b) => {
+        const t = b.receivedAt.getTime() - a.receivedAt.getTime();
+        if (t !== 0) return t;
+        return b.id < a.id ? -1 : b.id > a.id ? 1 : 0;
+      })
+      .slice(0, limit);
+  }
+
+  /** Test helper: seed a message without going through upsertBatch. */
+  seed(record: MessageRecord): void {
+    this.rows.set(`${record.deviceId}:seed-${record.id}`, {
+      id: record.id,
+      ownerId: record.ownerId,
+      deviceId: record.deviceId,
+      message: {
+        deviceMsgId: `seed-${record.id}`,
+        sender: record.sender,
+        bodyCiphertext: record.bodyCiphertext,
+        receivedAt: record.receivedAt,
+        simSlot: record.simSlot,
+        direction: record.direction,
+      },
+    });
+  }
 }
 
 export class MemoryStreamRepository implements StreamRepository {
   fault: FaultSwitch = { throwInfra: false };
   readonly byId = new Map<string, Stream>();
+  /** streamId → membership rows (test seeding for listMessages). */
+  readonly memberships = new Map<string, StreamMessageRecord[]>();
   published: Array<{
     type: "stream.reclassify";
     owner_id: string;
@@ -602,6 +654,35 @@ export class MemoryStreamRepository implements StreamRepository {
     const current = await this.findById(ownerId, streamId);
     if (!current) return false;
     this.byId.delete(streamId);
+    this.memberships.delete(streamId);
     return true;
+  }
+
+  async listMessages(input: ListStreamMessagesInput): Promise<ListStreamMessagesResult> {
+    maybeFault(this.fault, "memory stream messages list failed");
+    const stream = await this.findById(input.ownerId, input.streamId);
+    if (!stream) return { messages: null };
+
+    let rows = [...(this.memberships.get(input.streamId) ?? [])];
+    rows.sort((a, b) => {
+      const t = b.receivedAt.getTime() - a.receivedAt.getTime();
+      if (t !== 0) return t;
+      return b.id < a.id ? -1 : b.id > a.id ? 1 : 0;
+    });
+    if (input.cursor) {
+      rows = rows.filter((r) => {
+        const t = r.receivedAt.getTime() - input.cursor!.receivedAt.getTime();
+        if (t < 0) return true;
+        if (t > 0) return false;
+        return r.id < input.cursor!.id;
+      });
+    }
+    return { messages: rows.slice(0, input.limit) };
+  }
+
+  seedMembership(streamId: string, row: StreamMessageRecord): void {
+    const list = this.memberships.get(streamId) ?? [];
+    list.push(row);
+    this.memberships.set(streamId, list);
   }
 }

@@ -48,3 +48,20 @@ export {
   validateStreamName,
   type RulesValidation,
 } from "./validate-rules.js";
+export {
+  bodySnippet,
+  DEFAULT_BODY_SNIPPET_LEN,
+  evaluatePrepared,
+  evaluateRules,
+  prepareRules,
+  type MatchedRuleRef,
+  type MessageView,
+  type PreparedRules,
+  type RuleEvalResult,
+} from "./evaluate-rules.js";
+export {
+  decodeStreamMessageCursor,
+  encodeStreamMessageCursor,
+  type CursorParseResult,
+  type StreamMessageCursor,
+} from "./cursor.js";

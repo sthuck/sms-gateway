@@ -8,12 +8,17 @@ import {
   CreateStream,
   DeleteStream,
   GetStream,
+  ListStreamMessages,
   ListStreams,
+  PreviewStream,
   UpdateStream,
 } from "../../src/application/use-cases/index.js";
+import { IdentityBodyCodec } from "../../src/adapters/body-codec/index.js";
+import { PgMessageRepository } from "../../src/adapters/db-postgres/message-repository.js";
 import { PgStreamRepository } from "../../src/adapters/db-postgres/stream-repository.js";
 import { Re2SafeRegexCompiler } from "../../src/adapters/re2/index.js";
 import { MemoryQueuePublisher } from "../application/fakes/memory-ports.js";
+import { withOwner } from "../../src/adapters/db-postgres/with-owner.js";
 import {
   appDatabaseUrl,
   canConnect,
@@ -103,7 +108,9 @@ describe.skipIf(!migratorOk)("streams owner API (STH-23)", () => {
     const config = loadConfig(env);
     const jwtVerifier = createJwtVerifier(config.oidc!, mock.jwksUri);
     const streams = new PgStreamRepository(appPool, queue);
+    const messages = new PgMessageRepository(appPool, queue);
     const regex = new Re2SafeRegexCompiler();
+    const bodyCodec = new IdentityBodyCodec();
 
     app = await buildApp(config, {
       pool: appPool,
@@ -119,6 +126,8 @@ describe.skipIf(!migratorOk)("streams owner API (STH-23)", () => {
         getStream: new GetStream({ streams }),
         updateStream: new UpdateStream({ streams, regex }),
         deleteStream: new DeleteStream({ streams }),
+        previewStream: new PreviewStream({ messages, bodyCodec, regex }),
+        listStreamMessages: new ListStreamMessages({ streams, bodyCodec }),
       },
     });
     await app.ready();
@@ -327,5 +336,206 @@ describe.skipIf(!migratorOk)("streams owner API (STH-23)", () => {
   it("requires auth", async () => {
     const res = await app.inject({ method: "GET", url: "/v1/streams" });
     expectAuthProblem(userApi, "/v1/streams", "get", res, 401);
+  });
+
+  it("POST /v1/streams:preview matches OpenAPI and rejects bad rules", async () => {
+    const deviceId = (
+      await admin.query<{ id: string }>(
+        `INSERT INTO devices (owner_id, name, platform_info, status)
+         VALUES ($1, 'Alice phone', '{}'::jsonb, 'active') RETURNING id`,
+        [aliceId],
+      )
+    ).rows[0]!.id;
+
+    await withOwner(appPool, aliceId, async (client) => {
+      for (let i = 0; i < 5; i += 1) {
+        const body = i % 2 === 0 ? Buffer.from("OTP bank", "utf8") : Buffer.from("hello", "utf8");
+        await client.query(
+          `INSERT INTO messages (
+             owner_id, device_id, device_msg_id, sender, body_ciphertext,
+             received_at, sim_slot, direction
+           ) VALUES ($1, $2, $3, $4, $5, $6, 0, 'inbound')`,
+          [
+            aliceId,
+            deviceId,
+            `preview-${i}`,
+            "+1555",
+            body,
+            new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+          ],
+        );
+      }
+    });
+
+    // Bob's message must not be evaluated
+    const bobDevice = (
+      await admin.query<{ id: string }>(
+        `INSERT INTO devices (owner_id, name, platform_info, status)
+         VALUES ($1, 'Bob phone', '{}'::jsonb, 'active') RETURNING id`,
+        [bobId],
+      )
+    ).rows[0]!.id;
+    await withOwner(appPool, bobId, async (client) => {
+      await client.query(
+        `INSERT INTO messages (
+           owner_id, device_id, device_msg_id, sender, body_ciphertext,
+           received_at, sim_slot, direction
+         ) VALUES ($1, $2, 'bob-otp', 'Bank', $3, now(), 0, 'inbound')`,
+        [bobId, bobDevice, Buffer.from("OTP only for bob", "utf8")],
+      );
+    });
+
+    const preview = await app.inject({
+      method: "POST",
+      url: "/v1/streams:preview",
+      headers: aliceHeaders(),
+      payload: {
+        mode: "hybrid",
+        rules_json: [{ type: "body_keyword", match: "any", keywords: ["OTP"] }],
+        ai_prompt: "classify bank",
+        limit: 50,
+      },
+    });
+    const body = expectOpenApiResponse(userApi, "/v1/streams:preview", "post", preview, {
+      status: 200,
+      contentType: "application/json",
+    }) as {
+      evaluated: number;
+      matched: number;
+      ai_evaluated: boolean;
+      note: string | null;
+      matches: Array<{ message_id: string }>;
+    };
+    expect(body.matched).toBe(3);
+    expect(body.ai_evaluated).toBe(false);
+    expect(body.note).toMatch(/AI part not evaluated/i);
+    expect(body.matches.every((m) => typeof m.message_id === "string")).toBe(true);
+
+    const bad = await app.inject({
+      method: "POST",
+      url: "/v1/streams:preview",
+      headers: aliceHeaders(),
+      payload: {
+        mode: "rules",
+        rules_json: [{ type: "body_regex", pattern: "(a+)+$" }],
+      },
+    });
+    const problem = expectAuthProblem(userApi, "/v1/streams:preview", "post", bad, 400) as {
+      errors?: Array<{ path: string }>;
+    };
+    expect(problem.errors?.[0]?.path).toBe("rules_json[0].pattern");
+  });
+
+  it("GET /v1/streams/{id}/messages: cursor pages + RLS 404 for other owner", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/streams",
+      headers: aliceHeaders(),
+      payload: { name: "Membership", mode: "rules", rules_json: [] },
+    });
+    const streamId = (created.json() as { id: string }).id;
+
+    const deviceId = (
+      await admin.query<{ id: string }>(`SELECT id FROM devices WHERE owner_id = $1 LIMIT 1`, [
+        aliceId,
+      ])
+    ).rows[0]?.id;
+    const ensuredDevice =
+      deviceId ??
+      (
+        await admin.query<{ id: string }>(
+          `INSERT INTO devices (owner_id, name, platform_info, status)
+           VALUES ($1, 'Msg phone', '{}'::jsonb, 'active') RETURNING id`,
+          [aliceId],
+        )
+      ).rows[0]!.id;
+
+    const messageIds: string[] = [];
+    await withOwner(appPool, aliceId, async (client) => {
+      for (let i = 0; i < 5; i += 1) {
+        const inserted = await client.query<{ id: string }>(
+          `INSERT INTO messages (
+             owner_id, device_id, device_msg_id, sender, body_ciphertext,
+             received_at, sim_slot, direction
+           ) VALUES ($1, $2, $3, $4, $5, $6, 0, 'inbound')
+           RETURNING id`,
+          [
+            aliceId,
+            ensuredDevice,
+            `mem-${i}`,
+            `+100${i}`,
+            Buffer.from(`member-${i}`, "utf8"),
+            new Date(Date.UTC(2026, 5, 1, 0, 0, i)).toISOString(),
+          ],
+        );
+        messageIds.push(inserted.rows[0]!.id);
+        await client.query(
+          `INSERT INTO stream_membership (
+             stream_id, message_id, owner_id, matched_by, confidence, stream_version
+           ) VALUES ($1, $2, $3, 'rule', 1.0, 1)`,
+          [streamId, inserted.rows[0]!.id, aliceId],
+        );
+      }
+    });
+
+    const page1 = await app.inject({
+      method: "GET",
+      url: `/v1/streams/${streamId}/messages?limit=2`,
+      cookies: { sms_session: aliceSession },
+    });
+    const p1 = expectOpenApiResponse(userApi, "/v1/streams/{id}/messages", "get", page1, {
+      status: 200,
+      contentType: "application/json",
+    }) as {
+      messages: Array<{ id: string; body: string }>;
+      next_cursor: string | null;
+    };
+    expect(p1.messages).toHaveLength(2);
+    expect(p1.messages[0]?.body).toBe("member-4");
+    expect(p1.next_cursor).toBeTruthy();
+
+    const page2 = await app.inject({
+      method: "GET",
+      url: `/v1/streams/${streamId}/messages?limit=2&cursor=${encodeURIComponent(p1.next_cursor!)}`,
+      cookies: { sms_session: aliceSession },
+    });
+    const p2 = expectOpenApiResponse(userApi, "/v1/streams/{id}/messages", "get", page2, {
+      status: 200,
+      contentType: "application/json",
+    }) as {
+      messages: Array<{ id: string; body: string }>;
+      next_cursor: string | null;
+    };
+    expect(p2.messages.map((m) => m.body)).toEqual(["member-2", "member-1"]);
+
+    const page3 = await app.inject({
+      method: "GET",
+      url: `/v1/streams/${streamId}/messages?limit=2&cursor=${encodeURIComponent(p2.next_cursor!)}`,
+      cookies: { sms_session: aliceSession },
+    });
+    const p3 = page3.json() as { messages: Array<{ id: string }>; next_cursor: string | null };
+    expect(p3.messages).toHaveLength(1);
+    expect(p3.next_cursor).toBeNull();
+
+    const seen = new Set([...p1.messages, ...p2.messages, ...p3.messages].map((m) => m.id));
+    expect(seen.size).toBe(5);
+    expect([...seen].sort()).toEqual([...messageIds].sort());
+
+    const bobGet = await app.inject({
+      method: "GET",
+      url: `/v1/streams/${streamId}/messages`,
+      headers: { authorization: `Bearer ${bobBearer}` },
+    });
+    expectAuthProblem(userApi, "/v1/streams/{id}/messages", "get", bobGet, 404);
+  });
+
+  it("preview requires auth", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/streams:preview",
+      headers: { "content-type": "application/json" },
+      payload: { mode: "rules", rules_json: [] },
+    });
+    expectAuthProblem(userApi, "/v1/streams:preview", "post", res, 401);
   });
 });

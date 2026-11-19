@@ -5,6 +5,8 @@ import { STREAM_MODES } from "../../domain/stream/types.js";
 import { StreamError } from "../../domain/stream/errors.js";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
 import { DEFAULT_STREAM_LIST_LIMIT } from "../../application/use-cases/list-streams.js";
+import { DEFAULT_STREAM_MESSAGES_LIMIT } from "../../application/use-cases/list-stream-messages.js";
+import { DEFAULT_PREVIEW_LIMIT } from "../../application/use-cases/preview-stream.js";
 import { requireUserAuth } from "./auth-plugin.js";
 import { mapStreamError } from "./stream-plugin.js";
 import { sendProblem } from "./problems.js";
@@ -29,6 +31,15 @@ const patchBodySchema = z
   })
   .strict();
 
+const previewBodySchema = z
+  .object({
+    mode: modeSchema,
+    rules_json: z.unknown().optional(),
+    ai_prompt: z.string().nullable().optional(),
+    limit: z.number().int().optional(),
+  })
+  .strict();
+
 function toDto(stream: Stream) {
   return {
     id: stream.id,
@@ -44,6 +55,72 @@ function toDto(stream: Stream) {
 }
 
 export async function streamRoutes(app: FastifyInstance): Promise<void> {
+  app.post("/v1/streams:preview", { preHandler: requireUserAuth }, async (request, reply) => {
+    const preview = app.streamUseCases?.previewStream ?? null;
+    if (!preview) {
+      return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
+        retryable: true,
+        instance: "/v1/streams:preview",
+      });
+    }
+
+    const parsed = previewBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendProblem(reply, "invalid_request", 400, "Malformed preview body", {
+        instance: "/v1/streams:preview",
+      });
+    }
+
+    try {
+      const previewInput: {
+        ownerId: string;
+        mode: (typeof STREAM_MODES)[number];
+        rulesJson?: unknown;
+        aiPrompt?: string | null;
+        limit?: number;
+      } = {
+        ownerId: request.ownerId!,
+        mode: parsed.data.mode,
+      };
+      if (parsed.data.rules_json !== undefined) previewInput.rulesJson = parsed.data.rules_json;
+      if (parsed.data.ai_prompt !== undefined) previewInput.aiPrompt = parsed.data.ai_prompt;
+      if (parsed.data.limit !== undefined) previewInput.limit = parsed.data.limit;
+
+      const result = await preview.execute(previewInput);
+      return reply.status(200).send({
+        matches: result.matches.map((m) => ({
+          message_id: m.messageId,
+          sender: m.sender,
+          received_at: m.receivedAt.toISOString(),
+          body_snippet: m.bodySnippet,
+          matched_rule: m.matchedRule
+            ? { path: m.matchedRule.path, type: m.matchedRule.type }
+            : null,
+        })),
+        evaluated: result.evaluated,
+        matched: result.matched,
+        ai_evaluated: result.aiEvaluated,
+        note: result.note,
+        limit: previewInput.limit ?? DEFAULT_PREVIEW_LIMIT,
+      });
+    } catch (err) {
+      if (err instanceof StreamError) {
+        return mapStreamError(reply, request, err);
+      }
+      if (isInfrastructureError(err) || err instanceof InfrastructureError) {
+        request.log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "stream preview failed",
+        );
+        return sendProblem(reply, "internal_error", 500, "Failed to preview stream", {
+          retryable: true,
+          instance: "/v1/streams:preview",
+        });
+      }
+      throw err;
+    }
+  });
+
   app.get("/v1/streams", { preHandler: requireUserAuth }, async (request, reply) => {
     const list = app.streamUseCases?.listStreams ?? null;
     if (!list) {
@@ -239,6 +316,64 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         return sendProblem(reply, "internal_error", 500, "Failed to delete stream", {
           retryable: true,
           instance: `/v1/streams/${id}`,
+        });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/v1/streams/:id/messages", { preHandler: requireUserAuth }, async (request, reply) => {
+    const listMessages = app.streamUseCases?.listStreamMessages ?? null;
+    if (!listMessages) {
+      return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
+        retryable: true,
+        instance: "/v1/streams",
+      });
+    }
+    const { id } = request.params as { id: string };
+    const query = request.query as { limit?: string; cursor?: string };
+    const listInput: {
+      ownerId: string;
+      streamId: string;
+      limit?: number;
+      cursor?: string;
+    } = {
+      ownerId: request.ownerId!,
+      streamId: id,
+    };
+    if (query.limit !== undefined) listInput.limit = Number(query.limit);
+    if (query.cursor !== undefined) listInput.cursor = query.cursor;
+
+    try {
+      const result = await listMessages.execute(listInput);
+      return reply.status(200).send({
+        messages: result.messages.map((m) => ({
+          id: m.id,
+          sender: m.sender,
+          body: m.body,
+          received_at: m.receivedAt.toISOString(),
+          device_id: m.deviceId,
+          sim_slot: m.simSlot,
+          direction: m.direction,
+          matched_by: m.matchedBy,
+          confidence: m.confidence,
+          stream_version: m.streamVersion,
+        })),
+        next_cursor: result.nextCursor,
+        limit: result.limit ?? listInput.limit ?? DEFAULT_STREAM_MESSAGES_LIMIT,
+      });
+    } catch (err) {
+      if (err instanceof StreamError) {
+        return mapStreamError(reply, request, err);
+      }
+      if (isInfrastructureError(err) || err instanceof InfrastructureError) {
+        request.log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "stream messages list failed",
+        );
+        return sendProblem(reply, "internal_error", 500, "Failed to list stream messages", {
+          retryable: true,
+          instance: `/v1/streams/${id}/messages`,
         });
       }
       throw err;
