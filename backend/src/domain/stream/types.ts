@@ -8,6 +8,8 @@ export const STREAM_MODES = ["rules", "ai", "hybrid"] as const;
 export const MAX_RULES_DEPTH = 8;
 export const MAX_RULES_NODES = 64;
 export const MAX_REGEX_PATTERN_LEN = 256;
+/** Haystack cap when matching (aligns with message body char limit). */
+export const MAX_REGEX_INPUT_LEN = 32_768;
 export const MAX_KEYWORD_LEN = 64;
 export const MAX_KEYWORDS = 32;
 export const MAX_SENDER_VALUE_LEN = 64;

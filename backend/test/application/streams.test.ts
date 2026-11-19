@@ -8,18 +8,20 @@ import {
 } from "../../src/application/use-cases/index.js";
 import { StreamError } from "../../src/domain/stream/errors.js";
 import { InfrastructureError } from "../../src/domain/errors.js";
+import { Re2SafeRegexCompiler } from "../../src/adapters/re2/index.js";
 import { MemoryStreamRepository } from "./fakes/memory-ports.js";
 
 const OWNER = "00000000-0000-4000-8000-0000000000aa";
 const OTHER = "00000000-0000-4000-8000-0000000000bb";
+const regex = new Re2SafeRegexCompiler();
 
 function stack(streams = new MemoryStreamRepository()) {
   return {
     streams,
-    create: new CreateStream({ streams }),
+    create: new CreateStream({ streams, regex }),
     list: new ListStreams({ streams }),
     get: new GetStream({ streams }),
-    update: new UpdateStream({ streams }),
+    update: new UpdateStream({ streams, regex }),
     delete: new DeleteStream({ streams }),
   };
 }
@@ -136,7 +138,7 @@ describe("stream use cases", () => {
   it("propagates InfrastructureError from the port", async () => {
     const streams = new MemoryStreamRepository();
     streams.fault.throwInfra = true;
-    const create = new CreateStream({ streams });
+    const create = new CreateStream({ streams, regex });
     await expect(
       create.execute({ ownerId: OWNER, name: "A", mode: "rules" }),
     ).rejects.toBeInstanceOf(InfrastructureError);

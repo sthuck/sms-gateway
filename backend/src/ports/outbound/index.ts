@@ -25,3 +25,9 @@ export type {
   StreamRepository,
   UpdateStreamPatch,
 } from "./stream-repository.js";
+export type {
+  CompileSafeRegex,
+  RegexMatcher,
+  SafeRegexCompileResult,
+  SafeRegexCompiler,
+} from "./safe-regex.js";

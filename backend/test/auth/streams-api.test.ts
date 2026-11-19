@@ -12,6 +12,7 @@ import {
   UpdateStream,
 } from "../../src/application/use-cases/index.js";
 import { PgStreamRepository } from "../../src/adapters/db-postgres/stream-repository.js";
+import { Re2SafeRegexCompiler } from "../../src/adapters/re2/index.js";
 import { MemoryQueuePublisher } from "../application/fakes/memory-ports.js";
 import {
   appDatabaseUrl,
@@ -102,6 +103,7 @@ describe.skipIf(!migratorOk)("streams owner API (STH-23)", () => {
     const config = loadConfig(env);
     const jwtVerifier = createJwtVerifier(config.oidc!, mock.jwksUri);
     const streams = new PgStreamRepository(appPool, queue);
+    const regex = new Re2SafeRegexCompiler();
 
     app = await buildApp(config, {
       pool: appPool,
@@ -112,10 +114,10 @@ describe.skipIf(!migratorOk)("streams owner API (STH-23)", () => {
         skipDiscovery: false,
       },
       streamUseCases: {
-        createStream: new CreateStream({ streams }),
+        createStream: new CreateStream({ streams, regex }),
         listStreams: new ListStreams({ streams }),
         getStream: new GetStream({ streams }),
-        updateStream: new UpdateStream({ streams }),
+        updateStream: new UpdateStream({ streams, regex }),
         deleteStream: new DeleteStream({ streams }),
       },
     });

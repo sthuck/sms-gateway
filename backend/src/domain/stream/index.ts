@@ -17,6 +17,7 @@ export {
   MAX_AI_PROMPT_LEN,
   MAX_KEYWORD_LEN,
   MAX_KEYWORDS,
+  MAX_REGEX_INPUT_LEN,
   MAX_REGEX_PATTERN_LEN,
   MAX_RULES_DEPTH,
   MAX_RULES_NODES,
@@ -25,7 +26,19 @@ export {
   STREAM_MODES,
 } from "./types.js";
 export { StreamError, type StreamErrorCode, type StreamFieldError } from "./errors.js";
-export { isSafeRegexPattern } from "./safe-regex.js";
+export {
+  checkRegexPatternStatic,
+  isSafeRegexPattern,
+  type StaticRegexCheck,
+} from "./safe-regex.js";
+export {
+  assertPatternLength,
+  capRegexInput,
+  testSafeRegex,
+  type CompileSafeRegex,
+  type RegexMatcher,
+  type SafeRegexCompileResult,
+} from "./regex.js";
 export {
   formatRuleIssues,
   isStreamMode,

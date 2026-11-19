@@ -9,9 +9,11 @@ import {
 import type { Stream, StreamMode, StreamRule } from "../../domain/stream/types.js";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
 import type { StreamRepository } from "../../ports/outbound/stream-repository.js";
+import type { SafeRegexCompiler } from "../../ports/outbound/safe-regex.js";
 
 export type CreateStreamDeps = {
   streams: StreamRepository;
+  regex: SafeRegexCompiler;
 };
 
 export type CreateStreamInput = {
@@ -40,7 +42,7 @@ export class CreateStream {
     }
 
     const rulesRaw = input.rulesJson === undefined ? [] : input.rulesJson;
-    const rules = validateRulesJson(rulesRaw);
+    const rules = validateRulesJson(rulesRaw, this.deps.regex.compile);
     if (!rules.ok) {
       throw new StreamError("invalid_request", 400, formatRuleIssues(rules.issues), {
         errors: rules.issues,

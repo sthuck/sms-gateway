@@ -1,10 +1,9 @@
-import { isSafeRegexPattern } from "./safe-regex.js";
+import type { CompileSafeRegex } from "./regex.js";
 import type { StreamFieldError } from "./errors.js";
 import {
   MAX_AI_PROMPT_LEN,
   MAX_KEYWORD_LEN,
   MAX_KEYWORDS,
-  MAX_REGEX_PATTERN_LEN,
   MAX_RULES_DEPTH,
   MAX_RULES_NODES,
   MAX_SENDER_VALUE_LEN,
@@ -30,16 +29,21 @@ const LEAF_TYPES = new Set([
 ]);
 
 /**
- * Validate `rules_json` as a pure function. Returns field-pathed issues
- * (e.g. `rules_json[0].pattern`) suitable for `invalid_request` responses.
+ * Validate `rules_json`. Regex leaves are compiled via `compile` (RE2 seam);
+ * never uses `new RegExp` on user input. Returns field-pathed issues.
  */
-export function validateRulesJson(raw: unknown, path = "rules_json"): RulesValidation {
+export function validateRulesJson(
+  raw: unknown,
+  compile: CompileSafeRegex,
+  path = "rules_json",
+): RulesValidation {
   const issues: StreamFieldError[] = [];
   if (!Array.isArray(raw)) {
     return { ok: false, issues: [{ path, message: "must be an array" }] };
   }
 
   let nodeCount = 0;
+  let hitNodeCap = false;
   const rules: StreamRule[] = [];
   for (let i = 0; i < raw.length; i += 1) {
     const parsed = parseRule(
@@ -48,7 +52,8 @@ export function validateRulesJson(raw: unknown, path = "rules_json"): RulesValid
       1,
       () => {
         nodeCount += 1;
-        if (nodeCount > MAX_RULES_NODES) {
+        if (!hitNodeCap && nodeCount > MAX_RULES_NODES) {
+          hitNodeCap = true;
           issues.push({
             path,
             message: `exceeds maximum of ${MAX_RULES_NODES} rule nodes`,
@@ -56,6 +61,7 @@ export function validateRulesJson(raw: unknown, path = "rules_json"): RulesValid
         }
       },
       issues,
+      compile,
     );
     if (parsed) rules.push(parsed);
   }
@@ -102,6 +108,7 @@ function parseRule(
   depth: number,
   onNode: () => void,
   issues: StreamFieldError[],
+  compile: CompileSafeRegex,
 ): StreamRule | null {
   onNode();
   if (issues.some((i) => i.message.includes("maximum of"))) return null;
@@ -133,7 +140,14 @@ function parseRule(
     }
     const children: StreamRule[] = [];
     for (let i = 0; i < obj.rules.length; i += 1) {
-      const child = parseRule(obj.rules[i], `${path}.rules[${i}]`, depth + 1, onNode, issues);
+      const child = parseRule(
+        obj.rules[i],
+        `${path}.rules[${i}]`,
+        depth + 1,
+        onNode,
+        issues,
+        compile,
+      );
       if (child) children.push(child);
     }
     assertNoUnknownKeys(obj, ["type", "rules"], path, issues);
@@ -176,18 +190,9 @@ function parseRule(
         issues.push({ path: `${path}.pattern`, message: "must be a non-empty string" });
         return null;
       }
-      if (pattern.length > MAX_REGEX_PATTERN_LEN) {
-        issues.push({
-          path: `${path}.pattern`,
-          message: `must be at most ${MAX_REGEX_PATTERN_LEN} characters`,
-        });
-        return null;
-      }
-      if (!isSafeRegexPattern(pattern)) {
-        issues.push({
-          path: `${path}.pattern`,
-          message: "rejected as unsafe or invalid regular expression",
-        });
+      const compiled = compile(pattern);
+      if (!compiled.ok) {
+        issues.push({ path: `${path}.pattern`, message: compiled.message });
         return null;
       }
       assertNoUnknownKeys(obj, ["type", "pattern"], path, issues);

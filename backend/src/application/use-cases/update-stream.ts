@@ -12,9 +12,11 @@ import type {
   StreamRepository,
   UpdateStreamPatch,
 } from "../../ports/outbound/stream-repository.js";
+import type { SafeRegexCompiler } from "../../ports/outbound/safe-regex.js";
 
 export type UpdateStreamDeps = {
   streams: StreamRepository;
+  regex: SafeRegexCompiler;
 };
 
 export type UpdateStreamInput = {
@@ -65,7 +67,7 @@ export class UpdateStream {
       patch.mode = input.mode as StreamMode;
     }
     if (hasRules) {
-      const rules = validateRulesJson(input.rulesJson);
+      const rules = validateRulesJson(input.rulesJson, this.deps.regex.compile);
       if (!rules.ok) {
         throw new StreamError("invalid_request", 400, formatRuleIssues(rules.issues), {
           errors: rules.issues,

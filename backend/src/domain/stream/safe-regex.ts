@@ -1,34 +1,107 @@
 /**
- * ReDoS policy for user-supplied stream rule patterns:
- * - Cap pattern length (`MAX_REGEX_PATTERN_LEN`).
- * - Reject patterns that fail `RegExp` compile.
- * - Reject star-height > 1: a quantifier applied to a group/class/atom that
- *   itself contains a quantifier (e.g. `(a+)+$`, `(a|b+)*`). This is a static
- *   reject, not a match-time timeout — evaluation happens in a later ticket.
+ * Static ReDoS / feature guardrails for user-supplied patterns.
+ * Defence in depth only — compile and match MUST go through the
+ * `CompileSafeRegex` seam (RE2 adapter). Never call `new RegExp` here.
  *
- * Built-ins only (domain must stay free of npm packages).
+ * Policy:
+ * - Cap pattern length.
+ * - Reject lookaround and backreferences (RE2 unsupported; clear errors).
+ * - Reject star-height > 1 (nested quantifiers), including quantified
+ *   escaped atoms (`\d+` inside `(…)+`) and quantified character classes.
  */
 
 import { MAX_REGEX_PATTERN_LEN } from "./types.js";
 
 const QUANTIFIER_START = new Set(["*", "+", "?", "{"]);
 
+export type StaticRegexCheck =
+  | { ok: true }
+  | { ok: false; code: "too_long" | "unsupported_feature" | "unsafe"; message: string };
+
+export function checkRegexPatternStatic(pattern: string): StaticRegexCheck {
+  if (pattern.length === 0) {
+    return { ok: false, code: "unsafe", message: "must be a non-empty string" };
+  }
+  if (pattern.length > MAX_REGEX_PATTERN_LEN) {
+    return {
+      ok: false,
+      code: "too_long",
+      message: `must be at most ${MAX_REGEX_PATTERN_LEN} characters`,
+    };
+  }
+
+  const unsupported = findUnsupportedFeature(pattern);
+  if (unsupported) {
+    return { ok: false, code: "unsupported_feature", message: unsupported };
+  }
+
+  if (hasNestedQuantifiers(pattern)) {
+    return {
+      ok: false,
+      code: "unsafe",
+      message: "rejected as unsafe or invalid regular expression",
+    };
+  }
+
+  return { ok: true };
+}
+
+/** @deprecated Prefer checkRegexPatternStatic — kept for existing test imports. */
 export function isSafeRegexPattern(pattern: string): boolean {
-  if (pattern.length === 0 || pattern.length > MAX_REGEX_PATTERN_LEN) {
-    return false;
-  }
-  try {
-    void new RegExp(pattern);
-  } catch {
-    return false;
-  }
-  return !hasNestedQuantifiers(pattern);
+  return checkRegexPatternStatic(pattern).ok;
 }
 
 /**
- * Walk the pattern; track whether the current atom/group contains a
- * quantifier. If a quantifier is then applied to that atom, reject.
+ * RE2 does not support lookaround or backreferences. Detect them for
+ * field-pathed validation messages before the engine rejects them.
  */
+function findUnsupportedFeature(pattern: string): string | null {
+  let i = 0;
+  let inClass = false;
+  while (i < pattern.length) {
+    const ch = pattern[i]!;
+    if (inClass) {
+      if (ch === "\\" && i + 1 < pattern.length) {
+        i += 2;
+        continue;
+      }
+      if (ch === "]") inClass = false;
+      i += 1;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < pattern.length) {
+      const next = pattern[i + 1]!;
+      if (next >= "1" && next <= "9") {
+        return "backreference not supported";
+      }
+      if (next === "k") {
+        return "backreference not supported";
+      }
+      i += 2;
+      continue;
+    }
+    if (ch === "[") {
+      inClass = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "(" && pattern[i + 1] === "?") {
+      const after = pattern[i + 2];
+      if (after === "=" || after === "!") {
+        return "lookahead/backreference not supported";
+      }
+      if (after === "<") {
+        const look = pattern[i + 3];
+        if (look === "=" || look === "!") {
+          return "lookahead/backreference not supported";
+        }
+      }
+    }
+    i += 1;
+  }
+  return null;
+}
+
 function hasNestedQuantifiers(pattern: string): boolean {
   type Frame = { hasQuantifier: boolean; inClass: boolean };
   const stack: Frame[] = [{ hasQuantifier: false, inClass: false }];
@@ -46,15 +119,21 @@ function hasNestedQuantifiers(pattern: string): boolean {
       }
       if (ch === "]") {
         peek().inClass = false;
+        i += 1;
+        if (i < pattern.length && QUANTIFIER_START.has(pattern[i]!)) {
+          peek().hasQuantifier = true;
+          i = skipQuantifier(pattern, i);
+        }
+        continue;
       }
       i += 1;
       continue;
     }
 
     if (ch === "\\" && i + 1 < pattern.length) {
-      // Escaped atom; may be quantified next.
       i += 2;
       if (i < pattern.length && QUANTIFIER_START.has(pattern[i]!)) {
+        peek().hasQuantifier = true;
         i = skipQuantifier(pattern, i);
       }
       continue;
@@ -63,15 +142,12 @@ function hasNestedQuantifiers(pattern: string): boolean {
     if (ch === "[") {
       peek().inClass = true;
       i += 1;
-      // Character class may later be quantified; mark class as quantified atom
-      // only when the quantifier is applied after `]`.
       continue;
     }
 
     if (ch === "(") {
       stack.push({ hasQuantifier: false, inClass: false });
       i += 1;
-      // Skip optional group flags like (?:, (?=, (?!, (?<=, (?<!
       if (pattern[i] === "?") {
         i += 1;
         while (
@@ -80,7 +156,6 @@ function hasNestedQuantifiers(pattern: string): boolean {
           pattern[i] !== ")" &&
           pattern[i] !== "("
         ) {
-          // Lookahead / lookbehind / named groups — consume until body.
           if (
             pattern[i] === "<" ||
             pattern[i] === "=" ||
@@ -98,8 +173,6 @@ function hasNestedQuantifiers(pattern: string): boolean {
 
     if (ch === ")") {
       if (stack.length === 1) {
-        // Unbalanced — RegExp compile already accepted some edge cases;
-        // treat as unsafe rather than throw.
         return true;
       }
       const closed = stack.pop()!;
@@ -117,9 +190,6 @@ function hasNestedQuantifiers(pattern: string): boolean {
     }
 
     if (QUANTIFIER_START.has(ch)) {
-      // Quantifier on a single atom that itself isn't a group — only nested
-      // when the atom was a quantified thing we already tracked. Lone `a+`
-      // is fine; `a++` is invalid and rejected by RegExp compile.
       peek().hasQuantifier = true;
       i = skipQuantifier(pattern, i);
       continue;
@@ -135,7 +205,7 @@ function skipQuantifier(pattern: string, i: number): number {
   const ch = pattern[i]!;
   if (ch === "*" || ch === "+" || ch === "?") {
     i += 1;
-    if (pattern[i] === "?") i += 1; // lazy
+    if (pattern[i] === "?") i += 1;
     return i;
   }
   if (ch === "{") {
