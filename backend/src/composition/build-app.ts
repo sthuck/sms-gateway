@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import type { Pool } from "pg";
 import { toFastifyTrustProxy, type Config } from "../config.js";
+import type { AccessHeadersMap } from "../domain/access-headers.js";
 import { buildLoggerOptions } from "../logger.js";
 import { healthRoutes } from "../routes/health.js";
 import { createPool } from "../adapters/db-postgres/pool.js";
@@ -43,6 +44,9 @@ export type BuildAppOptions = {
   bodyCodec?: BodyCodec;
   /** Optional directory of built web UI assets (`web/dist`) served by the API. */
   webDistDir?: string | null;
+  /** Override client access headers (tests). */
+  deviceAccessHeaders?: AccessHeadersMap | null;
+  agentAccessHeaders?: AccessHeadersMap | null;
 };
 
 export async function buildApp(
@@ -98,6 +102,11 @@ export async function buildApp(
 
   const authConfig = options.auth?.config !== undefined ? options.auth.config : config.oidc;
 
+  const agentAccessHeaders =
+    options.agentAccessHeaders !== undefined
+      ? options.agentAccessHeaders
+      : config.clientAccess.agentHeaders;
+
   let authStack;
   try {
     authStack = await buildAuthStack({
@@ -106,6 +115,7 @@ export async function buildApp(
       jwtVerifier: options.auth?.jwtVerifier,
       oidcProvider: options.auth?.oidcProvider,
       skipDiscovery: options.auth?.skipDiscovery ?? false,
+      agentAccessHeaders,
     });
   } catch (err) {
     app.log.error(
@@ -142,12 +152,18 @@ export async function buildApp(
     throw err;
   }
 
+  const deviceAccessHeaders =
+    options.deviceAccessHeaders !== undefined
+      ? options.deviceAccessHeaders
+      : config.clientAccess.deviceHeaders;
+
   const deviceStack = buildDeviceStack({
     config: deviceConfig,
     pool,
     queuePublisher,
     ingestConfig: options.ingest ?? config.ingest,
     bodyCodec: encryptionStack.bodyCodec,
+    deviceAccessHeaders,
   });
 
   await app.register(devicePlugin, {

@@ -29,6 +29,16 @@ export const REDACT_PATHS = [
   "wrapped_dek",
   "bodyCiphertext",
   "body_ciphertext",
+  "CF_ACCESS_CLIENT_SECRET",
+  "DEVICE_CF_ACCESS_CLIENT_SECRET",
+  "AGENT_CF_ACCESS_CLIENT_SECRET",
+  "cf-access-client-secret",
+  'headers["cf-access-client-secret"]',
+  'req.headers["cf-access-client-secret"]',
+  "access_headers",
+  "accessHeaders",
+  "qr_payload",
+  "qrPayload",
 ] as const;
 
 export function buildLoggerOptions(level: string): LoggerOptions {

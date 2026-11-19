@@ -1,3 +1,4 @@
+import type { AccessHeadersMap } from "../../domain/access-headers.js";
 import { formatPairingQrPayload } from "../../domain/device/pairing.js";
 import { DeviceError } from "../../domain/device/errors.js";
 import { isInfrastructureError, InfrastructureError } from "../../domain/errors.js";
@@ -10,11 +11,13 @@ export type IssuePairingCodeDeps = {
   hashCode: (normalized: string) => string;
   ttlSeconds: number;
   apiPublicUrl: string | null;
+  deviceAccessHeaders?: AccessHeadersMap | null;
 };
 
 export type IssuePairingCodeResult = {
   code: string;
   qrPayload: string;
+  hasAccessHeaders: boolean;
   expiresAt: string;
   ttlSeconds: number;
   pairingCodeId: string;
@@ -32,6 +35,8 @@ export class IssuePairingCode {
       });
     }
     const codeHash = this.deps.hashCode(normalized);
+    const accessHeaders = this.deps.deviceAccessHeaders ?? null;
+    const hasAccessHeaders = accessHeaders !== null && Object.keys(accessHeaders).length > 0;
 
     try {
       const row = await this.deps.pairingCodes.insert({
@@ -41,7 +46,8 @@ export class IssuePairingCode {
       });
       return {
         code,
-        qrPayload: formatPairingQrPayload(code, this.deps.apiPublicUrl),
+        qrPayload: formatPairingQrPayload(code, this.deps.apiPublicUrl, accessHeaders),
+        hasAccessHeaders,
         expiresAt: row.expiresAt.toISOString(),
         ttlSeconds: this.deps.ttlSeconds,
         pairingCodeId: row.id,

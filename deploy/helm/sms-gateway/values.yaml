@@ -100,6 +100,17 @@ secrets:
   sessionSecretKey: SESSION_SECRET
   # When false, OIDC secret refs are omitted (API runs without login until configured).
   oidcEnabled: false
+  # Optional Cloudflare Access service token headers for paired Android devices and PAT agents.
+  # When cfAccessEnabled=true, all 6 keys are wired with optional: true so operators can
+  # populate only shared (CF_ACCESS_CLIENT_ID/SECRET) or only separate DEVICE_*/AGENT_* keys.
+  cfAccessEnabled: false
+  cfAccessSecretName: sms-gateway-cf-access
+  cfAccessClientIdKey: CF_ACCESS_CLIENT_ID
+  cfAccessClientSecretKey: CF_ACCESS_CLIENT_SECRET
+  deviceCfAccessClientIdKey: DEVICE_CF_ACCESS_CLIENT_ID
+  deviceCfAccessClientSecretKey: DEVICE_CF_ACCESS_CLIENT_SECRET
+  agentCfAccessClientIdKey: AGENT_CF_ACCESS_CLIENT_ID
+  agentCfAccessClientSecretKey: AGENT_CF_ACCESS_CLIENT_SECRET
   # Privileged migrator credentials (used ONLY by the pre-install/pre-upgrade migrate Job when migrations.enabled=true).
   # Expected keys: MIGRATE_DATABASE_URL, SMS_APP_PASSWORD
   migrateSecretName: sms-gateway-migrate

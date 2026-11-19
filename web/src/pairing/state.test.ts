@@ -44,7 +44,24 @@ describe("reducePairingState", () => {
       kind: "active",
       code: "7K3M-9Q2P",
       qrPayload: issued.qr_payload,
+      hasAccessHeaders: false,
       expiresAt: Date.parse(issued.expires_at),
+    });
+  });
+
+  it("preserves hasAccessHeaders=true when pairing code includes access headers", () => {
+    const state = reducePairingState(initialPairingState(), {
+      type: "ISSUED",
+      response: {
+        ...issued,
+        qr_payload: "smsgw://pair?code=7K3M-9Q2P&headers=eyJYLUEiOiIxIn0",
+        has_access_headers: true,
+      },
+      knownDeviceIds: new Set(),
+    });
+    expect(state).toMatchObject({
+      kind: "active",
+      hasAccessHeaders: true,
     });
   });
 

@@ -121,6 +121,7 @@ export function PairingPage() {
         <ActiveCode
           code={state.code}
           qrPayload={state.qrPayload}
+          hasAccessHeaders={state.hasAccessHeaders}
           remaining={secondsRemaining(state.expiresAt, now)}
           onRegenerate={() => void requestCode()}
         />
@@ -166,22 +167,50 @@ export function PairingPage() {
 function ActiveCode({
   code,
   qrPayload,
+  hasAccessHeaders,
   remaining,
   onRegenerate,
 }: {
   code: string;
   qrPayload: string;
+  hasAccessHeaders: boolean;
   remaining: number;
   onRegenerate: () => void;
 }) {
+  const [copiedUri, setCopiedUri] = useState(false);
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
+
+  useEffect(() => {
+    setCopiedUri(false);
+  }, [qrPayload]);
+
+  const onCopyUri = async () => {
+    try {
+      await navigator.clipboard.writeText(qrPayload);
+      setCopiedUri(true);
+    } catch {
+      setCopiedUri(false);
+    }
+  };
+
+  const handleRegenerate = () => {
+    setCopiedUri(false);
+    onRegenerate();
+  };
 
   return (
     <div className="pairing-active">
       <div className="qr-wrap" aria-hidden={false}>
-        <QRCodeSVG value={qrPayload} size={220} level="M" includeMargin />
+        <QRCodeSVG value={qrPayload} size={hasAccessHeaders ? 260 : 220} level="M" includeMargin />
       </div>
+      {hasAccessHeaders ? (
+        <p className="banner banner-warn" role="note">
+          Tunnel access headers are embedded in this QR code and pairing URI. Scan the QR code or
+          open/copy the full pairing URI on the device — entering only the short code will not carry
+          tunnel headers.
+        </p>
+      ) : null}
       <p className="short-code" aria-label="Pairing code">
         {code}
       </p>
@@ -189,9 +218,14 @@ function ActiveCode({
         Expires in {mm}:{ss}
       </p>
       <p className="hint">Waiting for the device to complete pairing…</p>
-      <button type="button" className="btn" onClick={onRegenerate}>
-        Regenerate code
-      </button>
+      <div className="filters-actions">
+        <button type="button" className="btn" onClick={() => void onCopyUri()}>
+          {copiedUri ? "Copied pairing URI" : "Copy pairing URI"}
+        </button>
+        <button type="button" className="btn" onClick={handleRegenerate}>
+          Regenerate code
+        </button>
+      </div>
     </div>
   );
 }

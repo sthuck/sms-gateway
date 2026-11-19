@@ -98,10 +98,14 @@ export async function tokenRoutes(app: FastifyInstance): Promise<void> {
         expiresInDays: parsed.data.expires_in_days ?? null,
         clientIp: clientIp(request),
       });
-      return reply.status(201).send({
+      const payload: Record<string, unknown> = {
         ...toTokenDto(result.token),
         token: result.secret,
-      });
+      };
+      if (result.accessHeaders && Object.keys(result.accessHeaders).length > 0) {
+        payload.access_headers = result.accessHeaders;
+      }
+      return reply.header("Cache-Control", "no-store").status(201).send(payload);
     } catch (err) {
       return mapTokenError(reply, request, err, "/v1/tokens", "Failed to create token");
     }

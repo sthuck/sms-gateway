@@ -22,9 +22,10 @@ export async function pairingCodeRoutes(app: FastifyInstance): Promise<void> {
         { pairing_code_id: result.pairingCodeId, expires_at: result.expiresAt },
         "pairing code issued",
       );
-      return reply.status(201).send({
+      return reply.header("Cache-Control", "no-store").status(201).send({
         code: result.code,
         qr_payload: result.qrPayload,
+        has_access_headers: result.hasAccessHeaders,
         expires_at: result.expiresAt,
         ttl_seconds: result.ttlSeconds,
       });

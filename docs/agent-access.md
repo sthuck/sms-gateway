@@ -16,8 +16,10 @@ curl -sS -X POST "$BASE/v1/tokens" \
   -H "Content-Type: application/json" \
   -d '{"name":"agent-reader","expires_in_days":90}'
 # → { "id":"…", "name":"agent-reader", "token":"smsg_pat_<uuid>_<secret>",
-#     "expires_at":"…", … }
-# Store `token` once; it is never returned again.
+#     "expires_at":"…", "access_headers":{…}, … }
+# Response sets `Cache-Control: no-store`. Store `token` once; it is never returned again.
+# `access_headers` is included only when agent tunnel headers are configured
+# (`AGENT_CF_ACCESS_CLIENT_ID`/`AGENT_CF_ACCESS_CLIENT_SECRET`, or shared `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`).
 # expires_in_days: 1..366, or null/omit for no expiry. Expired → same 401 as revoked.
 ```
 
@@ -26,6 +28,16 @@ curl -sS -X POST "$BASE/v1/tokens" \
 ```bash
 export TOKEN='smsg_pat_…'
 curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$BASE/v1/messages?limit=100"
+```
+
+If your deployment enforces Cloudflare Access service tokens (`access_headers`
+returned at creation time), pass those headers alongside `Authorization`:
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
   "$BASE/v1/messages?limit=100"
 ```
 

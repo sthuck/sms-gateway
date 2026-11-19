@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { AccessHeadersMap } from "../domain/access-headers.js";
 import {
   CompleteLogin,
   CreateOwnerAccessToken,
@@ -41,6 +42,8 @@ export type BuildAuthStackOptions = {
   oidcProvider?: OidcProvider | null | undefined;
   /** Skip remote discovery (tests supply jwtVerifier + stub oidc). */
   skipDiscovery?: boolean | undefined;
+  /** Optional access headers (e.g. Cloudflare Access) returned on PAT creation. */
+  agentAccessHeaders?: AccessHeadersMap | null | undefined;
 };
 
 export type AuthStack = {
@@ -52,6 +55,7 @@ export type AuthStack = {
 
 function buildTokenUseCases(
   pool: Pool | null,
+  agentAccessHeaders: AccessHeadersMap | null,
 ): Pick<
   AuthUseCases,
   "resolveOwnerPat" | "createOwnerAccessToken" | "listOwnerAccessTokens" | "revokeOwnerAccessToken"
@@ -75,6 +79,7 @@ function buildTokenUseCases(
       audit,
       ids,
       hasher,
+      agentAccessHeaders,
     }),
     listOwnerAccessTokens: new ListOwnerAccessTokens({ tokens: ownerTokens }),
     revokeOwnerAccessToken: new RevokeOwnerAccessToken({ tokens: ownerTokens, audit }),
@@ -83,7 +88,7 @@ function buildTokenUseCases(
 
 export async function buildAuthStack(options: BuildAuthStackOptions): Promise<AuthStack> {
   const { config, pool } = options;
-  const tokenUseCases = buildTokenUseCases(pool);
+  const tokenUseCases = buildTokenUseCases(pool, options.agentAccessHeaders ?? null);
 
   if (!config) {
     // PAT stack can still run when OIDC is off but a pool is present.

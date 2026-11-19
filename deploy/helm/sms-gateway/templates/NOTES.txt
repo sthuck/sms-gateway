@@ -22,6 +22,9 @@ Required Secrets (create before pods become Ready):
 {{- if .Values.secrets.oidcEnabled }}
   - {{ .Values.secrets.oidcSecretName }} (keys {{ .Values.secrets.oidcClientSecretKey }}, {{ .Values.secrets.sessionSecretKey }})
 {{- end }}
+{{- if .Values.secrets.cfAccessEnabled }}
+  - {{ .Values.secrets.cfAccessSecretName }} (optional keys {{ .Values.secrets.cfAccessClientIdKey }}/{{ .Values.secrets.cfAccessClientSecretKey }}, {{ .Values.secrets.deviceCfAccessClientIdKey }}/{{ .Values.secrets.deviceCfAccessClientSecretKey }}, {{ .Values.secrets.agentCfAccessClientIdKey }}/{{ .Values.secrets.agentCfAccessClientSecretKey }})
+{{- end }}
 {{- if .Values.migrations.enabled }}
   - {{ .Values.secrets.migrateSecretName }} (keys {{ .Values.secrets.migrateDatabaseUrlKey }}, {{ .Values.secrets.migrateAppPasswordKey }})
 {{- end }}

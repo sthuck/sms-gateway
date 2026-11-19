@@ -71,6 +71,44 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       name: {{ .Values.secrets.oidcSecretName | quote }}
       key: {{ .Values.secrets.sessionSecretKey | quote }}
 {{- end }}
+{{- if .Values.secrets.cfAccessEnabled }}
+- name: CF_ACCESS_CLIENT_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.cfAccessSecretName | quote }}
+      key: {{ .Values.secrets.cfAccessClientIdKey | quote }}
+      optional: true
+- name: CF_ACCESS_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.cfAccessSecretName | quote }}
+      key: {{ .Values.secrets.cfAccessClientSecretKey | quote }}
+      optional: true
+- name: DEVICE_CF_ACCESS_CLIENT_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.cfAccessSecretName | quote }}
+      key: {{ .Values.secrets.deviceCfAccessClientIdKey | quote }}
+      optional: true
+- name: DEVICE_CF_ACCESS_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.cfAccessSecretName | quote }}
+      key: {{ .Values.secrets.deviceCfAccessClientSecretKey | quote }}
+      optional: true
+- name: AGENT_CF_ACCESS_CLIENT_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.cfAccessSecretName | quote }}
+      key: {{ .Values.secrets.agentCfAccessClientIdKey | quote }}
+      optional: true
+- name: AGENT_CF_ACCESS_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.cfAccessSecretName | quote }}
+      key: {{ .Values.secrets.agentCfAccessClientSecretKey | quote }}
+      optional: true
+{{- end }}
 {{- end }}
 
 {{- define "sms-gateway.workerSecretEnv" -}}
