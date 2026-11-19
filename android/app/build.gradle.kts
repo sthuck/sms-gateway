@@ -6,6 +6,34 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+/**
+ * Resolve a value from a Gradle `-P` property first, then the process
+ * environment. Blank strings are treated as missing.
+ *
+ * Release signing / versioning secrets are never committed; CI passes them
+ * via env (see docs/android/releasing.md and STH-19).
+ */
+fun propOrEnv(name: String): String? {
+    val fromProp = (findProperty(name) as String?)?.trim()?.takeIf { it.isNotEmpty() }
+    if (fromProp != null) return fromProp
+    return System.getenv(name)?.trim()?.takeIf { it.isNotEmpty() }
+}
+
+val appVersionName = propOrEnv("APP_VERSION_NAME") ?: "0.1.0"
+val appVersionCode = propOrEnv("APP_VERSION_CODE")?.toIntOrNull() ?: 1
+
+val keystoreFilePath = propOrEnv("ANDROID_KEYSTORE_FILE")
+val keystorePassword = propOrEnv("ANDROID_KEYSTORE_PASSWORD")
+val keyAlias = propOrEnv("ANDROID_KEY_ALIAS")
+val keyPassword = propOrEnv("ANDROID_KEY_PASSWORD")
+
+val keystoreFile = keystoreFilePath?.let { path -> file(path).takeIf { it.isFile } }
+val releaseSigningReady =
+    keystoreFile != null &&
+        !keystorePassword.isNullOrBlank() &&
+        !keyAlias.isNullOrBlank() &&
+        !keyPassword.isNullOrBlank()
+
 android {
     namespace = "com.sthuck.smsgateway"
     // Compose BOM 2026.09.00 requires API 37+. Platform 35 is still installed
@@ -20,8 +48,8 @@ android {
         applicationId = "com.sthuck.smsgateway"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         // Hilt 2.60 removed HiltTestRunner; this runner swaps in HiltTestApplication.
         testInstrumentationRunner = "com.sthuck.smsgateway.SmsGatewayHiltTestRunner"
@@ -48,13 +76,41 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (releaseSigningReady) {
+                signingConfig = signingConfigs.getByName("release")
+                logger.lifecycle(
+                    "Release signing: enabled (store=${keystoreFile!!.path}, alias=$keyAlias)",
+                )
+            } else {
+                // Debug/CI keep working without secrets. Tag release workflow
+                // decodes ANDROID_KEYSTORE_BASE64 into ANDROID_KEYSTORE_FILE.
+                logger.lifecycle(
+                    "Release signing: SKIPPED — missing ANDROID_KEYSTORE_FILE " +
+                        "(or file not found), ANDROID_KEYSTORE_PASSWORD, " +
+                        "ANDROID_KEY_ALIAS, and/or ANDROID_KEY_PASSWORD " +
+                        "(env or Gradle -P). Producing an unsigned release APK. " +
+                        "See docs/android/releasing.md.",
+                )
+            }
         }
         debug {
             isMinifyEnabled = false

@@ -55,6 +55,8 @@ android/.kotlin/
 *.apk
 *.aab
 *.keystore
+*.jks
+*.jks.b64
 # Keep the Gradle wrapper jar even if a broader *.jar rule is added later
 !android/gradle/wrapper/gradle-wrapper.jar
 
