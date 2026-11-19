@@ -1,5 +1,6 @@
 package com.sthuck.smsgateway.ui
 
+import com.sthuck.smsgateway.crypto.Base64Url
 import com.sthuck.smsgateway.pairing.PairingUriParser
 import com.sthuck.smsgateway.pairing.ServerUrlValidator
 import org.junit.Assert.assertEquals
@@ -16,8 +17,11 @@ class PairingConfirmationTest {
 
     @Test
     fun scanPreparesConfirmationWithoutPairing() {
+        val encodedHeaders = Base64Url.encode(
+            """{"CF-Access-Client-Id":"id","CF-Access-Client-Secret":"secret"}""".toByteArray(),
+        )
         val parsed = PairingUriParser.parse(
-            "smsgw://pair?code=7K3M-9Q2P&server=https%3A%2F%2Fsms.sthuck.info",
+            "smsgw://pair?code=7K3M-9Q2P&server=https%3A%2F%2Fsms.sthuck.info&headers=$encodedHeaders",
         )!!
         val validated = ServerUrlValidator.validate(
             parsed.serverUrl,
@@ -31,10 +35,12 @@ class PairingConfirmationTest {
             hostLabel = validated.value.hostWithPort,
             requiresExtraWarning = validated.value.requiresExtraWarning,
             replacingExisting = false,
+            accessHeaders = parsed.accessHeaders,
         )
         assertEquals("7K3M-9Q2P", confirmation.code)
         assertEquals("sms.sthuck.info", confirmation.hostLabel)
         assertFalse(confirmation.requiresExtraWarning)
+        assertEquals(listOf("CF-Access-Client-Id", "CF-Access-Client-Secret"), confirmation.accessHeaders.keys.sorted())
         // Confirmation is the only side effect of a scan — no repository call.
         assertNotNull(confirmation)
     }

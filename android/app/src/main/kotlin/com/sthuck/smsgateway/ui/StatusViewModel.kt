@@ -54,6 +54,7 @@ data class StatusUiState(
     val notificationsGranted: Boolean = true,
     val batteryExempt: Boolean = false,
     val oemSetup: OemSetupTarget = OemSetupCatalog.forManufacturer(Build.MANUFACTURER),
+    val tunnelAuthError: String? = null,
 )
 
 @HiltViewModel
@@ -112,6 +113,7 @@ class StatusViewModel @Inject constructor(
                         deviceId = snap.creds.deviceId,
                         deviceName = snap.creds.deviceName,
                         lastSuccessfulSyncAtEpochMs = snap.creds.lastSuccessfulSyncAtEpochMs,
+                        tunnelAuthError = snap.creds.tunnelAuthError,
                         pairingStatus = if (snap.creds.isPaired) {
                             "Paired"
                         } else {

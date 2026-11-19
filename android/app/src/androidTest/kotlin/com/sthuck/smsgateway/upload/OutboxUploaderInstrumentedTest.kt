@@ -146,21 +146,38 @@ class OutboxUploaderInstrumentedTest {
     ) : PairingStateAccess {
         override suspend fun current() = value
         override suspend fun clearDeviceId() {
-            value = value.copy(deviceId = null, deviceName = null, lastSuccessfulSyncAtEpochMs = null)
+            value = value.copy(
+                deviceId = null,
+                deviceName = null,
+                lastSuccessfulSyncAtEpochMs = null,
+                accessHeaders = emptyMap(),
+                tunnelAuthError = null,
+            )
         }
         override suspend fun savePairing(
             deviceId: String,
             serverUrl: String,
             activeKeyAlias: String,
             deviceName: String,
+            accessHeaders: Map<String, String>,
         ) {
-            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias, deviceName)
+            value = PairingCredentials(
+                deviceId = deviceId,
+                serverUrl = serverUrl,
+                activeKeyAlias = activeKeyAlias,
+                deviceName = deviceName,
+                accessHeaders = accessHeaders,
+                tunnelAuthError = null,
+            )
         }
         override suspend fun updateDeviceName(deviceName: String) {
             value = value.copy(deviceName = deviceName)
         }
         override suspend fun recordSuccessfulSync(atEpochMs: Long) {
-            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs)
+            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs, tunnelAuthError = null)
+        }
+        override suspend fun recordTunnelAuthError(message: String?) {
+            value = value.copy(tunnelAuthError = message)
         }
         override suspend fun clearAll() {
             value = PairingCredentials(null, value.serverUrl)
