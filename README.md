@@ -9,7 +9,7 @@ views). AI agents read streams via REST or an MCP server with scoped auth.
 ```
 android/                 # Android client (Kotlin/Compose; see android/README.md)
 backend/                 # Fastify API + worker + MCP stubs (TypeScript)
-web/                     # React UI (placeholder README)
+web/                     # React UI (Vite; pairing + OIDC — see web/README.md)
 deploy/helm/sms-gateway/ # Helm chart (API / worker / MCP Deployments)
 docs/                    # Architecture, local-dev, STH-5 contracts
 docker-compose.yml       # Postgres + backend (+ optional Prism mock)
@@ -42,6 +42,15 @@ pnpm dev        # API on 0.0.0.0:8080
 pnpm test
 pnpm lint
 ```
+
+Web UI (part A — login + device pairing):
+
+```bash
+pnpm install
+pnpm web:dev    # http://localhost:5173 (proxies /v1 → :8080)
+```
+
+See `web/README.md` for OIDC redirect/`PUBLIC_BASE_URL` when using Vite.
 
 Signing test vector (STH-5):
 
