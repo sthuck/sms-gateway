@@ -126,3 +126,44 @@ Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed 
 | 2026-11-18 | Backend | backend/bench/ingest-batch.ts | low | --host "[::1]:3000" is falsely refused (fails safe); a DB URL like postgres://localhost/sms?host=remote slips past the guard because pg's host query param overrides the URL host. | Parse host query params in the guard. |
 | 2026-11-18 | Backend | backend/bench/ingest-batch.ts | low | SIGINT skips the finally; a half-failed seed leaks the user; pg-boss jobs from the run are not cleaned up. | Handle SIGINT and clean pg-boss jobs. |
 | 2026-11-18 | Backend | received_at parsing (pre-existing) | low | Date.parse may roll 2026-02-30 or 24:00:00 forward instead of rejecting them; no test covers it. | Round-trip check against the input. |
+
+## 2026-11-18 — PR #18 (Android outbox follow-ups) and PR #19 (Backend device/queue hexagonal move)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-18 | Android | OutboxUploader.kt:54, StatusViewModel.kt:133-134 | medium | retryParked() unparks, then runOnce runs enforceLimits first and re-parks expired_ttl rows, so Retry cannot upload unsent SMS older than 7 days (rows stay visible, not deleted). | Skip the TTL re-park on an explicit Retry, or add a grace flag. |
+| 2026-11-18 | Android | AppDatabase.kt:58-59 (MIGRATION_3_4 seed) | medium | Seed uses COUNT(*), wrong when earlier ordinals were already deleted (should be max(ordinal)+1); fully drained pre-upgrade contentKeys get no counter, so a later same-key SMS can reuse ordinal 0 and hit backend duplicate. Migration test covers only the dense in-outbox case. | Seed with max(ordinal)+1 and add a drained-case migration test. |
+| 2026-11-18 | Android | UploadScheduler.kt:83-87 | medium | delay-0 REPLACE can cancel an in-flight drain; no data loss given duplicate->delete, but bursts can thrash the worker. UploadSchedulerPolicyTest only asserts the helper. | REPLACE only when existing work is delayed; APPEND_OR_REPLACE when it is running. |
+| 2026-11-18 | Android | retryAfterDelayMs | low | RateLimit-Reset still ignored. | Parse it. |
+| 2026-11-18 | Android | status screen/docs | low | 'up to 2 000 messages for 7 days' understates unbounded parked plaintext rows. | Reword the retention copy. |
+| 2026-11-18 | Android | SmsGatewayApplication.kt:52-55 | low | runBlocking on the main thread for alias restore (race fixed; small ANR risk). | Restore off the main thread but before enqueue. |
+| 2026-11-18 | Android | content_key_counters | low | No TTL on counters. | Add cleanup. |
+| 2026-11-18 | Android | housekeeping tests | low | Omit the unpark-then-enforceLimits case. | Add it. |
+| 2026-11-18 | Backend | backend/test/device/parity-matrix.test.ts | medium | Static table asserting against its own constants; never calls the app. | Drive the real app or remove. |
+| 2026-11-18 | Backend | backend/test/auth/failure-modes.test.ts ('pairing-codes DB failure') | medium | Fails the session lookup first so it never reaches the pairing_codes insert. | Use a healthy session with a fault on just that insert. |
+| 2026-11-18 | Backend | HTTP-level tests | medium | No infra-failure tests for pair, /v1/devices/me, revoke, replay claim; no unit tests for the five new use cases (repository-contract tests do cover all new Postgres port methods). | Add them. |
+| 2026-11-18 | Backend | backend/src/adapters/http-fastify/device-routes.ts (pair catch) | low | A DB error in the rate-limit check, noteInvalidCode or the proof-of-possession replay claim returns 500 'Failed to pair device' (main: 500 'Unexpected error'); status/code/retryable same but RateLimit headers no longer set on that 500. | Keep headers or accept. |
+| 2026-11-18 | Backend | adapters/http-fastify/pair-auth.ts, device-routes.ts | low | pair-auth.ts calls db-postgres/replay-cache directly instead of the ReplayCache port and duplicates header/skew/hash checks owned by ResolveDeviceAuth; device-routes.ts imports rateLimitHeaders from db-postgres. | Add a PairProofOfPossession use case later. |
+| 2026-11-18 | Backend | device-routes.ts revoke handler | low | Now checks not-configured (503) before UUID validity (400); the 400's instance drops the query string. | Restore main's order. |
+| 2026-11-18 | Backend | the five new device use cases | low | Wrap any non-DeviceError as InfrastructureError('... failed'), so programmer bugs are labelled infra in logs (500 is the same as main). | Only wrap known infra errors. |
+| 2026-11-18 | Backend | QueuePublisher / PgBossQueuePublisher | low | Not wired into buildDeviceStack or any route yet (groundwork for PR C). | None, note only. |
+| 2026-11-18 | Backend | lint:auth-errors | low | No longer scans src/routes, src/device, src/queue; nothing there catches errors today. | Re-add if error handling appears there. |
+| 2026-11-18 | Backend | domain isTimestampInWindow | low | Lost its default skewSec. | Restore default or confirm callers pass it. |
+| 2026-11-18 | Backend | src/device/*, src/queue/* | low | Thin re-exports and @deprecated DeviceAuthRow/PairingCodeRow aliases remain. | Remove once callers migrate. |
+
+## 2026-11-18 — PR #21 (STH-15 message ingestion)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-18 | Backend | backend/src/domain/message/normalise.ts, domain/message/validate.ts, adapters/db-postgres/message-repository.ts | medium | A U+0000 character in sender or device_msg_id passes validation but Postgres rejects it (SQLSTATE 22021); received_at with year 0000 passes the regex, then timestamptz rejects it. Either rolls the whole batch back into a retryable 500 on every retry; Android never parks a 500, so that device's outbox stalls. | Reject NUL per item as invalid_field, add a lower bound on received_at (1970 or 2000), optionally a SAVEPOINT per item mapping SQLSTATE class 22 to a rejection. |
+| 2026-11-18 | Backend | tests for POST /v1/messages:batch | medium | Missing: parallel identical batches, mid-batch failure (fault on item 2+, item 1 not persisted, response 500), HTTP-level infra failure for the route (only use-case level covered), poison-item cases. | Add them. |
+| 2026-11-18 | Backend | backend/bench/ingest-batch.ts | medium | Seeds a user, active device and credential bound to the public test-vector key into whatever DB URL is set, no host guard, no cleanup; against a real DB it leaves a device credential anyone with the repo can sign for (owner is a throwaway). | Refuse non-localhost hosts without an explicit flag; delete the seeded user at the end. |
+| 2026-11-18 | Backend | validate.ts | low | Non-string device_msg_id returns missing_field instead of invalid_field. | Return invalid_field. |
+| 2026-11-18 | Backend | message repository transaction | low | Overlapping batches with different item order can deadlock (40P01) giving a retryable 500. | Sort by device_msg_id inside the transaction. |
+| 2026-11-18 | Backend | message repository inserts | low | One round trip per item; fine at the benchmarked p95 of ~85 ms. | Consider unnest batching later. |
+| 2026-11-18 | Backend | received_at handling | low | Loses microseconds because toISOString() is millisecond precision. | Accept or preserve precision. |
+| 2026-11-18 | Backend | last_seen_at | low | Not updated when every item in a batch is rejected. | Decide if intended. |
+| 2026-11-18 | Backend | rate limit | low | Tokens consumed before validation and on attempts that later return 500; default 10,000 messages/hour per device may throttle a large backfill. | Revisit the limits. |
+| 2026-11-18 | Backend/Deploy | INGEST_DEFAULT_PHONE_REGION | low | Defaults to US; set to IL in deployment so national-format senders normalise. | Set it in the Helm values/env. |
+| 2026-11-18 | Backend | adapters/http-fastify/message-routes.ts | low | MAX_PAYLOAD_BYTES check duplicates the one in device auth; `void body.owner_id` statements are no-ops. | Remove. |
+| 2026-11-18 | Backend | request schema | low | Unknown top-level keys tolerated although the schema says additionalProperties: false. | Harmless; align or document. |
