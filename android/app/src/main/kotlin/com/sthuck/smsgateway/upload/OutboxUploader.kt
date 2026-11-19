@@ -206,8 +206,9 @@ class OutboxUploader @Inject constructor(
                 return UploadPassResult.StopForRePair(code)
             }
             ProblemCodes.INVALID_SIGNATURE -> {
-                // Keep pairing and rows pending; retry with a fresh signature (STH-18).
-                scheduleRetry(rows, nowEpochMs, code, delayMs = 0L)
+                // Keep pairing and rows pending; back off so a sticky bad
+                // signature cannot hot-loop the worker (STH-18 follow-up).
+                scheduleRetry(rows, nowEpochMs, code)
                 return UploadPassResult.RetryLater(code)
             }
             ProblemCodes.INVALID_TIMESTAMP, ProblemCodes.REPLAY_DETECTED -> {

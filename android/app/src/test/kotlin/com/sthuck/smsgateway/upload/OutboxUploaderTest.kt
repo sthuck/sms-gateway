@@ -397,13 +397,20 @@ class OutboxUploaderTest {
             detail = "mismatch",
             retryable = false,
         )
-        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        val now = 1_000L
+        val result = uploader.runOnce(nowEpochMs = now)
         assertTrue(result is UploadPassResult.RetryLater)
         assertEquals(ProblemCodes.INVALID_SIGNATURE, (result as UploadPassResult.RetryLater).reason)
-        assertTrue(!dao.rows.single().parked)
-        assertTrue(dao.rows.single().attemptCount >= 1)
+        val row = dao.rows.single()
+        assertTrue(!row.parked)
+        assertTrue(row.attemptCount >= 1)
+        assertTrue(
+            "invalid_signature must back off (nextAttemptAt=$row.nextAttemptAtEpochMs)",
+            row.nextAttemptAtEpochMs > now,
+        )
     }
 
+    @Test
     fun devicesMeRevokedStopsAndWipesWithoutBatch() = runBlocking {
         dao.rows += sample("sms-1")
         DeviceApiMock.enqueueDeviceMe(server, status = "revoked")
