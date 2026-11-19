@@ -1,5 +1,6 @@
 import type {
   DeviceAuthRecord,
+  DeviceListItem,
   DeviceMe,
   DeviceInfo,
   PairedDevice,
@@ -30,6 +31,14 @@ export type DeviceAuthRepository = {
   }): Promise<PairedDevice | null>;
 
   findMe(ownerId: string, deviceId: string): Promise<DeviceMe | null>;
+
+  /** Owner's devices, newest first. */
+  list(ownerId: string, limit: number): Promise<DeviceListItem[]>;
+
+  /**
+   * Rename under RLS. Returns `null` when missing / other owner.
+   */
+  rename(ownerId: string, deviceId: string, name: string): Promise<DeviceListItem | null>;
 
   revoke(ownerId: string, deviceId: string, clientIp: string): Promise<"ok" | "missing">;
 };

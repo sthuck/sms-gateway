@@ -425,12 +425,17 @@ describe.skipIf(!migratorOk)("OpenAPI contract shapes (STH-14 / STH-15 endpoints
     expect(bad.json()).toMatchObject({ code: "invalid_timestamp", retryable: true });
   });
 
-  it("OpenAPI request/response schemas exist for STH-14 / STH-15 endpoints", () => {
+  it("OpenAPI request/response schemas exist for STH-14 / STH-15 / STH-21 endpoints", () => {
     expect(userApi.paths["/v1/pairing-codes"]?.post).toBeTruthy();
     expect(deviceApi.paths["/v1/devices/pair"]?.post).toBeTruthy();
+    expect(userApi.paths["/v1/devices"]?.get).toBeTruthy();
+    expect(userApi.paths["/v1/devices/{id}"]?.patch).toBeTruthy();
     expect(userApi.paths["/v1/devices/{id}/revoke"]?.post).toBeTruthy();
     expect(deviceApi.paths["/v1/devices/me"]?.get).toBeTruthy();
     expect(deviceApi.paths["/v1/messages:batch"]?.post).toBeTruthy();
+    expect(userApi.paths["/v1/messages"]?.get).toBeTruthy();
+    expect(userApi.paths["/v1/messages/{id}"]?.get).toBeTruthy();
+    expect(userApi.paths["/v1/messages/{id}"]?.delete).toBeTruthy();
   });
 });
 

@@ -29,6 +29,16 @@ export type DeviceMe = {
   revokedAt: string | null;
 };
 
+/** Owner device list / rename DTO (dates as Date for use-case mapping). */
+export type DeviceListItem = {
+  id: string;
+  name: string;
+  status: "active" | "revoked";
+  createdAt: Date;
+  lastSeenAt: Date | null;
+  revokedAt: Date | null;
+};
+
 export type DeviceInfo = {
   name?: string | undefined;
   platform: "android";

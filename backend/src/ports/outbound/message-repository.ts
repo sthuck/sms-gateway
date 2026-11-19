@@ -1,3 +1,4 @@
+import type { MessageCursor } from "../../domain/message/cursor.js";
 import type { MessageDirection } from "../../domain/message/types.js";
 
 export type MessageInsert = {
@@ -26,6 +27,21 @@ export type MessageRecord = {
   direction: MessageDirection;
 };
 
+/** Plaintext metadata filters applied in SQL before any decrypt. */
+export type MessageListFilters = {
+  deviceId?: string;
+  sender?: string;
+  receivedAfter?: Date;
+  receivedBefore?: Date;
+};
+
+export type MessageListInput = {
+  ownerId: string;
+  limit: number;
+  cursor?: MessageCursor;
+  filters?: MessageListFilters;
+};
+
 /**
  * Idempotent message writes under RLS (`withOwner`).
  *
@@ -33,6 +49,7 @@ export type MessageRecord = {
  * - Publishes `message.created` for NEW rows only (same transaction).
  * - Updates `devices.last_seen_at`.
  * - Infra failures MUST throw `InfrastructureError`.
+ * - Lookups return `null` / empty for absence under RLS (never throw for miss).
  */
 export type MessageRepository = {
   upsertBatch(input: {
@@ -46,6 +63,21 @@ export type MessageRepository = {
    * Used by stream preview (last N).
    */
   listRecent(ownerId: string, limit: number): Promise<MessageRecord[]>;
+
+  /**
+   * Owner inbox keyset page: `received_at DESC, id DESC`.
+   * Optional plaintext metadata filters narrow the candidate set (ADR 0002).
+   */
+  list(input: MessageListInput): Promise<MessageRecord[]>;
+
+  /** Single message under RLS; `null` when missing / other owner. */
+  findById(ownerId: string, messageId: string): Promise<MessageRecord | null>;
+
+  /**
+   * Delete under RLS. Returns false when no row matched (already gone or
+   * other owner). Does not throw on zero rows.
+   */
+  delete(ownerId: string, messageId: string): Promise<boolean>;
 
   /**
    * Keyset page for DEK re-encrypt jobs, ordered by `id ASC`.

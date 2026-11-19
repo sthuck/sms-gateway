@@ -34,6 +34,7 @@ import type { BodyCodec, BodyCodecContext } from "../../../src/ports/outbound/bo
 import type { IngestRateLimiter } from "../../../src/ports/outbound/ingest-rate-limiter.js";
 import type {
   MessageInsert,
+  MessageListInput,
   MessageRecord,
   MessageRepository,
   MessageUpsertRow,
@@ -54,6 +55,7 @@ import type {
 import type {
   DeviceAuthRecord,
   DeviceInfo,
+  DeviceListItem,
   DeviceMe,
   PairedDevice,
   PairingCodeRecord,
@@ -288,13 +290,27 @@ export function mapped(
   };
 }
 
+type MemoryDeviceRow = DeviceAuthRecord & {
+  name: string;
+  createdAt: Date;
+  lastSeenAt: Date | null;
+};
+
 export class MemoryDeviceAuthRepository implements DeviceAuthRepository {
-  readonly byId = new Map<string, DeviceAuthRecord>();
+  readonly byId = new Map<string, MemoryDeviceRow>();
   fault: FaultSwitch = { throwInfra: false };
 
   async lookupForAuth(deviceId: string): Promise<DeviceAuthRecord | null> {
     maybeFault(this.fault, "memory device lookup failed");
-    return this.byId.get(deviceId) ?? null;
+    const row = this.byId.get(deviceId);
+    if (!row) return null;
+    return {
+      deviceId: row.deviceId,
+      ownerId: row.ownerId,
+      status: row.status,
+      publicKey: row.publicKey,
+      credentialRevokedAt: row.credentialRevokedAt,
+    };
   }
 
   async pairWithBurnedCode(input: {
@@ -308,18 +324,22 @@ export class MemoryDeviceAuthRepository implements DeviceAuthRepository {
     maybeFault(this.fault, "memory device pair failed");
     if (input.pairingCodeId === "lost-race") return null;
     const id = `dev-${this.byId.size + 1}`;
+    const now = new Date();
     this.byId.set(id, {
       deviceId: id,
       ownerId: input.ownerId,
       status: "active",
       publicKey: input.publicKey,
       credentialRevokedAt: null,
+      name: input.displayName,
+      createdAt: now,
+      lastSeenAt: now,
     });
     return {
       deviceId: id,
       name: input.displayName,
       status: "active",
-      pairedAt: new Date().toISOString(),
+      pairedAt: now.toISOString(),
     };
   }
 
@@ -329,11 +349,46 @@ export class MemoryDeviceAuthRepository implements DeviceAuthRepository {
     if (!row || row.ownerId !== ownerId) return null;
     return {
       deviceId: row.deviceId,
-      name: "mem",
+      name: row.name,
       status: row.status,
-      pairedAt: new Date().toISOString(),
-      lastSeenAt: new Date().toISOString(),
+      pairedAt: row.createdAt.toISOString(),
+      lastSeenAt: (row.lastSeenAt ?? new Date()).toISOString(),
       revokedAt: row.credentialRevokedAt?.toISOString() ?? null,
+    };
+  }
+
+  async list(ownerId: string, limit: number): Promise<DeviceListItem[]> {
+    maybeFault(this.fault, "memory device list failed");
+    return [...this.byId.values()]
+      .filter((r) => r.ownerId === ownerId)
+      .sort((a, b) => {
+        const t = b.createdAt.getTime() - a.createdAt.getTime();
+        if (t !== 0) return t;
+        return b.deviceId < a.deviceId ? -1 : b.deviceId > a.deviceId ? 1 : 0;
+      })
+      .slice(0, limit)
+      .map((r) => ({
+        id: r.deviceId,
+        name: r.name,
+        status: r.status,
+        createdAt: r.createdAt,
+        lastSeenAt: r.lastSeenAt,
+        revokedAt: r.credentialRevokedAt,
+      }));
+  }
+
+  async rename(ownerId: string, deviceId: string, name: string): Promise<DeviceListItem | null> {
+    maybeFault(this.fault, "memory device rename failed");
+    const row = this.byId.get(deviceId);
+    if (!row || row.ownerId !== ownerId) return null;
+    row.name = name;
+    return {
+      id: row.deviceId,
+      name: row.name,
+      status: row.status,
+      createdAt: row.createdAt,
+      lastSeenAt: row.lastSeenAt,
+      revokedAt: row.credentialRevokedAt,
     };
   }
 
@@ -344,6 +399,11 @@ export class MemoryDeviceAuthRepository implements DeviceAuthRepository {
     row.status = "revoked";
     row.credentialRevokedAt = new Date();
     return "ok";
+  }
+
+  /** Test helper: seed a device row. */
+  seed(row: MemoryDeviceRow): void {
+    this.byId.set(row.deviceId, row);
   }
 }
 
@@ -616,8 +676,13 @@ export class MemoryMessageRepository implements MessageRepository {
 
   async listRecent(ownerId: string, limit: number): Promise<MessageRecord[]> {
     maybeFault(this.fault, "memory message list recent failed");
-    return [...this.rows.values()]
-      .filter((r) => r.ownerId === ownerId)
+    return this.list({ ownerId, limit });
+  }
+
+  async list(input: MessageListInput): Promise<MessageRecord[]> {
+    maybeFault(this.fault, "memory message list failed");
+    let rows = [...this.rows.values()]
+      .filter((r) => r.ownerId === input.ownerId)
       .map((r): MessageRecord => ({
         id: r.id,
         ownerId: r.ownerId,
@@ -628,13 +693,70 @@ export class MemoryMessageRepository implements MessageRepository {
         receivedAt: r.message.receivedAt,
         simSlot: r.message.simSlot,
         direction: r.message.direction,
-      }))
-      .sort((a, b) => {
-        const t = b.receivedAt.getTime() - a.receivedAt.getTime();
-        if (t !== 0) return t;
-        return b.id < a.id ? -1 : b.id > a.id ? 1 : 0;
-      })
-      .slice(0, limit);
+      }));
+
+    if (input.filters?.deviceId) {
+      rows = rows.filter((r) => r.deviceId === input.filters!.deviceId);
+    }
+    if (input.filters?.sender) {
+      rows = rows.filter((r) => r.sender === input.filters!.sender);
+    }
+    if (input.filters?.receivedAfter) {
+      const t = input.filters.receivedAfter.getTime();
+      rows = rows.filter((r) => r.receivedAt.getTime() >= t);
+    }
+    if (input.filters?.receivedBefore) {
+      const t = input.filters.receivedBefore.getTime();
+      rows = rows.filter((r) => r.receivedAt.getTime() <= t);
+    }
+
+    rows.sort((a, b) => {
+      const t = b.receivedAt.getTime() - a.receivedAt.getTime();
+      if (t !== 0) return t;
+      return b.id < a.id ? -1 : b.id > a.id ? 1 : 0;
+    });
+
+    if (input.cursor) {
+      rows = rows.filter((r) => {
+        const t = r.receivedAt.getTime() - input.cursor!.receivedAt.getTime();
+        if (t < 0) return true;
+        if (t > 0) return false;
+        return r.id < input.cursor!.id;
+      });
+    }
+
+    return rows.slice(0, input.limit);
+  }
+
+  async findById(ownerId: string, messageId: string): Promise<MessageRecord | null> {
+    maybeFault(this.fault, "memory message find failed");
+    for (const r of this.rows.values()) {
+      if (r.ownerId === ownerId && r.id === messageId) {
+        return {
+          id: r.id,
+          ownerId: r.ownerId,
+          deviceId: r.deviceId,
+          deviceMsgId: r.message.deviceMsgId,
+          sender: r.message.sender,
+          bodyCiphertext: r.message.bodyCiphertext,
+          receivedAt: r.message.receivedAt,
+          simSlot: r.message.simSlot,
+          direction: r.message.direction,
+        };
+      }
+    }
+    return null;
+  }
+
+  async delete(ownerId: string, messageId: string): Promise<boolean> {
+    maybeFault(this.fault, "memory message delete failed");
+    for (const [key, r] of this.rows) {
+      if (r.ownerId === ownerId && r.id === messageId) {
+        this.rows.delete(key);
+        return true;
+      }
+    }
+    return false;
   }
 
   async listCiphertextBatch(

@@ -33,6 +33,12 @@ const pairBodySchema = z
   })
   .strict();
 
+const patchDeviceBodySchema = z
+  .object({
+    name: z.string().min(1).max(120),
+  })
+  .strict();
+
 export async function deviceRoutes(app: FastifyInstance): Promise<void> {
   app.post("/v1/devices/pair", async (request, reply) => {
     const pool = app.dbPool;
@@ -171,6 +177,86 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.get("/v1/devices", { preHandler: requireUserAuth }, async (request, reply) => {
+    const list = app.deviceUseCases?.listDevices ?? null;
+    if (!list) {
+      return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
+        retryable: true,
+        instance: "/v1/devices",
+      });
+    }
+
+    const rawLimit = (request.query as { limit?: string }).limit;
+    const listInput: { ownerId: string; limit?: number } = { ownerId: request.ownerId! };
+    if (rawLimit !== undefined) {
+      listInput.limit = Number(rawLimit);
+    }
+
+    try {
+      const result = await list.execute(listInput);
+      return reply.status(200).send({
+        devices: result.devices.map(toOwnerDeviceDto),
+        limit: result.limit,
+      });
+    } catch (err) {
+      if (isInfrastructureError(err) || err instanceof InfrastructureError) {
+        request.log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "device list failed",
+        );
+        return sendProblem(reply, "internal_error", 500, "Failed to list devices", {
+          retryable: true,
+          instance: "/v1/devices",
+        });
+      }
+      mapDeviceError(reply, request, err);
+    }
+  });
+
+  app.patch("/v1/devices/:id", { preHandler: requireUserAuth }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const rename = app.deviceUseCases?.renameDevice ?? null;
+    if (!rename) {
+      return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
+        retryable: true,
+        instance: `/v1/devices/${params.id}`,
+      });
+    }
+
+    const parsed = patchDeviceBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendProblem(reply, "invalid_request", 400, "Malformed device body", {
+        instance: `/v1/devices/${params.id}`,
+      });
+    }
+
+    try {
+      const device = await rename.execute({
+        ownerId: request.ownerId!,
+        deviceId: params.id,
+        name: parsed.data.name,
+      });
+      return reply.status(200).send(toOwnerDeviceDto(device));
+    } catch (err) {
+      if (err instanceof DeviceError && err.code === "not_found") {
+        return sendProblem(reply, "not_found", 404, "Device not found", {
+          instance: `/v1/devices/${params.id}`,
+        });
+      }
+      if (isInfrastructureError(err) || err instanceof InfrastructureError) {
+        request.log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "device rename failed",
+        );
+        return sendProblem(reply, "internal_error", 500, "Failed to rename device", {
+          retryable: true,
+          instance: `/v1/devices/${params.id}`,
+        });
+      }
+      mapDeviceError(reply, request, err);
+    }
+  });
+
   app.post("/v1/devices/:id/revoke", { preHandler: requireUserAuth }, async (request, reply) => {
     const params = request.params as { id: string };
     const revoke = app.deviceUseCases?.revokeDevice ?? null;
@@ -199,6 +285,24 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       mapDeviceError(reply, request, err);
     }
   });
+}
+
+function toOwnerDeviceDto(device: {
+  id: string;
+  name: string;
+  status: "active" | "revoked";
+  createdAt: Date;
+  lastSeenAt: Date | null;
+  revokedAt: Date | null;
+}) {
+  return {
+    id: device.id,
+    name: device.name,
+    status: device.status,
+    created_at: device.createdAt.toISOString(),
+    last_seen_at: device.lastSeenAt ? device.lastSeenAt.toISOString() : null,
+    revoked_at: device.revokedAt ? device.revokedAt.toISOString() : null,
+  };
 }
 
 /**

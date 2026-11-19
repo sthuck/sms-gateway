@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type {
   DeviceAuthRecord,
   DeviceInfo,
+  DeviceListItem,
   DeviceMe,
   PairedDevice,
 } from "../../domain/device/types.js";
@@ -9,6 +10,26 @@ import type { DeviceAuthRepository } from "../../ports/outbound/device-auth-repo
 import { burnPairingCode, lookupDeviceForAuth } from "./device-lookups.js";
 import { withDbInfra } from "./infra.js";
 import { withOwner } from "./with-owner.js";
+
+type DeviceListRow = {
+  id: string;
+  name: string;
+  status: "active" | "revoked";
+  created_at: Date;
+  last_seen_at: Date | null;
+  revoked_at: Date | null;
+};
+
+function mapDeviceListRow(row: DeviceListRow): DeviceListItem {
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status,
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+    revokedAt: row.revoked_at,
+  };
+}
 
 export class PgDeviceAuthRepository implements DeviceAuthRepository {
   constructor(private readonly pool: Pool) {}
@@ -99,6 +120,44 @@ export class PgDeviceAuthRepository implements DeviceAuthRepository {
           lastSeenAt: (row.last_seen_at ?? new Date()).toISOString(),
           revokedAt: row.revoked_at ? row.revoked_at.toISOString() : null,
         };
+      }),
+    );
+  }
+
+  list(ownerId: string, limit: number): Promise<DeviceListItem[]> {
+    return withDbInfra("device list failed", () =>
+      withOwner(this.pool, ownerId, async (client) => {
+        const { rows } = await client.query<DeviceListRow>(
+          `SELECT d.id, d.name, d.status, d.created_at, d.last_seen_at, dc.revoked_at
+           FROM devices d
+           LEFT JOIN device_credentials dc ON dc.device_id = d.id
+           ORDER BY d.created_at DESC, d.id DESC
+           LIMIT $1`,
+          [limit],
+        );
+        return rows.map(mapDeviceListRow);
+      }),
+    );
+  }
+
+  rename(ownerId: string, deviceId: string, name: string): Promise<DeviceListItem | null> {
+    return withDbInfra("device rename failed", () =>
+      withOwner(this.pool, ownerId, async (client) => {
+        const updated = await client.query<{ id: string }>(
+          `UPDATE devices SET name = $1 WHERE id = $2 RETURNING id`,
+          [name, deviceId],
+        );
+        if (!updated.rows[0]) return null;
+
+        const { rows } = await client.query<DeviceListRow>(
+          `SELECT d.id, d.name, d.status, d.created_at, d.last_seen_at, dc.revoked_at
+           FROM devices d
+           LEFT JOIN device_credentials dc ON dc.device_id = d.id
+           WHERE d.id = $1`,
+          [deviceId],
+        );
+        const row = rows[0];
+        return row ? mapDeviceListRow(row) : null;
       }),
     );
   }

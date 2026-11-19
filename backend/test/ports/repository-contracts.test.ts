@@ -133,6 +133,10 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
         }),
       ).rejects.toBeInstanceOf(InfrastructureError);
       await expect(devices.findMe(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(devices.list(OWNER, 10)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(devices.rename(OWNER, OWNER, "Phone")).rejects.toBeInstanceOf(
+        InfrastructureError,
+      );
       await expect(devices.revoke(OWNER, OWNER, "127.0.0.1")).rejects.toBeInstanceOf(
         InfrastructureError,
       );
@@ -226,11 +230,20 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
       ).rejects.toBeInstanceOf(InfrastructureError);
     });
 
-    it("MessageRepository.listRecent throws InfrastructureError on fault", async () => {
+    it("MessageRepository list/find/delete throw InfrastructureError on fault", async () => {
       const messages = new MemoryMessageRepository();
       await expect(messages.listRecent(OWNER, 10)).resolves.toEqual([]);
+      await expect(messages.list({ ownerId: OWNER, limit: 10 })).resolves.toEqual([]);
+      await expect(messages.findById(OWNER, OWNER)).resolves.toBeNull();
+      await expect(messages.delete(OWNER, OWNER)).resolves.toBe(false);
+
       messages.fault.throwInfra = true;
       await expect(messages.listRecent(OWNER, 10)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(messages.list({ ownerId: OWNER, limit: 10 })).rejects.toBeInstanceOf(
+        InfrastructureError,
+      );
+      await expect(messages.findById(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(messages.delete(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
     });
   });
 
@@ -369,6 +382,8 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
             }),
         ],
         ["findMe", () => broken.findMe(OWNER, OWNER)],
+        ["list", () => broken.list(OWNER, 10)],
+        ["rename", () => broken.rename(OWNER, OWNER, "Phone")],
         ["revoke", () => broken.revoke(OWNER, OWNER, "127.0.0.1")],
       ];
       for (const [name, fn] of cases) {
@@ -442,6 +457,11 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
         }),
       ).rejects.toBeInstanceOf(InfrastructureError);
       await expect(brokenMsgs.listRecent(OWNER, 10)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(brokenMsgs.list({ ownerId: OWNER, limit: 10 })).rejects.toBeInstanceOf(
+        InfrastructureError,
+      );
+      await expect(brokenMsgs.findById(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(brokenMsgs.delete(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
 
       const brokenRl = new PgIngestRateLimiter(exploding, DEFAULT_INGEST_CONFIG);
       await expect(brokenRl.checkRequestAllowed(OWNER)).rejects.toBeInstanceOf(InfrastructureError);

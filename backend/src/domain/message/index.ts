@@ -20,3 +20,10 @@ export {
   type NormaliseTimestampResult,
 } from "./normalise.js";
 export { validateBatchItem, type ItemValidation } from "./validate.js";
+export {
+  decodeMessageCursor,
+  encodeMessageCursor,
+  type MessageCursor,
+  type MessageCursorParseResult,
+} from "./cursor.js";
+export { MessageError, type MessageErrorCode, type MessageFieldError } from "./errors.js";

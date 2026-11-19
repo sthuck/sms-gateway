@@ -1,6 +1,7 @@
 export type {
   DeviceAuthRecord,
   DeviceInfo,
+  DeviceListItem,
   DeviceMe,
   PairedDevice,
   PairingCodeRecord,

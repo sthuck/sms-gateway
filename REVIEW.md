@@ -167,3 +167,11 @@ Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed 
 | 2026-11-18 | Backend/Deploy | INGEST_DEFAULT_PHONE_REGION | low | Defaults to US; set to IL in deployment so national-format senders normalise. | Set it in the Helm values/env. |
 | 2026-11-18 | Backend | adapters/http-fastify/message-routes.ts | low | MAX_PAYLOAD_BYTES check duplicates the one in device auth; `void body.owner_id` statements are no-ops. | Remove. |
 | 2026-11-18 | Backend | request schema | low | Unknown top-level keys tolerated although the schema says additionalProperties: false. | Harmless; align or document. |
+
+## 2026-11-19 — STH-21 owner REST (messages + devices)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Backend | GET /v1/messages `q` | medium | Text search is case-insensitive substring on decrypted body only. No owner-facing regex filter is exposed (CompileSafeRegex / re2 remains the seam for stream rules). | Add an explicit `q_regex` (or documented regex mode) via CompileSafeRegex if product needs it; keep scan/page caps. |
+| 2026-11-19 | Backend | ListMessages search pagination | medium | When `q` is set, each request decrypts at most `MAX_MESSAGE_SEARCH_SCAN` (500) candidates. Hitting the scan cap with fewer than `limit` matches returns a `next_cursor` past the scanned window; dense matches after a short page still keyset from the last returned id (may re-decrypt non-matches between pages). | Acceptable for launch; revisit blind index / larger caps only with a privacy trade-off review (ADR 0002). |
+| 2026-11-19 | Backend | DELETE /v1/messages/{id} | medium | Second delete of the same id returns `404` (not `204`). Required so other-owner deletes stay `404` under RLS; unlike device revoke which is idempotent `204`. | Document in client SDKs; treat 404 as success for “ensure gone” if needed. |
