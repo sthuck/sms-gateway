@@ -4,8 +4,8 @@ info:
   summary: Browser session auth and owner-facing endpoints (STH-9 / STH-14)
   description: |
     User authentication for the web UI and bearer-JWT API access, plus
-    owner-facing device management (pairing code issue, revoke) and
-    stream CRUD (STH-23).
+    owner-facing device management (pairing code issue, list, rename,
+    revoke), owner inbox messages (STH-21), and stream CRUD (STH-23).
 
     Login uses a generic OIDC provider (Authentik in production/homelab)
     via authorization code + PKCE. The browser holds an httpOnly session
@@ -17,7 +17,7 @@ info:
 
     Errors use RFC 9457 `application/problem+json` with `code` and
     `retryable`, consistent with `docs/contracts/semantics.md`.
-  version: 0.3.0
+  version: 0.4.0
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -34,7 +34,9 @@ tags:
   - name: Auth
     description: OIDC login, callback, logout, and session introspection
   - name: Devices
-    description: Owner-facing device pairing and revocation
+    description: Owner-facing device pairing, list, rename, and revocation
+  - name: Messages
+    description: Owner inbox — list, get, delete (STH-21)
   - name: Streams
     description: Owner-facing stream definitions (rules / AI / hybrid)
 
@@ -161,6 +163,72 @@ paths:
         "503":
           $ref: "#/components/responses/AuthMisconfigured"
 
+  /v1/devices:
+    get:
+      operationId: listDevices
+      tags: [Devices]
+      summary: List devices for the authenticated owner
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        "200":
+          description: Device list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+
+  /v1/devices/{id}:
+    patch:
+      operationId: renameDevice
+      tags: [Devices]
+      summary: Rename a device owned by the current user
+      description: |
+        Updates `devices.name`. Other owners' devices return `404 not_found` (RLS).
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchDeviceRequest"
+      responses:
+        "200":
+          description: Renamed device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerDevice"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /v1/devices/{id}/revoke:
     post:
       operationId: revokeDevice
@@ -184,6 +252,136 @@ paths:
       responses:
         "204":
           description: Device revoked (idempotent if already revoked)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
+  /v1/messages:
+    get:
+      operationId: listMessages
+      tags: [Messages]
+      summary: List inbox messages for the authenticated owner
+      description: |
+        Cursor pagination on `(received_at, id)` descending (opaque `cursor`).
+        Plaintext metadata filters (`device_id`, `sender`, date range) are
+        applied in SQL. Optional `q` is a case-insensitive substring match on
+        the **decrypted** body (server-side decrypt-then-filter per ADR 0002);
+        work is bounded by page size and a scan cap so search cannot decrypt
+        unboundedly. Other owners' rows are invisible under RLS.
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque cursor from a previous `next_cursor`
+        - name: device_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: sender
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+        - name: received_after
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: received_before
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          description: Substring search over decrypted body text
+      responses:
+        "200":
+          description: Message page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerMessageList"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+
+  /v1/messages/{id}:
+    get:
+      operationId: getMessage
+      tags: [Messages]
+      summary: Get one inbox message
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerMessage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+    delete:
+      operationId: deleteMessage
+      tags: [Messages]
+      summary: Delete one inbox message
+      description: |
+        Deletes under RLS. Missing or other-owner ids return `404 not_found`.
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -506,6 +704,102 @@ components:
             - sim_slot
             - and
             - or
+
+
+    OwnerDevice:
+      type: object
+      additionalProperties: false
+      required: [id, name, status, created_at, last_seen_at, revoked_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, revoked]
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: [string, "null"]
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+
+    DeviceList:
+      type: object
+      additionalProperties: false
+      required: [devices, limit]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/OwnerDevice"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+
+    PatchDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+
+    OwnerMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - sender
+        - body
+        - received_at
+        - device_id
+        - sim_slot
+        - direction
+      properties:
+        id:
+          type: string
+          format: uuid
+        sender:
+          type: string
+        body:
+          type: string
+          description: Decrypted plaintext (empty string round-trips)
+        received_at:
+          type: string
+          format: date-time
+        device_id:
+          type: string
+          format: uuid
+        sim_slot:
+          type: [integer, "null"]
+        direction:
+          type: string
+          enum: [inbound, outbound]
+
+    OwnerMessageList:
+      type: object
+      additionalProperties: false
+      required: [messages, next_cursor, limit]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/OwnerMessage"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 200
 
     Stream:
       type: object

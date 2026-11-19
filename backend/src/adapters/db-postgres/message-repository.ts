@@ -3,6 +3,7 @@ import { InfrastructureError, isInfrastructureError } from "../../domain/errors.
 import type { MessageDirection } from "../../domain/message/types.js";
 import type {
   MessageInsert,
+  MessageListInput,
   MessageRecord,
   MessageRepository,
   MessageUpsertRow,
@@ -119,6 +120,76 @@ export class PgMessageRepository implements MessageRepository {
           [limit],
         );
         return rows.map(mapMessageRow);
+      }),
+    );
+  }
+
+  list(input: MessageListInput): Promise<MessageRecord[]> {
+    return withDbInfra("message list failed", () =>
+      withOwner(this.pool, input.ownerId, async (client) => {
+        const params: unknown[] = [];
+        const where: string[] = [];
+
+        if (input.filters?.deviceId) {
+          params.push(input.filters.deviceId);
+          where.push(`device_id = $${params.length}`);
+        }
+        if (input.filters?.sender) {
+          params.push(input.filters.sender);
+          where.push(`sender = $${params.length}`);
+        }
+        if (input.filters?.receivedAfter) {
+          params.push(input.filters.receivedAfter.toISOString());
+          where.push(`received_at >= $${params.length}::timestamptz`);
+        }
+        if (input.filters?.receivedBefore) {
+          params.push(input.filters.receivedBefore.toISOString());
+          where.push(`received_at <= $${params.length}::timestamptz`);
+        }
+        if (input.cursor) {
+          params.push(input.cursor.receivedAt.toISOString(), input.cursor.id);
+          where.push(
+            `(received_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`,
+          );
+        }
+
+        params.push(input.limit);
+        const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+        const { rows } = await client.query<MessageRow>(
+          `SELECT id, owner_id, device_id, device_msg_id, sender, body_ciphertext,
+                  received_at, sim_slot, direction
+           FROM messages
+           ${whereSql}
+           ORDER BY received_at DESC, id DESC
+           LIMIT $${params.length}`,
+          params,
+        );
+        return rows.map(mapMessageRow);
+      }),
+    );
+  }
+
+  findById(ownerId: string, messageId: string): Promise<MessageRecord | null> {
+    return withDbInfra("message find failed", () =>
+      withOwner(this.pool, ownerId, async (client) => {
+        const { rows } = await client.query<MessageRow>(
+          `SELECT id, owner_id, device_id, device_msg_id, sender, body_ciphertext,
+                  received_at, sim_slot, direction
+           FROM messages
+           WHERE id = $1`,
+          [messageId],
+        );
+        const row = rows[0];
+        return row ? mapMessageRow(row) : null;
+      }),
+    );
+  }
+
+  delete(ownerId: string, messageId: string): Promise<boolean> {
+    return withDbInfra("message delete failed", () =>
+      withOwner(this.pool, ownerId, async (client) => {
+        const result = await client.query(`DELETE FROM messages WHERE id = $1`, [messageId]);
+        return (result.rowCount ?? 0) > 0;
       }),
     );
   }

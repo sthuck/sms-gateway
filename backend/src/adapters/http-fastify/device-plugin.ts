@@ -2,10 +2,15 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
 import type { Pool, PoolClient } from "pg";
 import type {
+  DeleteMessage,
   GetDeviceMe,
+  GetMessage,
   IngestMessageBatch,
   IssuePairingCode,
+  ListDevices,
+  ListMessages,
   PairDevice,
+  RenameDevice,
   ResolveDeviceAuth,
   RevokeDevice,
 } from "../../application/use-cases/index.js";
@@ -26,9 +31,14 @@ export type DeviceUseCases = {
   issuePairingCode: IssuePairingCode | null;
   pairDevice: PairDevice | null;
   revokeDevice: RevokeDevice | null;
+  listDevices: ListDevices | null;
+  renameDevice: RenameDevice | null;
   getDeviceMe: GetDeviceMe | null;
   resolveDeviceAuth: ResolveDeviceAuth | null;
   ingestMessageBatch: IngestMessageBatch | null;
+  listMessages: ListMessages | null;
+  getMessage: GetMessage | null;
+  deleteMessage: DeleteMessage | null;
 };
 
 declare module "fastify" {
