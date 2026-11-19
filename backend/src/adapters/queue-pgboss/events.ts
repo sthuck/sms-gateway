@@ -35,6 +35,7 @@ export const StreamReclassifyEventSchema = z
     type: z.literal("stream.reclassify"),
     owner_id: uuid,
     stream_id: uuid,
+    version: z.number().int().positive(),
   })
   .strict();
 

@@ -12,13 +12,27 @@ describe("queue event payloads", () => {
     expect(event.type).toBe("message.created");
   });
 
-  it("accepts ID-only stream.reclassify", () => {
+  it("accepts ID-only stream.reclassify with version", () => {
     const event = parseQueueEvent({
       type: "stream.reclassify",
       owner_id: "11111111-1111-4111-8111-111111111111",
       stream_id: "44444444-4444-4444-8444-444444444444",
+      version: 2,
     });
     expect(event.type).toBe("stream.reclassify");
+    if (event.type === "stream.reclassify") {
+      expect(event.version).toBe(2);
+    }
+  });
+
+  it("rejects stream.reclassify without version", () => {
+    expect(() =>
+      parseQueueEvent({
+        type: "stream.reclassify",
+        owner_id: "11111111-1111-4111-8111-111111111111",
+        stream_id: "44444444-4444-4444-8444-444444444444",
+      }),
+    ).toThrow();
   });
 
   it("rejects message bodies and senders", () => {
@@ -49,6 +63,7 @@ describe("queue event payloads", () => {
         type: "stream.reclassify",
         owner_id: "11111111-1111-4111-8111-111111111111",
         stream_id: "44444444-4444-4444-8444-444444444444",
+        version: 1,
         meta: { body_ciphertext: "aa" },
       }),
     ).toThrow(/body_ciphertext/);

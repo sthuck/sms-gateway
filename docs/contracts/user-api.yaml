@@ -4,7 +4,8 @@ info:
   summary: Browser session auth and owner-facing endpoints (STH-9 / STH-14)
   description: |
     User authentication for the web UI and bearer-JWT API access, plus
-    owner-facing device management (pairing code issue, revoke).
+    owner-facing device management (pairing code issue, revoke) and
+    stream CRUD (STH-23).
 
     Login uses a generic OIDC provider (Authentik in production/homelab)
     via authorization code + PKCE. The browser holds an httpOnly session
@@ -16,7 +17,7 @@ info:
 
     Errors use RFC 9457 `application/problem+json` with `code` and
     `retryable`, consistent with `docs/contracts/semantics.md`.
-  version: 0.2.0
+  version: 0.3.0
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -34,6 +35,8 @@ tags:
     description: OIDC login, callback, logout, and session introspection
   - name: Devices
     description: Owner-facing device pairing and revocation
+  - name: Streams
+    description: Owner-facing stream definitions (rules / AI / hybrid)
 
 paths:
   /v1/auth/login:
@@ -186,6 +189,153 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /v1/streams:
+    get:
+      operationId: listStreams
+      tags: [Streams]
+      summary: List streams for the authenticated owner
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Stream list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamList"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createStream
+      tags: [Streams]
+      summary: Create a stream definition
+      description: |
+        Creates a stream with `mode` `rules` | `ai` | `hybrid`. `rules_json`
+        is validated server-side (field-pathed errors). AI fields are accepted
+        but inactive until Phase 5. Initial `version` is 1.
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStreamRequest"
+      responses:
+        "201":
+          description: Stream created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stream"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/streams/{id}:
+    get:
+      operationId: getStream
+      tags: [Streams]
+      summary: Get one stream by id
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stream"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateStream
+      tags: [Streams]
+      summary: Update a stream
+      description: |
+        Name-only updates do not bump `version`. Changes to `mode`,
+        `rules_json`, or `ai_prompt` increment `version` and enqueue
+        `stream.reclassify` in the same transaction. Other owners' streams
+        return `404 not_found` (RLS).
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchStreamRequest"
+      responses:
+        "200":
+          description: Updated stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stream"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteStream
+      tags: [Streams]
+      summary: Hard-delete a stream
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -247,6 +397,125 @@ components:
           type: integer
           minimum: 1
           examples: [300]
+
+    StreamMode:
+      type: string
+      enum: [rules, ai, hybrid]
+
+    StreamBackfillStatus:
+      type: string
+      enum: [pending, running, completed, failed]
+
+    StreamRule:
+      type: object
+      description: |
+        Discriminated by `type`. Leaf rules: sender_equals, sender_prefix,
+        sender_regex, body_keyword, body_regex, device, sim_slot. Groups:
+        and, or (nested). Regex patterns are ReDoS-checked server-side.
+      additionalProperties: true
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - sender_equals
+            - sender_prefix
+            - sender_regex
+            - body_keyword
+            - body_regex
+            - device
+            - sim_slot
+            - and
+            - or
+
+    Stream:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - mode
+        - rules_json
+        - ai_prompt
+        - version
+        - backfill_status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        mode:
+          $ref: "#/components/schemas/StreamMode"
+        rules_json:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamRule"
+        ai_prompt:
+          type: [string, "null"]
+        version:
+          type: integer
+          minimum: 1
+        backfill_status:
+          $ref: "#/components/schemas/StreamBackfillStatus"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    StreamList:
+      type: object
+      additionalProperties: false
+      required: [streams, limit]
+      properties:
+        streams:
+          type: array
+          items:
+            $ref: "#/components/schemas/Stream"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+
+    CreateStreamRequest:
+      type: object
+      additionalProperties: false
+      required: [name, mode]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        mode:
+          $ref: "#/components/schemas/StreamMode"
+        rules_json:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamRule"
+        ai_prompt:
+          type: [string, "null"]
+
+    PatchStreamRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        mode:
+          $ref: "#/components/schemas/StreamMode"
+        rules_json:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamRule"
+        ai_prompt:
+          type: [string, "null"]
 
     Problem:
       type: object

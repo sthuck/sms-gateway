@@ -9,6 +9,7 @@ export { PgReplayCache } from "./pg-replay-cache.js";
 export { PgPairRateLimiter } from "./pg-pair-rate-limiter.js";
 export { PgIngestRateLimiter } from "./pg-ingest-rate-limiter.js";
 export { PgMessageRepository } from "./message-repository.js";
+export { PgStreamRepository } from "./stream-repository.js";
 export {
   lookupDeviceForAuth,
   lookupPairingCode,

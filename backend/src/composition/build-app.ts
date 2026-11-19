@@ -14,20 +14,25 @@ import {
   pairingCodeRoutes,
   rawBodyPlugin,
   sendProblem,
+  streamPlugin,
+  streamRoutes,
   type AuthPluginOptions,
   type DeviceUseCases,
+  type StreamUseCases,
 } from "../adapters/http-fastify/index.js";
 import type { DeviceAuthConfig } from "../adapters/device-crypto/config.js";
 import type { IngestConfig } from "../adapters/ingest/index.js";
 import type { QueuePublisher } from "../ports/outbound/queue-publisher.js";
 import { buildAuthStack } from "./build-auth.js";
 import { buildDeviceStack } from "./build-device.js";
+import { buildStreamStack } from "./build-streams.js";
 
 export type BuildAppOptions = {
   pool?: Pool | null;
   auth?: Partial<AuthPluginOptions>;
   deviceAuth?: DeviceAuthConfig | null;
   deviceUseCases?: DeviceUseCases | null;
+  streamUseCases?: StreamUseCases | null;
   queuePublisher?: QueuePublisher | null;
   ingest?: IngestConfig;
 };
@@ -125,6 +130,14 @@ export async function buildApp(
     useCases: options.deviceUseCases !== undefined ? options.deviceUseCases : deviceStack.useCases,
   });
 
+  const streamStack = buildStreamStack({
+    pool,
+    queuePublisher,
+  });
+  await app.register(streamPlugin, {
+    useCases: options.streamUseCases !== undefined ? options.streamUseCases : streamStack.useCases,
+  });
+
   app.setErrorHandler((err, request, reply) => {
     const statusCode =
       typeof err === "object" && err && "statusCode" in err
@@ -153,6 +166,7 @@ export async function buildApp(
   await app.register(pairingCodeRoutes);
   await app.register(deviceRoutes);
   await app.register(messageRoutes);
+  await app.register(streamRoutes);
 
   return app;
 }

@@ -12,6 +12,7 @@ export const handleStreamReclassify: OwnerJobHandler<StreamReclassifyEvent> = as
     {
       ownerId: event.owner_id,
       streamId: event.stream_id,
+      version: event.version,
     },
     "stub handler stream.reclassify",
   );
