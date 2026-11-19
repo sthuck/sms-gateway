@@ -6,6 +6,7 @@
 | [schema.md](./schema.md) | Postgres ER diagram, RLS, roles, device/pairing lookups |
 | [queue.md](./queue.md) | pg-boss events, publishInTx, retries/DLQ, worker RLS |
 | [local-dev.md](./local-dev.md) | Docker Compose, ports, emulator access, Prism mock, Authentik |
+| [deploy.md](./deploy.md) | Homelab Kubernetes deploy (image, secrets, Helm, web interim, Android) |
 | [pairing.md](./pairing.md) | Pairing codes, device auth, rate limits, replay cache, revoke (STH-14) |
 | [android-outbox-retention.md](./android-outbox-retention.md) | Outbox TTL/cap defaults and plaintext-at-rest decision |
 | [android-keepalive.md](./android-keepalive.md) | FGS vs WorkManager, boot/Doze/force-stop, permissions, OEM setup (STH-47) |
