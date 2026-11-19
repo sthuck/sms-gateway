@@ -16,12 +16,16 @@ const createBodySchema = z
   })
   .strict();
 
+/**
+ * Client IP for audit logs. Relies on Fastify `trustProxy` (configured from
+ * TRUST_PROXY); never parses X-Forwarded-For by hand.
+ */
 function clientIp(request: FastifyRequest): string | null {
-  const forwarded = request.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    return forwarded.split(",")[0]?.trim() || null;
+  const ip = request.ip?.trim();
+  if (!ip || !/^[0-9a-fA-F:.]+$/.test(ip)) {
+    return null;
   }
-  return request.ip || null;
+  return ip;
 }
 
 function toTokenDto(token: {

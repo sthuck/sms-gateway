@@ -62,6 +62,39 @@ async function main(): Promise<void> {
     app.log.error(err, "failed to start API");
     process.exit(1);
   }
+
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    app.log.info({ signal }, "API shutting down; closing HTTP server and dependencies");
+    const forceExitTimer = setTimeout(() => {
+      app.log.error({ signal }, "API graceful shutdown timed out; forcing exit");
+      process.exit(1);
+    }, 25_000);
+    forceExitTimer.unref();
+    try {
+      await app.close();
+      clearTimeout(forceExitTimer);
+      process.exit(0);
+    } catch (err) {
+      clearTimeout(forceExitTimer);
+      app.log.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        "error during API shutdown",
+      );
+      process.exit(1);
+    }
+  };
+
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
 }
 
 void main();
