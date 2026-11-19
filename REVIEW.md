@@ -198,11 +198,12 @@ Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed 
 | 2026-11-19 | Backend | composition / message inbox UCs | minor | Message read/delete use cases exist only when a queue publisher is configured (owner reads return 503 without pg-boss). | Build the message repository independently of the queue. |
 | 2026-11-19 | Backend | tests | minor | Gaps: multi-value `q`, search scan cap, HTTP-level owner-read key outage, corrupt-row listing, renaming a revoked device, cascade delete of stream memberships. | Add them. |
 
-## 2026-11-19 — Web UI part A (STH-16)
+## 2026-11-19 — Web UI part A (STH-16) / PR #41 review
 
 | Date | Area | Location | Severity | Description | Suggestion |
 | --- | --- | --- | --- | --- | --- |
-| 2026-11-19 | Web | Pairing completion via GET /v1/devices poll | medium | No dedicated pairing-status / SSE endpoint; UI detects success by a new device id not in the pre-issue snapshot. A second owner tab that pairs another phone in the same window can look like success for this code; concurrent revoke+re-pair of an existing id is invisible. | Add owner-facing GET /v1/pairing-codes/{id} or SSE when product needs certainty. |
-| 2026-11-19 | Web | Deploy | medium | Helm still serves API only; production same-origin SPA serving (static + /v1) is not wired. Local Vite proxy is documented. | Add a web static deploy or ingress path when shipping to sms.sthuck.info. |
-| 2026-11-19 | Web | Logout CSRF | medium | POST /v1/auth/logout is called with credentials + CSRF header when the cookie exists, but the backend route does not enforce CSRF (pre-existing). | Align with other unsafe methods when backend hardens logout. |
-| 2026-11-19 | Web | VITE_APK_DOWNLOAD_URL | medium | Install/APK link is a config placeholder until Android release publishes a URL. | Set the env at build time once the APK is published. |
+| 2026-11-19 | Web | PairingPage + pairing/state (GET /v1/devices poll) | medium | Success is inferred from the first new active device id vs a pre-issue snapshot. A concurrent pairing in another tab can look like success; devices beyond the default list limit (100) would be missed. | Pass `limit` explicitly (max 100); add owner-facing pairing-status / SSE when certainty matters. |
+| 2026-11-19 | Web | AuthContext refresh (`/v1/auth/me`) | medium | A 5xx or network error is treated as logged out (same path as 401). | Only clear the session on 401; otherwise keep prior auth state and show retry. |
+| 2026-11-19 | Web | `config.ts` CSRF cookie name | medium | `sms_csrf` is hardcoded while the backend cookie name is configurable (`CSRF_COOKIE_NAME`). | Document the coupling in `web/README.md`, or expose `VITE_CSRF_COOKIE_NAME`. |
+| 2026-11-19 | Web | Deploy / Helm | medium | Helm still serves API only; production same-origin SPA (`web/dist` + `/v1`) is not wired. A login cookie will not work if the SPA host differs from the API. Local Vite proxy is documented. | Add a web static deploy or ingress path when shipping to sms.sthuck.info. |
+| 2026-11-19 | Web | `VITE_APK_DOWNLOAD_URL` | medium | Install/APK link is still a build-time placeholder. Install docs now live at `docs/android/install.md` / GitHub Releases. | Set `VITE_APK_DOWNLOAD_URL` at build time (e.g. releases page or install doc URL); allow only http/https. |
