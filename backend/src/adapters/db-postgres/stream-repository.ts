@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
+import type { MessageDirection } from "../../domain/message/types.js";
 import type {
   Stream,
   StreamBackfillStatus,
@@ -8,6 +9,10 @@ import type {
 } from "../../domain/stream/types.js";
 import type {
   InsertStreamInput,
+  ListStreamMessagesInput,
+  ListStreamMessagesResult,
+  StreamMatchedBy,
+  StreamMessageRecord,
   StreamRepository,
   UpdateStreamPatch,
 } from "../../ports/outbound/stream-repository.js";
@@ -175,6 +180,66 @@ export class PgStreamRepository implements StreamRepository {
       withOwner(this.pool, ownerId, async (client) => {
         const result = await client.query(`DELETE FROM streams WHERE id = $1`, [streamId]);
         return (result.rowCount ?? 0) > 0;
+      }),
+    );
+  }
+
+  listMessages(input: ListStreamMessagesInput): Promise<ListStreamMessagesResult> {
+    return withDbInfra("stream messages list failed", () =>
+      withOwner(this.pool, input.ownerId, async (client) => {
+        const exists = await client.query<{ id: string }>(`SELECT id FROM streams WHERE id = $1`, [
+          input.streamId,
+        ]);
+        if (!exists.rows[0]) {
+          return { messages: null };
+        }
+
+        type MembershipRow = {
+          id: string;
+          sender: string;
+          body_ciphertext: Buffer;
+          received_at: Date;
+          device_id: string;
+          sim_slot: number | null;
+          direction: MessageDirection;
+          matched_by: StreamMatchedBy;
+          confidence: number | null;
+          stream_version: number;
+        };
+
+        const params: unknown[] = [input.streamId, input.limit];
+        let cursorClause = "";
+        if (input.cursor) {
+          params.push(input.cursor.receivedAt.toISOString(), input.cursor.id);
+          cursorClause = `AND (m.received_at, m.id) < ($3::timestamptz, $4::uuid)`;
+        }
+
+        const { rows } = await client.query<MembershipRow>(
+          `SELECT m.id, m.sender, m.body_ciphertext, m.received_at, m.device_id,
+                  m.sim_slot, m.direction, sm.matched_by, sm.confidence, sm.stream_version
+           FROM stream_membership sm
+           INNER JOIN messages m ON m.id = sm.message_id
+           WHERE sm.stream_id = $1
+             ${cursorClause}
+           ORDER BY m.received_at DESC, m.id DESC
+           LIMIT $2`,
+          params,
+        );
+
+        const messages: StreamMessageRecord[] = rows.map((row) => ({
+          id: row.id,
+          sender: row.sender,
+          bodyCiphertext: new Uint8Array(row.body_ciphertext),
+          receivedAt: row.received_at,
+          deviceId: row.device_id,
+          simSlot: row.sim_slot,
+          direction: row.direction,
+          matchedBy: row.matched_by,
+          confidence: row.confidence,
+          streamVersion: row.stream_version,
+        }));
+
+        return { messages };
       }),
     );
   }

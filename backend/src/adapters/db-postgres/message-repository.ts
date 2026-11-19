@@ -1,13 +1,39 @@
 import type { Pool, PoolClient } from "pg";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
+import type { MessageDirection } from "../../domain/message/types.js";
 import type {
   MessageInsert,
+  MessageRecord,
   MessageRepository,
   MessageUpsertRow,
 } from "../../ports/outbound/message-repository.js";
 import type { QueuePublisher } from "../../ports/outbound/queue-publisher.js";
 import { withDbInfra } from "./infra.js";
 import { withOwner } from "./with-owner.js";
+
+type MessageRow = {
+  id: string;
+  owner_id: string;
+  device_id: string;
+  sender: string;
+  body_ciphertext: Buffer;
+  received_at: Date;
+  sim_slot: number | null;
+  direction: MessageDirection;
+};
+
+function mapMessageRow(row: MessageRow): MessageRecord {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    deviceId: row.device_id,
+    sender: row.sender,
+    bodyCiphertext: new Uint8Array(row.body_ciphertext),
+    receivedAt: row.received_at,
+    simSlot: row.sim_slot,
+    direction: row.direction,
+  };
+}
 
 export class PgMessageRepository implements MessageRepository {
   constructor(
@@ -75,6 +101,22 @@ export class PgMessageRepository implements MessageRepository {
         ]);
 
         return results;
+      }),
+    );
+  }
+
+  listRecent(ownerId: string, limit: number): Promise<MessageRecord[]> {
+    return withDbInfra("message list recent failed", () =>
+      withOwner(this.pool, ownerId, async (client) => {
+        const { rows } = await client.query<MessageRow>(
+          `SELECT id, owner_id, device_id, sender, body_ciphertext,
+                  received_at, sim_slot, direction
+           FROM messages
+           ORDER BY received_at DESC, id DESC
+           LIMIT $1`,
+          [limit],
+        );
+        return rows.map(mapMessageRow);
       }),
     );
   }

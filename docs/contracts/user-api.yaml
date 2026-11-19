@@ -336,6 +336,85 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /v1/streams:preview:
+    post:
+      operationId: previewStream
+      tags: [Streams]
+      summary: Preview an unsaved stream definition against recent messages
+      description: |
+        Evaluates `rules_json` against the owner's last N messages (default 500,
+        max 500). Only the rules portion is evaluated; when `mode` is `ai` or
+        `hybrid`, the response sets `ai_evaluated: false` and a `note` that the
+        AI part was not evaluated. Invalid definitions return the same
+        field-pathed errors as create/update.
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreviewStreamRequest"
+      responses:
+        "200":
+          description: Preview matches
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewStreamResponse"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/streams/{id}/messages:
+    get:
+      operationId: listStreamMessages
+      tags: [Streams]
+      summary: List messages belonging to a stream
+      description: |
+        Owner view of messages linked via `stream_membership`. Cursor pagination
+        is opaque and ordered by `received_at` descending then `id`. Other
+        owners' streams return `404 not_found` (RLS).
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Opaque cursor from a previous `next_cursor`
+      responses:
+        "200":
+          description: Stream message page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamMessageList"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -516,6 +595,139 @@ components:
             $ref: "#/components/schemas/StreamRule"
         ai_prompt:
           type: [string, "null"]
+
+    PreviewStreamRequest:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode:
+          $ref: "#/components/schemas/StreamMode"
+        rules_json:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamRule"
+        ai_prompt:
+          type: [string, "null"]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 500
+
+    MatchedRuleRef:
+      type: object
+      additionalProperties: false
+      required: [path, type]
+      properties:
+        path:
+          type: string
+          description: Field path of the matching rule node
+        type:
+          type: string
+
+    PreviewMatch:
+      type: object
+      additionalProperties: false
+      required: [message_id, sender, received_at, body_snippet, matched_rule]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        sender:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        body_snippet:
+          type: string
+        matched_rule:
+          oneOf:
+            - $ref: "#/components/schemas/MatchedRuleRef"
+            - type: "null"
+
+    PreviewStreamResponse:
+      type: object
+      additionalProperties: false
+      required: [matches, evaluated, matched, ai_evaluated, note, limit]
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/PreviewMatch"
+        evaluated:
+          type: integer
+          minimum: 0
+        matched:
+          type: integer
+          minimum: 0
+        ai_evaluated:
+          type: boolean
+          description: Always false in preview; AI classification is not run
+        note:
+          type: [string, "null"]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+
+    StreamMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - sender
+        - body
+        - received_at
+        - device_id
+        - sim_slot
+        - direction
+        - matched_by
+        - confidence
+        - stream_version
+      properties:
+        id:
+          type: string
+          format: uuid
+        sender:
+          type: string
+        body:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        device_id:
+          type: string
+          format: uuid
+        sim_slot:
+          type: [integer, "null"]
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        matched_by:
+          type: string
+          enum: [rule, ai]
+        confidence:
+          type: [number, "null"]
+        stream_version:
+          type: integer
+          minimum: 1
+
+    StreamMessageList:
+      type: object
+      additionalProperties: false
+      required: [messages, next_cursor, limit]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamMessage"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 200
 
     Problem:
       type: object

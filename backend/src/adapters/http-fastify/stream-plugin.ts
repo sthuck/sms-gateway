@@ -4,7 +4,9 @@ import type {
   CreateStream,
   DeleteStream,
   GetStream,
+  ListStreamMessages,
   ListStreams,
+  PreviewStream,
   UpdateStream,
 } from "../../application/use-cases/index.js";
 import { StreamError } from "../../domain/stream/errors.js";
@@ -17,6 +19,8 @@ export type StreamUseCases = {
   getStream: GetStream | null;
   updateStream: UpdateStream | null;
   deleteStream: DeleteStream | null;
+  previewStream: PreviewStream | null;
+  listStreamMessages: ListStreamMessages | null;
 };
 
 declare module "fastify" {
