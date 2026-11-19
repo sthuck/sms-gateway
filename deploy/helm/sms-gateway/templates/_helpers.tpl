@@ -60,11 +60,18 @@ app.kubernetes.io/instance: {{ .Release.Name }}
     secretKeyRef:
       name: {{ .Values.secrets.databaseSecretName | quote }}
       key: {{ .Values.secrets.databaseSecretKey | quote }}
-- name: ENCRYPTION_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ .Values.secrets.encryptionSecretName | quote }}
-      key: {{ .Values.secrets.encryptionSecretKey | quote }}
+- name: ENCRYPTION_ENABLED
+  value: {{ .Values.config.ENCRYPTION_ENABLED | quote }}
+- name: KEK_ID
+  value: {{ .Values.config.KEK_ID | quote }}
+- name: KEK_FILE
+  value: {{ .Values.config.KEK_FILE | quote }}
+- name: KEK_PREVIOUS
+  value: {{ .Values.config.KEK_PREVIOUS | quote }}
+- name: DEK_CACHE_TTL_MS
+  value: {{ .Values.config.DEK_CACHE_TTL_MS | quote }}
+- name: DEK_CACHE_MAX_ENTRIES
+  value: {{ .Values.config.DEK_CACHE_MAX_ENTRIES | quote }}
 - name: LLM_API_KEY
   valueFrom:
     secretKeyRef:
@@ -114,4 +121,19 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       name: {{ .Values.secrets.oidcSecretName | quote }}
       key: {{ .Values.secrets.sessionSecretKey | quote }}
 {{- end }}
+{{- end }}
+
+{{- define "sms-gateway.kekVolume" -}}
+- name: kek
+  secret:
+    secretName: {{ .Values.secrets.encryptionKekSecretName | quote }}
+    items:
+      - key: {{ .Values.secrets.encryptionKekSecretKey | quote }}
+        path: kek
+{{- end }}
+
+{{- define "sms-gateway.kekVolumeMount" -}}
+- name: kek
+  mountPath: /var/run/secrets/sms-gateway
+  readOnly: true
 {{- end }}

@@ -10,3 +10,4 @@ export {
   type StreamStack,
   type BuildStreamStackOptions,
 } from "./build-streams.js";
+export { buildEncryptionStack, type EncryptionStack } from "./build-encryption.js";

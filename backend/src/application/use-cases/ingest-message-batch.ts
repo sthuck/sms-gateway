@@ -1,6 +1,11 @@
 import { DeviceError } from "../../domain/device/errors.js";
 import type { RateLimitDecision } from "../../domain/device/types.js";
-import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
+import {
+  DecryptionError,
+  InfrastructureError,
+  isDecryptionError,
+  isInfrastructureError,
+} from "../../domain/errors.js";
 import {
   MAX_BATCH_MESSAGES,
   validateBatchItem,
@@ -135,14 +140,25 @@ export class IngestMessageBatch {
       }
 
       if (validValues.length > 0) {
-        const encoded = validValues.map((msg) => ({
-          deviceMsgId: msg.deviceMsgId,
-          sender: msg.sender,
-          bodyCiphertext: this.deps.bodyCodec.encode(input.ownerId, msg.body),
-          receivedAt: msg.receivedAt,
-          simSlot: msg.simSlot,
-          direction: msg.direction,
-        }));
+        const encoded = [];
+        for (const msg of validValues) {
+          const bodyCiphertext = await this.deps.bodyCodec.encode(
+            {
+              ownerId: input.ownerId,
+              deviceId: input.deviceId,
+              deviceMsgId: msg.deviceMsgId,
+            },
+            msg.body,
+          );
+          encoded.push({
+            deviceMsgId: msg.deviceMsgId,
+            sender: msg.sender,
+            bodyCiphertext,
+            receivedAt: msg.receivedAt,
+            simSlot: msg.simSlot,
+            direction: msg.direction,
+          });
+        }
 
         const upserted = await this.deps.messages.upsertBatch({
           ownerId: input.ownerId,
@@ -164,6 +180,7 @@ export class IngestMessageBatch {
       return { ok: true, results: results as BatchItemResult[], rateLimit: reqLimit };
     } catch (err) {
       if (isInfrastructureError(err) || err instanceof InfrastructureError) throw err;
+      if (isDecryptionError(err) || err instanceof DecryptionError) throw err;
       if (err instanceof DeviceError) {
         return { ok: false, error: err };
       }

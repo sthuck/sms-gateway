@@ -22,9 +22,11 @@ import {
 } from "../adapters/http-fastify/index.js";
 import type { DeviceAuthConfig } from "../adapters/device-crypto/config.js";
 import type { IngestConfig } from "../adapters/ingest/index.js";
+import type { BodyCodec } from "../ports/outbound/body-codec.js";
 import type { QueuePublisher } from "../ports/outbound/queue-publisher.js";
 import { buildAuthStack } from "./build-auth.js";
 import { buildDeviceStack } from "./build-device.js";
+import { buildEncryptionStack } from "./build-encryption.js";
 import { buildStreamStack } from "./build-streams.js";
 
 export type BuildAppOptions = {
@@ -35,6 +37,8 @@ export type BuildAppOptions = {
   streamUseCases?: StreamUseCases | null;
   queuePublisher?: QueuePublisher | null;
   ingest?: IngestConfig;
+  /** Override body codec (tests). When omitted, built from encryption config. */
+  bodyCodec?: BodyCodec;
 };
 
 export async function buildApp(
@@ -118,11 +122,28 @@ export async function buildApp(
 
   const deviceConfig = options.deviceAuth !== undefined ? options.deviceAuth : config.deviceAuth;
   const queuePublisher = options.queuePublisher !== undefined ? options.queuePublisher : null;
+
+  let encryptionStack;
+  try {
+    encryptionStack = buildEncryptionStack(
+      options.bodyCodec
+        ? { config: config.encryption, pool, bodyCodec: options.bodyCodec }
+        : { config: config.encryption, pool },
+    );
+  } catch (err) {
+    app.log.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      "Encryption configuration failed at startup",
+    );
+    throw err;
+  }
+
   const deviceStack = buildDeviceStack({
     config: deviceConfig,
     pool,
     queuePublisher,
     ingestConfig: options.ingest ?? config.ingest,
+    bodyCodec: encryptionStack.bodyCodec,
   });
 
   await app.register(devicePlugin, {
@@ -133,6 +154,7 @@ export async function buildApp(
   const streamStack = buildStreamStack({
     pool,
     queuePublisher,
+    bodyCodec: encryptionStack.bodyCodec,
   });
   await app.register(streamPlugin, {
     useCases: options.streamUseCases !== undefined ? options.streamUseCases : streamStack.useCases,

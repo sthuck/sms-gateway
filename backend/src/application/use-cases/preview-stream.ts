@@ -12,7 +12,12 @@ import {
   validateStreamMode,
 } from "../../domain/stream/validate-rules.js";
 import type { StreamMode } from "../../domain/stream/types.js";
-import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
+import {
+  DecryptionError,
+  InfrastructureError,
+  isDecryptionError,
+  isInfrastructureError,
+} from "../../domain/errors.js";
 import type { BodyCodec } from "../../ports/outbound/body-codec.js";
 import type { MessageRepository } from "../../ports/outbound/message-repository.js";
 import type { SafeRegexCompiler } from "../../ports/outbound/safe-regex.js";
@@ -101,7 +106,14 @@ export class PreviewStream {
       const matches: PreviewMatch[] = [];
 
       for (const row of rows) {
-        const body = this.deps.bodyCodec.decode(input.ownerId, row.bodyCiphertext);
+        const body = await this.deps.bodyCodec.decode(
+          {
+            ownerId: input.ownerId,
+            deviceId: row.deviceId,
+            deviceMsgId: row.deviceMsgId,
+          },
+          row.bodyCiphertext,
+        );
         const evalResult = evaluatePrepared(prepared, {
           id: row.id,
           sender: row.sender,
@@ -129,6 +141,7 @@ export class PreviewStream {
       };
     } catch (err) {
       if (isInfrastructureError(err) || err instanceof InfrastructureError) throw err;
+      if (isDecryptionError(err) || err instanceof DecryptionError) throw err;
       if (err instanceof StreamError) throw err;
       throw InfrastructureError.wrap(err, "stream preview failed");
     }

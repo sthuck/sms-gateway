@@ -2,6 +2,7 @@ import { z } from "zod";
 import { loadOidcAuthConfig, type OidcAuthConfig } from "./adapters/auth-oidc/oidc-config.js";
 import { loadDeviceAuthConfig, type DeviceAuthConfig } from "./adapters/device-crypto/config.js";
 import { loadIngestConfig, type IngestConfig } from "./adapters/ingest/index.js";
+import { loadEncryptionConfig, type EncryptionConfig } from "./adapters/key-wrapper/config.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -17,6 +18,7 @@ const envSchema = z.object({
    * Later migrations never reset it; rotate with a manual ALTER ROLE.
    */
   SMS_APP_PASSWORD: z.string().min(1).optional(),
+  /** @deprecated Prefer KEK_FILE (STH-20). Kept so existing Helm secrets do not fail parse. */
   ENCRYPTION_KEY: z.string().optional(),
   LLM_BASE_URL: z.string().url().optional().or(z.literal("")),
   LLM_MODEL: z.string().optional(),
@@ -46,6 +48,7 @@ export type Config = Omit<z.infer<typeof envSchema>, "CORS_ALLOWED_ORIGINS" | "T
   oidc: OidcAuthConfig | null;
   deviceAuth: DeviceAuthConfig;
   ingest: IngestConfig;
+  encryption: EncryptionConfig;
 };
 
 /** Loose IPv4 / IPv6 / CIDR check for TRUST_PROXY list entries. */
@@ -160,6 +163,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     publicBaseUrl: oidc?.publicBaseUrl ?? null,
   });
   const ingest = loadIngestConfig(env);
+  const encryption = loadEncryptionConfig(env, { nodeEnv: rest.NODE_ENV });
 
   return {
     ...rest,
@@ -168,5 +172,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     oidc,
     deviceAuth,
     ingest,
+    encryption,
   };
 }

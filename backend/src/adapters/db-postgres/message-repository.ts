@@ -15,6 +15,7 @@ type MessageRow = {
   id: string;
   owner_id: string;
   device_id: string;
+  device_msg_id: string;
   sender: string;
   body_ciphertext: Buffer;
   received_at: Date;
@@ -27,6 +28,7 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     id: row.id,
     ownerId: row.owner_id,
     deviceId: row.device_id,
+    deviceMsgId: row.device_msg_id,
     sender: row.sender,
     bodyCiphertext: new Uint8Array(row.body_ciphertext),
     receivedAt: row.received_at,
@@ -109,7 +111,7 @@ export class PgMessageRepository implements MessageRepository {
     return withDbInfra("message list recent failed", () =>
       withOwner(this.pool, ownerId, async (client) => {
         const { rows } = await client.query<MessageRow>(
-          `SELECT id, owner_id, device_id, sender, body_ciphertext,
+          `SELECT id, owner_id, device_id, device_msg_id, sender, body_ciphertext,
                   received_at, sim_slot, direction
            FROM messages
            ORDER BY received_at DESC, id DESC
@@ -117,6 +119,48 @@ export class PgMessageRepository implements MessageRepository {
           [limit],
         );
         return rows.map(mapMessageRow);
+      }),
+    );
+  }
+
+  listCiphertextBatch(
+    ownerId: string,
+    opts: { limit: number; afterId?: string },
+  ): Promise<MessageRecord[]> {
+    return withDbInfra("message ciphertext batch failed", () =>
+      withOwner(this.pool, ownerId, async (client) => {
+        const params: unknown[] = [opts.limit];
+        let afterClause = "";
+        if (opts.afterId) {
+          params.push(opts.afterId);
+          afterClause = `WHERE id > $2`;
+        }
+        const { rows } = await client.query<MessageRow>(
+          `SELECT id, owner_id, device_id, device_msg_id, sender, body_ciphertext,
+                  received_at, sim_slot, direction
+           FROM messages
+           ${afterClause}
+           ORDER BY id ASC
+           LIMIT $1`,
+          params,
+        );
+        return rows.map(mapMessageRow);
+      }),
+    );
+  }
+
+  updateCiphertext(
+    ownerId: string,
+    messageId: string,
+    bodyCiphertext: Uint8Array,
+  ): Promise<boolean> {
+    return withDbInfra("message ciphertext update failed", () =>
+      withOwner(this.pool, ownerId, async (client) => {
+        const result = await client.query(
+          `UPDATE messages SET body_ciphertext = $1 WHERE id = $2`,
+          [Buffer.from(bodyCiphertext), messageId],
+        );
+        return (result.rowCount ?? 0) > 0;
       }),
     );
   }

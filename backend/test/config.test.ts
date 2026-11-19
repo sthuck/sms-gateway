@@ -7,6 +7,13 @@ describe("loadConfig", () => {
     expect(config.HOST).toBe("0.0.0.0");
     expect(config.PORT).toBe(8080);
     expect(config.LOG_LEVEL).toBe("info");
+    expect(config.encryption.enabled).toBe(false);
+  });
+
+  it("requires KEK_FILE when encryption is enabled", () => {
+    expect(() => loadConfig({ NODE_ENV: "development", ENCRYPTION_ENABLED: "true" })).toThrow(
+      /KEK_FILE/,
+    );
   });
 
   it("parses PORT as a number", () => {

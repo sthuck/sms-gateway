@@ -46,4 +46,9 @@ export interface UserRepository {
   updateAuthProfile(input: UpdateAuthProfileInput): Promise<void>;
   /** Link a new (issuer, sub) and update profile in one owner-scoped transaction. */
   linkIdentityAndUpdate(input: LinkIdentityAndUpdateInput): Promise<void>;
+  /**
+   * Delete the user row (CASCADE removes owned data including user_keys).
+   * Returns false when the row was already absent under RLS.
+   */
+  deleteById(ownerId: string): Promise<boolean>;
 }

@@ -30,7 +30,7 @@ import type { PairingCodeRepository } from "../../../src/ports/outbound/pairing-
 import type { ReplayCache } from "../../../src/ports/outbound/replay-cache.js";
 import type { PairRateLimiter } from "../../../src/ports/outbound/pair-rate-limiter.js";
 import type { QueuePublisher } from "../../../src/ports/outbound/queue-publisher.js";
-import type { BodyCodec } from "../../../src/ports/outbound/body-codec.js";
+import type { BodyCodec, BodyCodecContext } from "../../../src/ports/outbound/body-codec.js";
 import type { IngestRateLimiter } from "../../../src/ports/outbound/ingest-rate-limiter.js";
 import type {
   MessageInsert,
@@ -46,6 +46,11 @@ import type {
   StreamRepository,
   UpdateStreamPatch,
 } from "../../../src/ports/outbound/stream-repository.js";
+import type {
+  InsertUserKeyInput,
+  UserKeyRecord,
+  UserKeyRepository,
+} from "../../../src/ports/outbound/user-key-repository.js";
 import type {
   DeviceAuthRecord,
   DeviceInfo,
@@ -216,6 +221,11 @@ export class MemoryUserRepository implements UserRepository {
       lastAuthMethod: input.lastAuthMethod,
       displayName: input.displayName,
     });
+  }
+
+  async deleteById(ownerId: string): Promise<boolean> {
+    maybeFault(this.fault, "memory user delete failed");
+    return this.users.delete(ownerId);
   }
 }
 
@@ -439,12 +449,96 @@ export class MemoryQueuePublisher implements QueuePublisher {
 }
 
 export class MemoryBodyCodec implements BodyCodec {
-  encode(_ownerId: string, plaintext: string): Uint8Array {
+  async encode(_ctx: BodyCodecContext, plaintext: string): Promise<Uint8Array> {
     return Buffer.from(plaintext, "utf8");
   }
 
-  decode(_ownerId: string, ciphertext: Uint8Array): string {
+  async decode(_ctx: BodyCodecContext, ciphertext: Uint8Array): Promise<string> {
     return Buffer.from(ciphertext).toString("utf8");
+  }
+}
+
+export class MemoryUserKeyRepository implements UserKeyRepository {
+  fault: FaultSwitch = { throwInfra: false };
+  readonly rows = new Map<string, UserKeyRecord>();
+
+  private key(ownerId: string, dekVersion: number): string {
+    return `${ownerId}:${dekVersion}`;
+  }
+
+  async getOrCreateLatest(
+    ownerId: string,
+    create: () => Promise<Omit<InsertUserKeyInput, "ownerId" | "dekVersion">>,
+  ): Promise<UserKeyRecord> {
+    maybeFault(this.fault, "memory user key get-or-create failed");
+    const existing = [...this.rows.values()]
+      .filter((r) => r.ownerId === ownerId)
+      .sort((a, b) => b.dekVersion - a.dekVersion);
+    if (existing[0]) return existing[0];
+
+    const material = await create();
+    const record: UserKeyRecord = {
+      ownerId,
+      wrappedDek: material.wrappedDek,
+      kekId: material.kekId,
+      dekVersion: 1,
+      createdAt: new Date(),
+    };
+    const k = this.key(ownerId, 1);
+    if (!this.rows.has(k)) {
+      this.rows.set(k, record);
+    }
+    return this.rows.get(k)!;
+  }
+
+  async getByVersion(ownerId: string, dekVersion: number): Promise<UserKeyRecord | null> {
+    maybeFault(this.fault, "memory user key lookup failed");
+    return this.rows.get(this.key(ownerId, dekVersion)) ?? null;
+  }
+
+  async listForOwner(ownerId: string): Promise<UserKeyRecord[]> {
+    maybeFault(this.fault, "memory user key list failed");
+    return [...this.rows.values()]
+      .filter((r) => r.ownerId === ownerId)
+      .sort((a, b) => a.dekVersion - b.dekVersion);
+  }
+
+  async insertVersion(input: InsertUserKeyInput): Promise<UserKeyRecord> {
+    maybeFault(this.fault, "memory user key insert failed");
+    const record: UserKeyRecord = {
+      ownerId: input.ownerId,
+      wrappedDek: input.wrappedDek,
+      kekId: input.kekId,
+      dekVersion: input.dekVersion,
+      createdAt: new Date(),
+    };
+    this.rows.set(this.key(input.ownerId, input.dekVersion), record);
+    return record;
+  }
+
+  async updateWrapped(
+    ownerId: string,
+    dekVersion: number,
+    wrappedDek: Uint8Array,
+    kekId: string,
+  ): Promise<void> {
+    maybeFault(this.fault, "memory user key rewrap failed");
+    const row = this.rows.get(this.key(ownerId, dekVersion));
+    if (!row) throw new InfrastructureError("memory user key missing");
+    row.wrappedDek = wrappedDek;
+    row.kekId = kekId;
+  }
+
+  async deleteAllForOwner(ownerId: string): Promise<number> {
+    maybeFault(this.fault, "memory user key delete failed");
+    let n = 0;
+    for (const k of [...this.rows.keys()]) {
+      if (k.startsWith(`${ownerId}:`)) {
+        this.rows.delete(k);
+        n += 1;
+      }
+    }
+    return n;
   }
 }
 
@@ -528,6 +622,7 @@ export class MemoryMessageRepository implements MessageRepository {
         id: r.id,
         ownerId: r.ownerId,
         deviceId: r.deviceId,
+        deviceMsgId: r.message.deviceMsgId,
         sender: r.message.sender,
         bodyCiphertext: r.message.bodyCiphertext,
         receivedAt: r.message.receivedAt,
@@ -542,14 +637,53 @@ export class MemoryMessageRepository implements MessageRepository {
       .slice(0, limit);
   }
 
+  async listCiphertextBatch(
+    ownerId: string,
+    opts: { limit: number; afterId?: string },
+  ): Promise<MessageRecord[]> {
+    maybeFault(this.fault, "memory message ciphertext batch failed");
+    return [...this.rows.values()]
+      .filter((r) => r.ownerId === ownerId)
+      .filter((r) => (opts.afterId ? r.id > opts.afterId : true))
+      .map((r): MessageRecord => ({
+        id: r.id,
+        ownerId: r.ownerId,
+        deviceId: r.deviceId,
+        deviceMsgId: r.message.deviceMsgId,
+        sender: r.message.sender,
+        bodyCiphertext: r.message.bodyCiphertext,
+        receivedAt: r.message.receivedAt,
+        simSlot: r.message.simSlot,
+        direction: r.message.direction,
+      }))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .slice(0, opts.limit);
+  }
+
+  async updateCiphertext(
+    ownerId: string,
+    messageId: string,
+    bodyCiphertext: Uint8Array,
+  ): Promise<boolean> {
+    maybeFault(this.fault, "memory message ciphertext update failed");
+    for (const row of this.rows.values()) {
+      if (row.ownerId === ownerId && row.id === messageId) {
+        row.message.bodyCiphertext = bodyCiphertext;
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Test helper: seed a message without going through upsertBatch. */
   seed(record: MessageRecord): void {
-    this.rows.set(`${record.deviceId}:seed-${record.id}`, {
+    const deviceMsgId = record.deviceMsgId || `seed-${record.id}`;
+    this.rows.set(`${record.deviceId}:${deviceMsgId}`, {
       id: record.id,
       ownerId: record.ownerId,
       deviceId: record.deviceId,
       message: {
-        deviceMsgId: `seed-${record.id}`,
+        deviceMsgId,
         sender: record.sender,
         bodyCiphertext: record.bodyCiphertext,
         receivedAt: record.receivedAt,

@@ -31,7 +31,8 @@
     "schema:equivalence": "node scripts/schema-equivalence.mjs",
     "catalog:write": "node scripts/catalog-fingerprint.mjs write",
     "catalog:check": "node scripts/catalog-fingerprint.mjs check",
-    "queue:bootstrap": "node scripts/bootstrap-pgboss.mjs"
+    "queue:bootstrap": "node scripts/bootstrap-pgboss.mjs",
+    "encryption:rotate-kek": "tsx scripts/encryption-rotate-kek.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

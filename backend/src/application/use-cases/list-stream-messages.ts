@@ -4,7 +4,12 @@ import {
   encodeStreamMessageCursor,
   type StreamMessageCursor,
 } from "../../domain/stream/cursor.js";
-import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
+import {
+  DecryptionError,
+  InfrastructureError,
+  isDecryptionError,
+  isInfrastructureError,
+} from "../../domain/errors.js";
 import type { BodyCodec } from "../../ports/outbound/body-codec.js";
 import type { StreamMatchedBy, StreamRepository } from "../../ports/outbound/stream-repository.js";
 import type { MessageDirection } from "../../domain/message/types.js";
@@ -104,22 +109,33 @@ export class ListStreamMessages {
           ? encodeStreamMessageCursor({ receivedAt: last.receivedAt, id: last.id })
           : null;
 
-      const messages: StreamMessageDto[] = slice.map((row) => ({
-        id: row.id,
-        sender: row.sender,
-        body: this.deps.bodyCodec.decode(input.ownerId, row.bodyCiphertext),
-        receivedAt: row.receivedAt,
-        deviceId: row.deviceId,
-        simSlot: row.simSlot,
-        direction: row.direction,
-        matchedBy: row.matchedBy,
-        confidence: row.confidence,
-        streamVersion: row.streamVersion,
-      }));
+      const messages: StreamMessageDto[] = [];
+      for (const row of slice) {
+        messages.push({
+          id: row.id,
+          sender: row.sender,
+          body: await this.deps.bodyCodec.decode(
+            {
+              ownerId: input.ownerId,
+              deviceId: row.deviceId,
+              deviceMsgId: row.deviceMsgId,
+            },
+            row.bodyCiphertext,
+          ),
+          receivedAt: row.receivedAt,
+          deviceId: row.deviceId,
+          simSlot: row.simSlot,
+          direction: row.direction,
+          matchedBy: row.matchedBy,
+          confidence: row.confidence,
+          streamVersion: row.streamVersion,
+        });
+      }
 
       return { messages, nextCursor, limit };
     } catch (err) {
       if (isInfrastructureError(err) || err instanceof InfrastructureError) throw err;
+      if (isDecryptionError(err) || err instanceof DecryptionError) throw err;
       if (err instanceof StreamError) throw err;
       throw InfrastructureError.wrap(err, "stream messages list failed");
     }

@@ -8,8 +8,9 @@ as history only. This document explains the model, roles, and isolation
 pattern.
 
 Message bodies are stored as `body_ciphertext` (`bytea`). Columns hold
-ciphertext only; envelope encryption / KMS wrapping is a later ticket
-(STH-20). **Never log message bodies, pairing codes, or signatures.**
+ciphertext only; per-user envelope encryption is STH-20 (see
+`docs/encryption.md`). Wrapped DEKs live in `user_keys`. **Never log message
+bodies, pairing codes, signatures, or key material.**
 
 ## ER diagram
 
@@ -316,6 +317,7 @@ rows.
 
 ## Encryption at rest
 
-`messages.body_ciphertext` stores opaque bytes. Cleartext must not appear
-in logs, traces, queue payloads, or error reports. Key handling
-(`users.encryption_key_ref`) is implemented in STH-20.
+`messages.body_ciphertext` stores opaque AES-GCM envelope bytes (STH-20).
+Per-user wrapped DEKs are in `user_keys` (`FORCE RLS`). Cleartext and key
+material must not appear in logs, traces, queue payloads, or error reports.
+See `docs/encryption.md`.

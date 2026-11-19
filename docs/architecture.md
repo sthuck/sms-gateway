@@ -25,7 +25,7 @@ Decisions:
 
 Still open (see also Linear STH-6 / architecture canvas):
 
-- Message-body encryption key / KMS secret handling (see below)
+- Vault/cloud-KMS adapter for KEK wrap (file-based KEK shipped in STH-20; see `docs/encryption.md`)
 
 ## Monorepo layout
 
@@ -75,10 +75,9 @@ The application Helm chart does **not** bundle Postgres by default.
 Point `DATABASE_URL` (and related secret refs) at whichever option you
 run. See `deploy/helm/sms-gateway/README.md`.
 
-### Encryption key / KMS (open item)
+### Encryption key / KMS
 
-Message bodies are expected to be encrypted at rest. How the encryption
-key is stored and rotated — Kubernetes Secret, external KMS, sealed
-secrets, or a secrets operator — is an **open item**. Until that is
-decided, charts only reference a placeholder secret key name
-(`encryptionKeySecret`) and do not generate keys.
+Message bodies are envelope-encrypted at rest (STH-20) with a per-user DEK
+wrapped by a file-based KEK (`KEK_FILE` / Helm secret mount). See
+`docs/encryption.md`. A Vault transit or cloud-KMS `KeyWrapper` adapter is
+future work.

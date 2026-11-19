@@ -116,4 +116,13 @@ export class PgUserRepository implements UserRepository {
       }),
     );
   }
+
+  deleteById(ownerId: string): Promise<boolean> {
+    return withDbInfra("user delete failed", () =>
+      withOwner(this.pool, ownerId, async (client) => {
+        const result = await client.query(`DELETE FROM users WHERE id = $1`, [ownerId]);
+        return (result.rowCount ?? 0) > 0;
+      }),
+    );
+  }
 }

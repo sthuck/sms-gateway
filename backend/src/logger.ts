@@ -24,6 +24,11 @@ export const REDACT_PATHS = [
   "LLM_API_KEY",
   "apiKey",
   "ENCRYPTION_KEY",
+  "KEK_FILE",
+  "wrappedDek",
+  "wrapped_dek",
+  "bodyCiphertext",
+  "body_ciphertext",
 ] as const;
 
 export function buildLoggerOptions(level: string): LoggerOptions {

@@ -32,6 +32,9 @@ import {
 } from "./catalog-fingerprint.mjs";
 import ownedTablesJson from "../src/adapters/db-postgres/owned-tables.json" with { type: "json" };
 
+/** Baseline floor — stamp/legacy may not yet have post-baseline owned tables. */
+const OWNED_TABLE_FORCE_RLS_FLOOR = 14;
+
 const backendRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 if (process.env.DRIZZLE_MIGRATIONS_FOLDER && process.env.NODE_ENV === "production") {
   console.error("DRIZZLE_MIGRATIONS_FOLDER is not allowed when NODE_ENV=production");
@@ -290,9 +293,9 @@ async function assertLegacyReadyForStamp(client) {
     WHERE table_schema = 'public' AND column_name = 'owner_id'
     `,
   );
-  if ((owned[0]?.n ?? 0) < OWNED_TABLES.length) {
+  if ((owned[0]?.n ?? 0) < OWNED_TABLE_FORCE_RLS_FLOOR) {
     throw new Error(
-      `Expected at least ${OWNED_TABLES.length} owner_id tables; found ${owned[0]?.n ?? 0}`,
+      `Expected at least ${OWNED_TABLE_FORCE_RLS_FLOOR} owner_id tables; found ${owned[0]?.n ?? 0}`,
     );
   }
 
