@@ -107,20 +107,21 @@ kubectl create secret generic sms-gateway-database \
   --from-literal=DATABASE_URL='postgres://sms_app:<password>@<pg-host>:5432/sms' \
   -n <ns>
 
-# 32-byte KEK file → key "kek", mounted at /var/run/secrets/sms-gateway/kek
-# (config.KEK_FILE / ENCRYPTION_ENABLED / KEK_ID; see docs/encryption.md)
+# 32-byte KEK file → key "kek", mounted under /var/run/secrets/sms-gateway/
+# (mode 0440; all keys in this Secret mount so kek-previous can be added for
+# KEK_PREVIOUS rotation — see docs/encryption.md)
 dd if=/dev/urandom bs=32 count=1 of=/tmp/kek
 kubectl create secret generic sms-gateway-encryption \
   --from-file=kek=/tmp/kek \
   -n <ns>
 rm -f /tmp/kek
 
-# LLM key (dummy OK until a real classifier is wired)
-kubectl create secret generic sms-gateway-llm \
-  --from-literal=LLM_API_KEY='dummy' \
-  -n <ns>
+# Optional — LLM key (only required when secrets.llmEnabled=true)
+# kubectl create secret generic sms-gateway-llm \
+#   --from-literal=LLM_API_KEY='<llm-api-key>' \
+#   -n <ns>
 
-# OIDC (required when secrets.oidcEnabled=true)
+# OIDC (required when secrets.oidcEnabled=true; mounted on api only)
 kubectl create secret generic sms-gateway-oidc \
   --from-literal=OIDC_CLIENT_SECRET='<authentik-client-secret>' \
   --from-literal=SESSION_SECRET='<32+-random-bytes>' \
@@ -131,6 +132,12 @@ kubectl create secret generic sms-gateway-oidc \
 
 ## 5. Helm values and install
 
+Publishing a GitHub Release also packages and pushes the Helm chart to GHCR via
+[`.github/workflows/helm-release.yml`](../.github/workflows/helm-release.yml) as
+`oci://ghcr.io/sthuck/charts/sms-gateway` (with `--version <tag-without-v>` and
+`--app-version <tag>`, matching the published container image tag so `image.tag`
+can stay `""`).
+
 Example override for `sms.sthuck.info` / `auth.sthuck.info` (keys from
 `values.yaml`; also in [deployment-auth.md](./deployment-auth.md)):
 
@@ -138,13 +145,18 @@ Example override for `sms.sthuck.info` / `auth.sthuck.info` (keys from
 # my-values.yaml
 image:
   repository: ghcr.io/sthuck/sms-gateway-backend
-  tag: "<sha>"
+  # Optional when installing matching OCI chart version (defaults to Chart appVersion):
+  # tag: "v0.1.0"
 
 imagePullSecrets:
   - name: ghcr-pull
 
 config:
   WEB_DIST_DIR: "/app/web-dist" # chart default; set "" to run API-only
+  TRUST_PROXY: "10.42.0.0/16" # Ingress controller pod CIDR (or hop count "1")
+  DEVICE_ALLOWED_HOSTS: "sms.sthuck.info"
+  DEVICE_API_PUBLIC_URL: "https://sms.sthuck.info"
+  INGEST_DEFAULT_PHONE_REGION: "IL" # or your 2-letter region for national senders
   OIDC_ISSUER_URL: "https://auth.sthuck.info/application/o/sms-gateway/"
   OIDC_CLIENT_ID: "sms-gateway"
   OIDC_REDIRECT_URI: "https://sms.sthuck.info/v1/auth/callback"
@@ -180,8 +192,14 @@ ingress:
         - sms.sthuck.info
 ```
 
+Install from the published GHCR OCI chart (or pass `./deploy/helm/sms-gateway`
+with `--set image.tag=<tag>` when installing from a local checkout):
+
 ```bash
-helm upgrade --install sms-gateway deploy/helm/sms-gateway \
+echo <github-token> | helm registry login ghcr.io -u <github-user> --password-stdin
+
+helm upgrade --install sms-gateway oci://ghcr.io/sthuck/charts/sms-gateway \
+  --version <chart-version> \
   -f my-values.yaml \
   -n <ns>
 ```
@@ -227,10 +245,9 @@ builds a signed prod APK and attaches it to a GitHub Release. Install/update
 via Obtainium: [android/obtainium.md](./android/obtainium.md),
 [android/install.md](./android/install.md).
 
-For device signing Host checks in production, the API also needs
-`DEVICE_ALLOWED_HOSTS` / `DEVICE_API_PUBLIC_URL` (and usually `TRUST_PROXY`) —
-those env vars exist in the backend but are **not** exposed in the chart yet
-(see Known gaps).
+For device signing Host checks and accurate rate-limit/audit IPs in
+production, set `config.DEVICE_ALLOWED_HOSTS`, `config.DEVICE_API_PUBLIC_URL`,
+and `config.TRUST_PROXY` in your Helm values (shown in Section 5).
 
 ## 8. Smoke test
 
@@ -251,11 +268,4 @@ More PAT usage: [agent-access.md](./agent-access.md).
 
 Verified against the repo as of this doc:
 
-- `TRUST_PROXY`, `DEVICE_ALLOWED_HOSTS`, and `DEVICE_API_PUBLIC_URL` are read by
-  the backend (`.env.example`, pairing/device auth) but **not** present in
-  Helm `values.yaml` / `sms-gateway.env`.
 - No in-cluster migrate Job — migrations are laptop/`pnpm migrate:up` only.
-- `templates/NOTES.txt` references `secrets.encryptionSecretName` /
-  `secrets.encryptionSecretKey`, but `values.yaml` defines
-  `encryptionKekSecretName` / `encryptionKekSecretKey` — NOTES will render
-  empty for the encryption secret line.
