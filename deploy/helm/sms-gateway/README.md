@@ -15,8 +15,11 @@ image with different commands:
 # Create secrets first (examples — do not commit real values)
 kubectl create secret generic sms-gateway-database \
   --from-literal=DATABASE_URL='postgres://user:pass@postgres:5432/sms'
+# 32-byte KEK file (STH-20). Mounted at /var/run/secrets/sms-gateway/kek
+dd if=/dev/urandom bs=32 count=1 of=/tmp/kek
 kubectl create secret generic sms-gateway-encryption \
-  --from-literal=ENCRYPTION_KEY='replace-me'
+  --from-file=kek=/tmp/kek
+rm -f /tmp/kek
 kubectl create secret generic sms-gateway-llm \
   --from-literal=LLM_API_KEY='replace-me'
 # OIDC (when secrets.oidcEnabled=true) — see docs/deployment-auth.md
@@ -45,8 +48,9 @@ See `values.yaml`. Notable knobs:
 - `config.*` — non-secret env (`HOST`, `PORT`, `LOG_LEVEL`, `LLM_*`, `OIDC_*`, MFA, CORS)
 - `config.OIDC_APPLICATION_SLUG` — Authentik app slug (`sms-gateway`); issuer path segment
 - `config.CORS_ALLOWED_ORIGINS` — comma-separated browser origins
-- `secrets.*` — Secret names/keys for `DATABASE_URL`, `ENCRYPTION_KEY`, `LLM_API_KEY`, OIDC
+- `secrets.*` — Secret names/keys for `DATABASE_URL`, KEK file, `LLM_API_KEY`, OIDC
 - `secrets.oidcEnabled` — default **false**; set true when wiring OIDC secrets
+- `config.ENCRYPTION_ENABLED` / `KEK_FILE` / `KEK_ID` — body encryption (STH-20)
 - `ingress.enabled` — optional Ingress for the API Service
 - `api` / `worker` / `mcp` — replicas, resources, commands
 
@@ -69,8 +73,11 @@ Homelab options (also documented in `docs/architecture.md`):
 pg-boss (queue) uses the **same** Postgres database. No Redis or other
 broker is required; the worker Deployment is the consumer.
 
-### Encryption key / KMS
+### Encryption KEK (STH-20)
 
-`ENCRYPTION_KEY` is referenced from a Secret, but how that key is minted,
-stored, and rotated (plain Secret vs external KMS vs sealed secrets) is an
-**open item**. Do not bake keys into values or the chart.
+The chart mounts a **32-byte KEK file** from Secret
+`secrets.encryptionKekSecretName` (key `encryptionKekSecretKey`, default
+`kek`) at `config.KEK_FILE` (default `/var/run/secrets/sms-gateway/kek`).
+Set `ENCRYPTION_ENABLED=true` (default in values). Rotation and crypto-shred
+are documented in `docs/encryption.md`. A Vault/cloud-KMS adapter is future
+work behind the same `KeyWrapper` port — do not bake keys into chart values.

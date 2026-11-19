@@ -192,6 +192,29 @@ export const messages = pgTable(
   ],
 ).enableRLS();
 
+/**
+ * Per-user data-encryption keys (DEKs), wrapped by a KEK (STH-20).
+ * PK (owner_id, dek_version): old versions retained so historical ciphertext decrypts.
+ */
+export const userKeys = pgTable(
+  "user_keys",
+  {
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    wrappedDek: bytea("wrapped_dek").notNull(),
+    kekId: text("kek_id").notNull(),
+    dekVersion: integer("dek_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "user_keys_pkey", columns: [t.ownerId, t.dekVersion] }),
+    check("user_keys_dek_version_positive", sql`${t.dekVersion} >= 1`),
+    index("idx_user_keys_owner").on(t.ownerId),
+    pgPolicy("owner_isolation", ownerIsolation),
+  ],
+).enableRLS();
+
 export const streams = pgTable(
   "streams",
   {
@@ -426,6 +449,7 @@ export const OWNED_TABLES = ownedTablesJson as unknown as readonly [
   "device_credentials",
   "pairing_codes",
   "messages",
+  "user_keys",
   "streams",
   "stream_membership",
   "agent_clients",
@@ -436,4 +460,8 @@ export const OWNED_TABLES = ownedTablesJson as unknown as readonly [
   "queue_processed_jobs",
 ];
 
-export const OWNED_TABLE_FORCE_RLS_FLOOR = OWNED_TABLES.length;
+/**
+ * Minimum owned-table count after the baseline (legacy stamp / pre-0001).
+ * Later migrations may add tables (e.g. user_keys); OWNED_TABLES.length grows.
+ */
+export const OWNED_TABLE_FORCE_RLS_FLOOR = 14;

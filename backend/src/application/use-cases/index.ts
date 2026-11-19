@@ -51,3 +51,15 @@ export {
   type ListStreamMessagesResult,
   type StreamMessageDto,
 } from "./list-stream-messages.js";
+export { rotateKekForOwner, type RotateKekDeps } from "./rotate-kek.js";
+export {
+  rotateDekForOwner,
+  reencryptMessagesForOwner,
+  type RotateDekDeps,
+  type ReencryptMessagesResult,
+} from "./rotate-dek.js";
+export {
+  DeleteUserData,
+  type DeleteUserDataDeps,
+  type DeleteUserDataResult,
+} from "./delete-user-data.js";

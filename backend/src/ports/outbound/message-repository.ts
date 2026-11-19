@@ -18,6 +18,7 @@ export type MessageRecord = {
   id: string;
   ownerId: string;
   deviceId: string;
+  deviceMsgId: string;
   sender: string;
   bodyCiphertext: Uint8Array;
   receivedAt: Date;
@@ -45,4 +46,19 @@ export type MessageRepository = {
    * Used by stream preview (last N).
    */
   listRecent(ownerId: string, limit: number): Promise<MessageRecord[]>;
+
+  /**
+   * Keyset page for DEK re-encrypt jobs, ordered by `id ASC`.
+   */
+  listCiphertextBatch(
+    ownerId: string,
+    opts: { limit: number; afterId?: string },
+  ): Promise<MessageRecord[]>;
+
+  /** Replace body_ciphertext in place (DEK rotation re-encrypt). */
+  updateCiphertext(
+    ownerId: string,
+    messageId: string,
+    bodyCiphertext: Uint8Array,
+  ): Promise<boolean>;
 };

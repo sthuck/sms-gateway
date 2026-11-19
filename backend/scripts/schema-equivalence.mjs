@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 /**
- * CI: prove (legacy migrations up + stamp) ≡ (empty DB + Drizzle baseline).
+ * CI: prove (legacy migrations up + stamp + migrate:up) ≡ (empty DB + drizzle migrate:up).
+ *
+ * After stamp, both paths run `migrate:up` so post-baseline migrations
+ * (e.g. 0001 user_keys) apply on the legacy cutover path as well.
  *
  * Creates two temporary databases, applies each path, then:
  *   1. dumps schema-only (excluding pgboss + drizzle), normalizes, and diffs
  *   2. captures security catalog fingerprints (ACLs, policies, role attrs,
  *      proconfig, RLS flags) and diffs those too
+ *
+ * `drizzle/expected-catalog.json` fingerprints the **baseline only** (stamp
+ * target). Post-baseline objects are ignored when checking it against head.
  *
  * Exit 1 on mismatch. Requires a privileged MIGRATE_DATABASE_URL that can
  * CREATE DATABASE.
@@ -21,7 +27,6 @@ import {
   captureCatalog,
   diffCatalogs,
   formatCatalogDiffs,
-  stableStringify,
   EXPECTED_CATALOG_PATH,
 } from "./catalog-fingerprint.mjs";
 
@@ -135,8 +140,15 @@ async function main() {
       DATABASE_URL: dbUrl(legacyDb),
       SMS_APP_PASSWORD: process.env.SMS_APP_PASSWORD,
     });
+    // Apply post-baseline migrations (0001+) so legacy cutover matches head.
+    console.log("→ legacy migrate:up (post-baseline)");
+    run("node", ["scripts/migrate.mjs", "up"], {
+      MIGRATE_DATABASE_URL: dbUrl(legacyDb),
+      DATABASE_URL: dbUrl(legacyDb),
+      SMS_APP_PASSWORD: process.env.SMS_APP_PASSWORD,
+    });
 
-    console.log("→ drizzle baseline up");
+    console.log("→ drizzle migrate:up (baseline + later)");
     run("node", ["scripts/migrate.mjs", "up"], {
       MIGRATE_DATABASE_URL: dbUrl(drizzleDb),
       DATABASE_URL: dbUrl(drizzleDb),
@@ -153,7 +165,7 @@ async function main() {
       execFileSync("diff", ["-u", legacyDump, drizzleDump], { stdio: "inherit" });
       console.log("Schema dump equivalence OK.");
     } catch {
-      console.error("Schema dumps differ (legacy+stamp vs drizzle baseline).");
+      console.error("Schema dumps differ (legacy+stamp+up vs drizzle migrate:up).");
       failed = true;
     }
 
@@ -163,8 +175,8 @@ async function main() {
     await drizzleClient.connect();
     try {
       for (const [label, c] of [
-        ["legacy+stamp", legacyClient],
-        ["drizzle-baseline", drizzleClient],
+        ["legacy+stamp+up", legacyClient],
+        ["drizzle-up", drizzleClient],
       ]) {
         const ownerDiffs = await assertMigratorOwnership(c);
         if (ownerDiffs.length > 0) {
@@ -176,8 +188,8 @@ async function main() {
       const legacyCatalog = await captureCatalog(legacyClient);
       const drizzleCatalog = await captureCatalog(drizzleClient);
       const catalogDiffs = diffCatalogs(legacyCatalog, drizzleCatalog, {
-        leftLabel: "legacy+stamp",
-        rightLabel: "drizzle-baseline",
+        leftLabel: "legacy+stamp+up",
+        rightLabel: "drizzle-up",
       });
       if (catalogDiffs.length > 0) {
         console.error(formatCatalogDiffs(catalogDiffs, "Catalog fingerprint differs"));
@@ -186,26 +198,30 @@ async function main() {
         console.log("Catalog equivalence OK (ACLs, policies, roles, proconfig, RLS, ownership).");
       }
 
-      // Keep committed expected-catalog.json in sync with the drizzle baseline path.
+      // expected-catalog.json is the baseline stamp fingerprint. Ignore
+      // post-baseline objects (added by 0001+) when comparing to migrate:up head.
+      const POST_BASELINE_RE = /\buser_keys\b/;
       if (process.env.SMS_UPDATE_EXPECTED_CATALOG === "1") {
-        fs.writeFileSync(EXPECTED_CATALOG_PATH, stableStringify(drizzleCatalog));
-        console.log(`Updated ${EXPECTED_CATALOG_PATH}`);
+        console.warn(
+          "SMS_UPDATE_EXPECTED_CATALOG=1 ignored: expected-catalog.json must stay baseline-only. " +
+            "Regenerate from a DB with only 0000_baseline applied.",
+        );
       } else {
         const committed = JSON.parse(fs.readFileSync(EXPECTED_CATALOG_PATH, "utf8"));
         const expectedDiffs = diffCatalogs(committed, drizzleCatalog, {
           leftLabel: "expected-catalog.json",
-          rightLabel: "drizzle-baseline",
-        });
+          rightLabel: "drizzle-head",
+        }).filter((d) => !POST_BASELINE_RE.test(d));
         if (expectedDiffs.length > 0) {
           console.error(
             formatCatalogDiffs(
               expectedDiffs,
-              "Committed expected-catalog.json is stale — re-run with SMS_UPDATE_EXPECTED_CATALOG=1",
+              "Committed expected-catalog.json is stale vs baseline objects in migrate:up head",
             ),
           );
           failed = true;
         } else {
-          console.log("expected-catalog.json matches drizzle baseline.");
+          console.log("expected-catalog.json matches drizzle baseline objects.");
         }
       }
     } finally {

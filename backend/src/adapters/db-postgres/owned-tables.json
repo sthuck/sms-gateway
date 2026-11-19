@@ -5,6 +5,7 @@
   "device_credentials",
   "pairing_codes",
   "messages",
+  "user_keys",
   "streams",
   "stream_membership",
   "agent_clients",

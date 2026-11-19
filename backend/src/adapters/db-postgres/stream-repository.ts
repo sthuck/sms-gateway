@@ -200,6 +200,7 @@ export class PgStreamRepository implements StreamRepository {
           body_ciphertext: Buffer;
           received_at: Date;
           device_id: string;
+          device_msg_id: string;
           sim_slot: number | null;
           direction: MessageDirection;
           matched_by: StreamMatchedBy;
@@ -216,7 +217,8 @@ export class PgStreamRepository implements StreamRepository {
 
         const { rows } = await client.query<MembershipRow>(
           `SELECT m.id, m.sender, m.body_ciphertext, m.received_at, m.device_id,
-                  m.sim_slot, m.direction, sm.matched_by, sm.confidence, sm.stream_version
+                  m.device_msg_id, m.sim_slot, m.direction, sm.matched_by, sm.confidence,
+                  sm.stream_version
            FROM stream_membership sm
            INNER JOIN messages m ON m.id = sm.message_id
            WHERE sm.stream_id = $1
@@ -232,6 +234,7 @@ export class PgStreamRepository implements StreamRepository {
           bodyCiphertext: new Uint8Array(row.body_ciphertext),
           receivedAt: row.received_at,
           deviceId: row.device_id,
+          deviceMsgId: row.device_msg_id,
           simSlot: row.sim_slot,
           direction: row.direction,
           matchedBy: row.matched_by,

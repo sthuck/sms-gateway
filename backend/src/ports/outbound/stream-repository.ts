@@ -25,6 +25,7 @@ export type StreamMessageRecord = {
   bodyCiphertext: Uint8Array;
   receivedAt: Date;
   deviceId: string;
+  deviceMsgId: string;
   simSlot: number | null;
   direction: MessageDirection;
   matchedBy: StreamMatchedBy;

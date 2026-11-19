@@ -10,7 +10,7 @@
  * Also supports:
  *   node scripts/check-drizzle-drift.mjs --assert-detects-drift <drizzleDir> <schemaTs>
  *     Run generate against a (mutated) drizzle tree + schema; exit 0 only if
- *     real schema drift is detected (new 0001_*.sql after a loaded schema).
+ *     real schema drift is detected (new NNNN_*.sql after a loaded schema).
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -35,9 +35,9 @@ const drizzleKitEntryHref = pathToFileURL(requireFromBackend.resolve("drizzle-ki
 const NO_CHANGES_RE = /No schema changes, nothing to migrate/i;
 const MALFORMED_RE = /\bmalformed\b/i;
 /** drizzle-kit prints this when it writes a new migration SQL file. */
-const MIGRATION_FILE_RE = /Your SQL migration file\s+➜\s+\S*0001_\S+\.sql/i;
+const MIGRATION_FILE_RE = /Your SQL migration file\s+➜\s+\S*\d{4}_\S+\.sql/i;
 const TABLES_LOADED_RE = /\b([1-9]\d*)\s+tables\b/i;
-const NEW_MIGRATION_SQL_RE = /^0001_.+\.sql$/;
+const NEW_MIGRATION_SQL_RE = /^\d{4}_.+\.sql$/;
 
 /**
  * Exact trimmed lines that may mention `drizzle-kit push` (forbid docs only).
@@ -82,7 +82,7 @@ if (assertDetectsDrift) {
   const detected = runGenerateExpectingDrift(probeDrizzleDir, probeSchema);
   if (!detected) {
     console.error(
-      "Negative drift test failed: generate did not produce a real 0001_*.sql migration against the mutated tree",
+      "Negative drift test failed: generate did not produce a real NNNN_*.sql migration against the mutated tree",
     );
     process.exit(1);
   }
@@ -322,9 +322,9 @@ function cleanupArtifacts(targetDrizzleDir, result) {
 }
 
 /**
- * Real drift only: schema loaded (≥1 table) and drizzle-kit wrote 0001_*.sql
- * (or printed its migration-file line). Errors, empty schemas, and no-ops are
- * not drift.
+ * Real drift only: schema loaded (≥1 table) and drizzle-kit wrote a new
+ * NNNN_*.sql (or printed its migration-file line). Errors, empty schemas, and
+ * no-ops are not drift.
  * @param {string} targetDrizzleDir
  * @param {string} schemaPath
  * @returns {boolean}

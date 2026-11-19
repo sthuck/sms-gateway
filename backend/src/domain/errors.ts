@@ -1,5 +1,5 @@
 /**
- * Infrastructure failures (DB down, network to IdP/JWKS, timeouts).
+ * Infrastructure failures (DB down, network to IdP/JWKS, timeouts, KMS/KEK).
  *
  * Ports MUST throw this (or let it propagate) for infra faults.
  * Ports MUST NOT return `null`/`undefined` to mean "error" — `null` means
@@ -31,4 +31,25 @@ export function isInfrastructureError(err: unknown): boolean {
     return isInfrastructureError((err as { cause?: unknown }).cause);
   }
   return false;
+}
+
+/**
+ * Ciphertext authentication failure (tampered blob, wrong DEK, AAD mismatch).
+ *
+ * Distinct from InfrastructureError: classify by class, never treat as an
+ * empty/garbage body. Not retryable.
+ */
+export class DecryptionError extends Error {
+  readonly retryable = false;
+  readonly cause?: unknown;
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "DecryptionError";
+    this.cause = options?.cause;
+  }
+}
+
+export function isDecryptionError(err: unknown): boolean {
+  return err instanceof DecryptionError;
 }

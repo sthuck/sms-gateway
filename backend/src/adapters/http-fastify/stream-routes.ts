@@ -3,7 +3,12 @@ import { z } from "zod";
 import type { Stream } from "../../domain/stream/types.js";
 import { STREAM_MODES } from "../../domain/stream/types.js";
 import { StreamError } from "../../domain/stream/errors.js";
-import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
+import {
+  DecryptionError,
+  InfrastructureError,
+  isDecryptionError,
+  isInfrastructureError,
+} from "../../domain/errors.js";
 import { DEFAULT_STREAM_LIST_LIMIT } from "../../application/use-cases/list-streams.js";
 import { DEFAULT_STREAM_MESSAGES_LIMIT } from "../../application/use-cases/list-stream-messages.js";
 import { DEFAULT_PREVIEW_LIMIT } from "../../application/use-cases/preview-stream.js";
@@ -107,12 +112,22 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       if (err instanceof StreamError) {
         return mapStreamError(reply, request, err);
       }
+      if (isDecryptionError(err) || err instanceof DecryptionError) {
+        request.log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "stream preview decrypt failed",
+        );
+        return sendProblem(reply, "internal_error", 500, "Failed to decrypt message body", {
+          retryable: false,
+          instance: "/v1/streams:preview",
+        });
+      }
       if (isInfrastructureError(err) || err instanceof InfrastructureError) {
         request.log.error(
           { err: err instanceof Error ? err.message : String(err) },
           "stream preview failed",
         );
-        return sendProblem(reply, "internal_error", 500, "Failed to preview stream", {
+        return sendProblem(reply, "service_unavailable", 503, "Failed to preview stream", {
           retryable: true,
           instance: "/v1/streams:preview",
         });
@@ -366,12 +381,22 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       if (err instanceof StreamError) {
         return mapStreamError(reply, request, err);
       }
+      if (isDecryptionError(err) || err instanceof DecryptionError) {
+        request.log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "stream messages decrypt failed",
+        );
+        return sendProblem(reply, "internal_error", 500, "Failed to decrypt message body", {
+          retryable: false,
+          instance: `/v1/streams/${id}/messages`,
+        });
+      }
       if (isInfrastructureError(err) || err instanceof InfrastructureError) {
         request.log.error(
           { err: err instanceof Error ? err.message : String(err) },
           "stream messages list failed",
         );
-        return sendProblem(reply, "internal_error", 500, "Failed to list stream messages", {
+        return sendProblem(reply, "service_unavailable", 503, "Failed to list stream messages", {
           retryable: true,
           instance: `/v1/streams/${id}/messages`,
         });

@@ -31,6 +31,7 @@ import {
 import { IdentityBodyCodec } from "../adapters/body-codec/index.js";
 import { DEFAULT_INGEST_CONFIG, type IngestConfig } from "../adapters/ingest/index.js";
 import { formatPhoneSender } from "../adapters/phone/index.js";
+import type { BodyCodec } from "../ports/outbound/body-codec.js";
 import type { QueuePublisher } from "../ports/outbound/queue-publisher.js";
 
 export type DeviceStack = {
@@ -43,6 +44,7 @@ export type BuildDeviceStackOptions = {
   pool: Pool | null;
   queuePublisher?: QueuePublisher | null;
   ingestConfig?: IngestConfig;
+  bodyCodec?: BodyCodec;
 };
 
 export function buildDeviceStack(options: BuildDeviceStackOptions): DeviceStack {
@@ -57,13 +59,14 @@ export function buildDeviceStack(options: BuildDeviceStackOptions): DeviceStack 
   const rateLimiter = new PgPairRateLimiter(pool, config.rateLimit);
   const ingestConfig = options.ingestConfig ?? DEFAULT_INGEST_CONFIG;
   const queuePublisher = options.queuePublisher ?? null;
+  const bodyCodec = options.bodyCodec ?? new IdentityBodyCodec();
 
   const ingestMessageBatch =
     queuePublisher !== null
       ? new IngestMessageBatch({
           messages: new PgMessageRepository(pool, queuePublisher),
           rateLimiter: new PgIngestRateLimiter(pool, ingestConfig),
-          bodyCodec: new IdentityBodyCodec(),
+          bodyCodec,
           formatPhone: formatPhoneSender,
           defaultPhoneRegion: ingestConfig.defaultPhoneRegion,
         })

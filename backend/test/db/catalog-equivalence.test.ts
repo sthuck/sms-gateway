@@ -102,7 +102,9 @@ describe.skipIf(!migratorOk)("catalog fingerprint catches privilege/role drift",
     const client = await admin.connect();
     try {
       const catalog = await captureCatalog(client);
-      const diffs = diffAgainstExpected(catalog);
+      // expected-catalog.json fingerprints the baseline (stamp target).
+      // Post-baseline migrations (e.g. user_keys) appear only in the DB.
+      const diffs = diffAgainstExpected(catalog).filter((d) => !/\buser_keys\b/.test(d));
       expect(diffs, formatCatalogDiffs(diffs)).toEqual([]);
     } finally {
       client.release();
@@ -444,12 +446,15 @@ describe("drizzle drift check (STH-45)", () => {
       );
       fs.writeFileSync(schemaCopy, schemaText);
 
+      const sqlBefore = new Set(
+        fs.readdirSync(path.join(backendRoot, "drizzle")).filter((f) => /^\d{4}_.+\.sql$/.test(f)),
+      );
       const result = await assertDetectsDrift(drizzleCopy, schemaCopy);
       expect(result.ok, result.output).toBe(true);
-      // Probe must not leave 0001_*.sql / mutated journal in the real tree.
+      // Probe must not leave new migration SQL / mutated journal in the real tree.
       const leftover = fs
         .readdirSync(path.join(backendRoot, "drizzle"))
-        .filter((f) => /^0001_.+\.sql$/.test(f));
+        .filter((f) => /^\d{4}_.+\.sql$/.test(f) && !sqlBefore.has(f));
       expect(leftover).toEqual([]);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

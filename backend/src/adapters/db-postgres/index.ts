@@ -10,6 +10,7 @@ export { PgPairRateLimiter } from "./pg-pair-rate-limiter.js";
 export { PgIngestRateLimiter } from "./pg-ingest-rate-limiter.js";
 export { PgMessageRepository } from "./message-repository.js";
 export { PgStreamRepository } from "./stream-repository.js";
+export { PgUserKeyRepository } from "./user-key-repository.js";
 export {
   lookupDeviceForAuth,
   lookupPairingCode,

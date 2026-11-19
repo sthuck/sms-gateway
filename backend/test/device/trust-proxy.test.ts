@@ -63,7 +63,11 @@ describe("parseTrustProxy", () => {
       calls.push(args);
     };
     try {
-      const config = loadConfig({ NODE_ENV: "production", TRUST_PROXY: "true" });
+      const config = loadConfig({
+        NODE_ENV: "production",
+        TRUST_PROXY: "true",
+        ENCRYPTION_ENABLED: "false",
+      });
       expect(config.trustProxy).toBe(true);
       expect(calls.some((c) => String(c[0]).includes("TRUST_PROXY=true"))).toBe(true);
     } finally {

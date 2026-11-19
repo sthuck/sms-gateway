@@ -81,7 +81,8 @@ import stability; new code should import from `src/adapters/*`.
 
 ## Planned follow-ups
 
-- Body encryption (STH-20) replaces `IdentityBodyCodec`.
+- Body encryption (STH-20): `AesGcmBodyCodec` + `KeyWrapper` (file KEK) +
+  `user_keys`; `IdentityBodyCodec` only when `ENCRYPTION_ENABLED=false`.
 
 ## Error classification (STH-46 / STH-48 / STH-50)
 

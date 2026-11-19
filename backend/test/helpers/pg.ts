@@ -178,6 +178,14 @@ export async function seedTwoOwners(admin: Pool): Promise<SeededOwners> {
       [userA, userB],
     );
 
+    await client.query(
+      `INSERT INTO user_keys (owner_id, wrapped_dek, kek_id, dek_version)
+       VALUES
+         ($1, decode('01', 'hex'), 'seed-kek', 1),
+         ($2, decode('02', 'hex'), 'seed-kek', 1)`,
+      [userA, userB],
+    );
+
     const messageA = (
       await client.query<{ id: string }>(
         `INSERT INTO messages (

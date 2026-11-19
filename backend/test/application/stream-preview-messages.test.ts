@@ -14,15 +14,20 @@ const DEVICE = "11111111-1111-4111-8111-111111111111";
 const regex = new Re2SafeRegexCompiler();
 const codec = new MemoryBodyCodec();
 
-function seedMessages(messages: MemoryMessageRepository, count: number, matchEvery = 10) {
+async function seedMessages(messages: MemoryMessageRepository, count: number, matchEvery = 10) {
   for (let i = 0; i < count; i += 1) {
     const body = i % matchEvery === 0 ? `OTP code ${i}` : `hello ${i}`;
+    const id = `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
     messages.seed({
-      id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+      id,
       ownerId: OWNER,
       deviceId: DEVICE,
+      deviceMsgId: `seed-${id}`,
       sender: "+1555000",
-      bodyCiphertext: codec.encode(OWNER, body),
+      bodyCiphertext: await codec.encode(
+        { ownerId: OWNER, deviceId: DEVICE, deviceMsgId: `seed-${id}` },
+        body,
+      ),
       receivedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)),
       simSlot: 0,
       direction: "inbound",
@@ -33,7 +38,7 @@ function seedMessages(messages: MemoryMessageRepository, count: number, matchEve
 describe("PreviewStream use case", () => {
   it("returns matches and counts for rules mode", async () => {
     const messages = new MemoryMessageRepository();
-    seedMessages(messages, 20, 5);
+    await seedMessages(messages, 20, 5);
     const preview = new PreviewStream({ messages, bodyCodec: codec, regex });
     const result = await preview.execute({
       ownerId: OWNER,
@@ -50,7 +55,7 @@ describe("PreviewStream use case", () => {
 
   it("notes AI not evaluated for hybrid/ai", async () => {
     const messages = new MemoryMessageRepository();
-    seedMessages(messages, 5, 1);
+    await seedMessages(messages, 5, 1);
     const preview = new PreviewStream({ messages, bodyCodec: codec, regex });
     const hybrid = await preview.execute({
       ownerId: OWNER,
@@ -85,12 +90,17 @@ describe("PreviewStream use case", () => {
 
   it("never evaluates another owner's messages", async () => {
     const messages = new MemoryMessageRepository();
+    const id = "00000000-0000-4000-8000-000000000099";
     messages.seed({
-      id: "00000000-0000-4000-8000-000000000099",
+      id,
       ownerId: OTHER,
       deviceId: DEVICE,
+      deviceMsgId: `seed-${id}`,
       sender: "Bank",
-      bodyCiphertext: codec.encode(OTHER, "OTP secret"),
+      bodyCiphertext: await codec.encode(
+        { ownerId: OTHER, deviceId: DEVICE, deviceMsgId: `seed-${id}` },
+        "OTP secret",
+      ),
       receivedAt: new Date(),
       simSlot: 0,
       direction: "inbound",
@@ -107,7 +117,7 @@ describe("PreviewStream use case", () => {
 
   it("evaluates 500 messages under 1s (generous local bound)", async () => {
     const messages = new MemoryMessageRepository();
-    seedMessages(messages, 500, 7);
+    await seedMessages(messages, 500, 7);
     const preview = new PreviewStream({ messages, bodyCodec: codec, regex });
     const started = performance.now();
     const result = await preview.execute({
@@ -142,12 +152,17 @@ describe("ListStreamMessages use case", () => {
       aiPrompt: null,
     });
     for (let i = 0; i < 5; i += 1) {
+      const id = `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
       streams.seedMembership(created.id, {
-        id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+        id,
         sender: `+1${i}`,
-        bodyCiphertext: codec.encode(OWNER, `body-${i}`),
+        bodyCiphertext: await codec.encode(
+          { ownerId: OWNER, deviceId: DEVICE, deviceMsgId: `msg-${i}` },
+          `body-${i}`,
+        ),
         receivedAt: new Date(Date.UTC(2026, 0, 1, 12, 0, i)),
         deviceId: DEVICE,
+        deviceMsgId: `msg-${i}`,
         simSlot: 0,
         direction: "inbound",
         matchedBy: "rule",
