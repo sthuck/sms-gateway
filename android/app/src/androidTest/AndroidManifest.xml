@@ -1,13 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-
-    <!--
-      Hilt 2.60 removed HiltTestRunner. Use AndroidJUnitRunner with
-      HiltTestApplication so @HiltAndroidTest / HiltAndroidRule work.
-      (Cannot @CustomTestApplication a @HiltAndroidApp subclass.)
-    -->
-    <application
-        android:name="dagger.hilt.android.testing.HiltTestApplication"
-        tools:replace="android:name" />
-</manifest>
+<!-- Instrumentation runner is SmsGatewayHiltTestRunner (see build.gradle.kts).
+     It forces HiltTestApplication at runtime for @HiltAndroidTest. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

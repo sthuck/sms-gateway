@@ -23,9 +23,8 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // Hilt 2.60+ removed HiltTestRunner; AndroidJUnitRunner + @HiltAndroidTest
-        // / HiltAndroidRule is the supported path.
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Hilt 2.60 removed HiltTestRunner; this runner swaps in HiltTestApplication.
+        testInstrumentationRunner = "com.sthuck.smsgateway.SmsGatewayHiltTestRunner"
 
         // Heartbeat endpoint is draft-only; keep off until the backend ships.
         buildConfigField("boolean", "HEARTBEAT_ENABLED", "false")
