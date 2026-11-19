@@ -1,11 +1,16 @@
 export {
   authPlugin,
   requireUserAuth,
+  requireOwnerReadAuth,
+  requireOwnerWriteAuth,
+  OWNER_PAT_READ_ALLOWLIST,
+  PAT_READONLY_DETAIL,
   type AuthPluginOptions,
   type AuthRequestContext,
   type AuthUseCases,
 } from "./auth-plugin.js";
 export { authRoutes } from "./auth-routes.js";
+export { tokenRoutes } from "./token-routes.js";
 export {
   devicePlugin,
   requireDeviceAuth,

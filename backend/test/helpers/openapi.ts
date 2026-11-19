@@ -20,6 +20,7 @@ export type OpenApiDoc = {
     Record<
       string,
       {
+        security?: Array<Record<string, string[]>>;
         responses: Record<
           string,
           {
@@ -29,7 +30,11 @@ export type OpenApiDoc = {
       }
     >
   >;
-  components?: { schemas?: Record<string, JsonSchema>; responses?: Record<string, unknown> };
+  components?: {
+    schemas?: Record<string, JsonSchema>;
+    responses?: Record<string, unknown>;
+    securitySchemes?: Record<string, unknown>;
+  };
 };
 
 let userApiCache: OpenApiDoc | undefined;

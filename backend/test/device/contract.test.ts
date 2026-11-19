@@ -51,6 +51,7 @@ type OpenApiDoc = {
     Record<
       string,
       {
+        security?: Array<Record<string, string[]>>;
         responses: Record<
           string,
           {
@@ -60,7 +61,10 @@ type OpenApiDoc = {
       }
     >
   >;
-  components?: { schemas?: Record<string, JsonSchema> };
+  components?: {
+    schemas?: Record<string, JsonSchema>;
+    securitySchemes?: Record<string, unknown>;
+  };
 };
 
 function responseSchema(
@@ -436,6 +440,23 @@ describe.skipIf(!migratorOk)("OpenAPI contract shapes (STH-14 / STH-15 endpoints
     expect(userApi.paths["/v1/messages"]?.get).toBeTruthy();
     expect(userApi.paths["/v1/messages/{id}"]?.get).toBeTruthy();
     expect(userApi.paths["/v1/messages/{id}"]?.delete).toBeTruthy();
+  });
+
+  it("OpenAPI declares owner PAT endpoints and bearerAuth on read routes", () => {
+    expect(userApi.components?.securitySchemes?.bearerAuth).toBeTruthy();
+    expect(userApi.paths["/v1/tokens"]?.post).toBeTruthy();
+    expect(userApi.paths["/v1/tokens"]?.get).toBeTruthy();
+    expect(userApi.paths["/v1/tokens/{id}"]?.delete).toBeTruthy();
+
+    const messageGetSec = userApi.paths["/v1/messages"]?.get?.security ?? [];
+    const messageIdGetSec = userApi.paths["/v1/messages/{id}"]?.get?.security ?? [];
+    const devicesGetSec = userApi.paths["/v1/devices"]?.get?.security ?? [];
+    expect(messageGetSec.some((s) => "bearerAuth" in s)).toBe(true);
+    expect(messageIdGetSec.some((s) => "bearerAuth" in s)).toBe(true);
+    expect(devicesGetSec.some((s) => "bearerAuth" in s)).toBe(true);
+
+    const tokenPostSec = userApi.paths["/v1/tokens"]?.post?.security ?? [];
+    expect(tokenPostSec.some((s) => "bearerAuth" in s)).toBe(false);
   });
 });
 

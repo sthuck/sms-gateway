@@ -3,7 +3,7 @@ import { z } from "zod";
 import { DeviceError } from "../../domain/device/errors.js";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
 import { rateLimitHeaders } from "../db-postgres/rate-limit.js";
-import { requireUserAuth } from "./auth-plugin.js";
+import { requireOwnerReadAuth, requireOwnerWriteAuth } from "./auth-plugin.js";
 import { deviceAuthPreHandler, mapDeviceError } from "./device-plugin.js";
 import { pairProofErrorToDeviceError, verifyPairProofOfPossession } from "./pair-auth.js";
 import { sendProblem, type ProblemCode } from "./problems.js";
@@ -178,7 +178,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.get("/v1/devices", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.get("/v1/devices", { preHandler: requireOwnerReadAuth }, async (request, reply) => {
     const list = app.deviceUseCases?.listDevices ?? null;
     if (!list) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
@@ -217,7 +217,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.patch("/v1/devices/:id", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.patch("/v1/devices/:id", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const params = request.params as { id: string };
     const rename = app.deviceUseCases?.renameDevice ?? null;
     if (!rename) {
@@ -261,34 +261,38 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.post("/v1/devices/:id/revoke", { preHandler: requireUserAuth }, async (request, reply) => {
-    const params = request.params as { id: string };
-    const revoke = app.deviceUseCases?.revokeDevice ?? null;
-    if (!revoke) {
-      return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
-        retryable: true,
-        instance: request.url,
-      });
-    }
-
-    try {
-      await revoke.execute({
-        ownerId: request.ownerId!,
-        deviceId: params.id,
-        clientIp: clientIp(request),
-      });
-      request.log.info({ device_id: params.id }, "device revoked");
-      return reply.status(204).send();
-    } catch (err) {
-      if (err instanceof DeviceError && err.code === "not_found") {
-        return sendProblem(reply, "not_found", 404, "Device not found", {
-          instance: `/v1/devices/${params.id}/revoke`,
+  app.post(
+    "/v1/devices/:id/revoke",
+    { preHandler: requireOwnerWriteAuth },
+    async (request, reply) => {
+      const params = request.params as { id: string };
+      const revoke = app.deviceUseCases?.revokeDevice ?? null;
+      if (!revoke) {
+        return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
+          retryable: true,
+          instance: request.url,
         });
       }
-      if (isInfrastructureError(err) || err instanceof InfrastructureError) throw err;
-      mapDeviceError(reply, request, err);
-    }
-  });
+
+      try {
+        await revoke.execute({
+          ownerId: request.ownerId!,
+          deviceId: params.id,
+          clientIp: clientIp(request),
+        });
+        request.log.info({ device_id: params.id }, "device revoked");
+        return reply.status(204).send();
+      } catch (err) {
+        if (err instanceof DeviceError && err.code === "not_found") {
+          return sendProblem(reply, "not_found", 404, "Device not found", {
+            instance: `/v1/devices/${params.id}/revoke`,
+          });
+        }
+        if (isInfrastructureError(err) || err instanceof InfrastructureError) throw err;
+        mapDeviceError(reply, request, err);
+      }
+    },
+  );
 }
 
 function toOwnerDeviceDto(device: {

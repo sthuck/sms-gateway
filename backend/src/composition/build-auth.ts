@@ -1,10 +1,14 @@
 import type { Pool } from "pg";
 import {
   CompleteLogin,
+  CreateOwnerAccessToken,
   GetMe,
+  ListOwnerAccessTokens,
   Logout,
   ResolveBearer,
+  ResolveOwnerPat,
   ResolveSession,
+  RevokeOwnerAccessToken,
   StartLogin,
 } from "../application/use-cases/index.js";
 import type { AuthUseCases } from "../adapters/http-fastify/auth-plugin.js";
@@ -19,7 +23,9 @@ import {
   type OidcAuthConfig,
 } from "../adapters/auth-oidc/index.js";
 import {
+  PgAuditRepository,
   PgIdentityRepository,
+  PgOwnerAccessTokenRepository,
   PgSessionRepository,
   PgUserRepository,
 } from "../adapters/db-postgres/index.js";
@@ -44,14 +50,64 @@ export type AuthStack = {
   useCases: AuthUseCases | null;
 };
 
+function buildTokenUseCases(
+  pool: Pool | null,
+): Pick<
+  AuthUseCases,
+  "resolveOwnerPat" | "createOwnerAccessToken" | "listOwnerAccessTokens" | "revokeOwnerAccessToken"
+> {
+  if (!pool) {
+    return {
+      resolveOwnerPat: null,
+      createOwnerAccessToken: null,
+      listOwnerAccessTokens: null,
+      revokeOwnerAccessToken: null,
+    };
+  }
+  const ownerTokens = new PgOwnerAccessTokenRepository(pool);
+  const audit = new PgAuditRepository(pool);
+  const ids = systemIdGenerator;
+  const hasher = sha256TokenHasher;
+  return {
+    resolveOwnerPat: new ResolveOwnerPat({ tokens: ownerTokens, hasher }),
+    createOwnerAccessToken: new CreateOwnerAccessToken({
+      tokens: ownerTokens,
+      audit,
+      ids,
+      hasher,
+    }),
+    listOwnerAccessTokens: new ListOwnerAccessTokens({ tokens: ownerTokens }),
+    revokeOwnerAccessToken: new RevokeOwnerAccessToken({ tokens: ownerTokens, audit }),
+  };
+}
+
 export async function buildAuthStack(options: BuildAuthStackOptions): Promise<AuthStack> {
   const { config, pool } = options;
+  const tokenUseCases = buildTokenUseCases(pool);
+
   if (!config) {
+    // PAT stack can still run when OIDC is off but a pool is present.
+    if (!pool) {
+      return {
+        config: null,
+        oidcProvider: null,
+        jwtVerifier: null,
+        useCases: null,
+      };
+    }
     return {
       config: null,
       oidcProvider: null,
       jwtVerifier: null,
-      useCases: null,
+      useCases: {
+        startLogin: null,
+        completeLogin: null,
+        logout: null,
+        getMe: null,
+        resolveSession: null,
+        resolveBearer: null,
+        ...tokenUseCases,
+      },
     };
   }
 
@@ -84,6 +140,7 @@ export async function buildAuthStack(options: BuildAuthStackOptions): Promise<Au
         getMe: null,
         resolveSession: null,
         resolveBearer: null,
+        ...tokenUseCases,
       },
     };
   }
@@ -119,6 +176,7 @@ export async function buildAuthStack(options: BuildAuthStackOptions): Promise<Au
       identities,
       mfa: config.mfa,
     }),
+    ...tokenUseCases,
   };
 
   return { config, oidcProvider, jwtVerifier, useCases };

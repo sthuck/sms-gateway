@@ -16,6 +16,7 @@ import {
   sendProblem,
   streamPlugin,
   streamRoutes,
+  tokenRoutes,
   type AuthPluginOptions,
   type DeviceUseCases,
   type StreamUseCases,
@@ -189,6 +190,7 @@ export async function buildApp(
   await app.register(deviceRoutes);
   await app.register(messageRoutes);
   await app.register(streamRoutes);
+  await app.register(tokenRoutes);
 
   return app;
 }

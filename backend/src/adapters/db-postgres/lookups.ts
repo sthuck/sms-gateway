@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { OwnerAccessTokenLookup } from "../../domain/auth/access-token.js";
 import type { IdentityRecord, Session } from "../../domain/auth/types.js";
 
 type IdentityRow = {
@@ -77,5 +78,33 @@ export async function lookupUserByEmail(
     ownerId: row.owner_id,
     email: row.email,
     mfaEnrolled: row.mfa_enrolled,
+  };
+}
+
+type OwnerAccessTokenRow = {
+  token_id: string;
+  owner_id: string;
+  token_hash: string;
+  revoked_at: Date | null;
+  last_used_at: Date | null;
+};
+
+/** SECURITY DEFINER: resolve owner PAT by id without an owner GUC (includes revoked). */
+export async function lookupOwnerAccessTokenById(
+  pool: Pool,
+  tokenId: string,
+): Promise<OwnerAccessTokenLookup | null> {
+  const { rows } = await pool.query<OwnerAccessTokenRow>(
+    `SELECT * FROM app.lookup_owner_access_token($1)`,
+    [tokenId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.token_id,
+    ownerId: row.owner_id,
+    tokenHash: row.token_hash,
+    revokedAt: row.revoked_at,
+    lastUsedAt: row.last_used_at,
   };
 }

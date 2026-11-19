@@ -219,6 +219,10 @@ describe.skipIf(!migratorOk)("OIDC auth flow (mock provider)", () => {
       method: "POST",
       url: "/v1/auth/logout",
       cookies: { sms_session: sessionCookie, sms_csrf: csrfCookie },
+      headers: {
+        "x-csrf-token": csrfCookie,
+        origin: "http://127.0.0.1:8080",
+      },
     });
     expect(logout.statusCode).toBe(204);
     const me = await app.inject({

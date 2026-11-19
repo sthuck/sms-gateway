@@ -2,6 +2,14 @@
 
 Entries are appended by the reviewer. HIGH-severity findings are tracked in Linear (team STH, project "SMS Gateway"), not here.
 
+## 2026-11-19 — owner PATs (agent read access)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Backend | `ResolveOwnerPat` / `owner_access_tokens` | medium | PAT id is embedded in the clear (`smsg_pat_<uuid>_…`). Existence timing on the SECURITY DEFINER lookup can differ for unknown vs known ids before the constant-time hash compare; revoked and wrong-secret still share the same 401 body. | Acceptable for launch; consider hash-only lookup (no id in token) if PAT id enumeration becomes a concern. |
+| 2026-11-19 | Backend | PAT `last_used_at` touch | medium | Best-effort throttle uses in-process `lastUsedAt` from the lookup row plus a SQL `INTERVAL '1 minute'` guard; concurrent requests in the same minute can still race a second update. Failures are swallowed so reads never 5xx. | Fine for launch; a single `UPDATE … WHERE last_used_at IS DISTINCT FROM …` is enough. |
+| 2026-11-19 | Backend | PAT scope surface | medium | Read scope is enforced in HTTP preHandlers (`requireOwnerWriteAuth`), not in RLS. A future route that forgets the write guard would accept a PAT. | Keep a contract/lint check that every owner mutating route uses `requireOwnerWriteAuth`; stream GETs already do. |
+
 ## 2026-11-18 — first pass (PRs #2, #3, #5, #6)
 
 | Date | Area | Location | Severity | Description | Suggestion |

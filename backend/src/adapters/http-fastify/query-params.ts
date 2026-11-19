@@ -11,15 +11,20 @@ export const singleQueryString = z.string({
   invalid_type_error: "must be a single string value",
 });
 
+/** Reject U+0000 so Postgres never sees it (avoids SQLSTATE 22021 → 5xx). */
+export const noNulString = singleQueryString.refine((v) => !v.includes("\u0000"), {
+  message: "must not contain NUL characters",
+});
+
 export const listMessagesQuerySchema = z
   .object({
     limit: singleQueryString.optional(),
     cursor: singleQueryString.optional(),
     device_id: singleQueryString.optional(),
-    sender: singleQueryString.optional(),
+    sender: noNulString.optional(),
     received_after: singleQueryString.optional(),
     received_before: singleQueryString.optional(),
-    q: singleQueryString.optional(),
+    q: noNulString.optional(),
   })
   .passthrough();
 

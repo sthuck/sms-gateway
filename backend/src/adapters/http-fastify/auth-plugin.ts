@@ -4,12 +4,17 @@ import cookie from "@fastify/cookie";
 import type { Pool, PoolClient } from "pg";
 import type {
   CompleteLogin,
+  CreateOwnerAccessToken,
   GetMe,
+  ListOwnerAccessTokens,
   Logout,
   ResolveBearer,
+  ResolveOwnerPat,
   ResolveSession,
+  RevokeOwnerAccessToken,
   StartLogin,
 } from "../../application/use-cases/index.js";
+import { isOwnerPatFormat } from "../../domain/auth/access-token.js";
 import { AuthError } from "../../domain/auth/errors.js";
 import type { Session } from "../../domain/auth/types.js";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
@@ -22,8 +27,10 @@ import { sendProblem } from "./problems.js";
 
 export type AuthRequestContext = {
   ownerId: string;
-  authMethod: "session" | "bearer";
+  authMethod: "session" | "bearer" | "pat";
   session: Session | null;
+  /** Set when authMethod is `pat`. */
+  patTokenId: string | null;
 };
 
 export type AuthUseCases = {
@@ -33,7 +40,24 @@ export type AuthUseCases = {
   getMe: GetMe | null;
   resolveSession: ResolveSession | null;
   resolveBearer: ResolveBearer | null;
+  resolveOwnerPat: ResolveOwnerPat | null;
+  createOwnerAccessToken: CreateOwnerAccessToken | null;
+  listOwnerAccessTokens: ListOwnerAccessTokens | null;
+  revokeOwnerAccessToken: RevokeOwnerAccessToken | null;
 };
+
+/**
+ * Owner routes where a valid PAT is accepted (STH-57: default-deny elsewhere).
+ * Keep in sync with `requireOwnerReadAuth` call sites.
+ */
+export const OWNER_PAT_READ_ALLOWLIST = [
+  { method: "GET", url: "/v1/messages" },
+  { method: "GET", url: "/v1/messages/:id" },
+  { method: "GET", url: "/v1/devices" },
+] as const;
+
+export const PAT_READONLY_DETAIL =
+  "Personal access tokens are read-only and cannot call this endpoint";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -93,11 +117,40 @@ export const authPlugin = fp(authPluginImpl, {
 });
 
 /**
- * Authenticate via session cookie or Authorization: Bearer JWT, then expose
- * `request.ownerId` and `request.withOwner`. Device-signed requests are not
- * accepted here (see `requireDeviceAuth`); agent routes remain separate.
+ * Session cookie or OIDC Bearer JWT only. Owner PATs are rejected with 403
+ * (STH-57 default-deny). Device-signed requests are not accepted here.
  */
 export async function requireUserAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  await authenticateOwner(request, reply, { allowPat: false });
+}
+
+/**
+ * Session, OIDC JWT, or owner PAT. Use only on the PAT read allowlist
+ * (`GET /v1/messages`, `GET /v1/messages/:id`, `GET /v1/devices`).
+ */
+export async function requireOwnerReadAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  await authenticateOwner(request, reply, { allowPat: true });
+}
+
+/**
+ * Alias of `requireUserAuth` for mutating / privileged owner routes.
+ * PATs are already denied by default in `requireUserAuth`.
+ */
+export async function requireOwnerWriteAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  await requireUserAuth(request, reply);
+}
+
+async function authenticateOwner(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  opts: { allowPat: boolean },
+): Promise<void> {
   const app = request.server;
   const pool = app.dbPool;
   const config = app.authConfig;
@@ -113,6 +166,36 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
 
   const bearer = extractBearer(request.headers.authorization);
   if (bearer) {
+    if (isOwnerPatFormat(bearer)) {
+      if (!useCases?.resolveOwnerPat) {
+        sendProblem(reply, "unauthorized", 401, "Missing or invalid access token", {
+          instance: request.url,
+        });
+        return;
+      }
+      let resolved;
+      try {
+        resolved = await useCases.resolveOwnerPat.execute({ token: bearer });
+      } catch (err) {
+        mapAuthError(reply, request, err);
+        return;
+      }
+      if (!opts.allowPat) {
+        sendProblem(reply, "forbidden", 403, PAT_READONLY_DETAIL, {
+          instance: request.url,
+        });
+        return;
+      }
+      bindAuth(request, pool, {
+        ownerId: resolved.ownerId,
+        authMethod: "pat",
+        session: null,
+        patTokenId: resolved.tokenId,
+      });
+      schedulePatTouch(pool, resolved.ownerId, resolved.tokenId, resolved.lastUsedAt);
+      return;
+    }
+
     if (!useCases?.resolveBearer) {
       // Match main: missing config/verifier → 401, not 503 (STH-46).
       sendProblem(reply, "unauthorized", 401, "Missing or invalid access token", {
@@ -126,6 +209,7 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
         ownerId: resolved.ownerId,
         authMethod: "bearer",
         session: null,
+        patTokenId: null,
       });
     } catch (err) {
       mapAuthError(reply, request, err);
@@ -199,6 +283,7 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
       expiresAt: resolved.expiresAt,
       revokedAt: resolved.revokedAt,
     },
+    patTokenId: null,
   });
 
   // Best-effort last_seen update after CSRF/origin succeed (STH-46).
@@ -206,6 +291,27 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
     await client.query(`UPDATE sessions SET last_seen_at = now() WHERE id = $1`, [
       resolved.sessionRowId,
     ]);
+  }).catch(() => undefined);
+}
+
+function schedulePatTouch(
+  pool: Pool,
+  ownerId: string,
+  tokenId: string,
+  lastUsedAt: Date | null,
+): void {
+  const throttleMs = 60_000;
+  if (lastUsedAt && Date.now() - lastUsedAt.getTime() < throttleMs) {
+    return;
+  }
+  void withOwner(pool, ownerId, async (client) => {
+    await client.query(
+      `UPDATE owner_access_tokens
+       SET last_used_at = now()
+       WHERE id = $1
+         AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`,
+      [tokenId],
+    );
   }).catch(() => undefined);
 }
 

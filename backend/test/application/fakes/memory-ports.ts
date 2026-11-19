@@ -101,6 +101,9 @@ export class MemoryTokenHasher implements TokenHasher {
   hash(value: string): string {
     return `hash(${value})`;
   }
+  safeEqual(a: string, b: string): boolean {
+    return a === b;
+  }
 }
 
 export class MemorySessionRepository implements SessionRepository {

@@ -46,3 +46,8 @@ export type {
   SafeRegexCompileResult,
   SafeRegexCompiler,
 } from "./safe-regex.js";
+export type {
+  InsertOwnerAccessTokenInput,
+  OwnerAccessTokenRepository,
+} from "./owner-access-token-repository.js";
+export type { AppendAuditInput, AuditActorType, AuditRepository } from "./audit-repository.js";

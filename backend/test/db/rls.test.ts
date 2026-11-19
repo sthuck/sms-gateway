@@ -65,6 +65,7 @@ describe.skipIf(!migratorOk)("RLS owner isolation", () => {
         "audit_log",
         "sender_ai_optout",
         "sessions",
+        "owner_access_tokens",
         "queue_processed_jobs",
       ]),
     );

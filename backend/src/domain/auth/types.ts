@@ -61,4 +61,4 @@ export type IdentityRecord = {
   displayName: string | null;
 };
 
-export type AuthMethod = "session" | "bearer";
+export type AuthMethod = "session" | "bearer" | "pat";
