@@ -71,11 +71,14 @@ send_sms_when_ready() {
   adb shell pm grant "$PACKAGE" android.permission.READ_SMS
 
   wait_until "$PACKAGE process is stable (post-install)" process_stable
-  # Leave the "stopped" state so the manifest receiver can run.
-  adb shell am start -W -n "$PACKAGE/com.sthuck.smsgateway.MainActivity" >/dev/null 2>&1 || true
+  # Do NOT `am start MainActivity` here: IncomingSmsReceiptTest already
+  # launches it via ActivityScenarioRule, and a host-started instance leaves
+  # the activity PAUSED so scenario.close() never reaches DESTROYED.
+  # Instrumentation itself clears the package "stopped" state.
+  #
   # Let IncomingSmsReceiptTest reach its poll loop (it runs after a few
   # faster suites under connectedDevDebugAndroidTest).
-  sleep 8
+  sleep 5
 
   local long_body
   long_body="$(python3 -c 'print("A" * 200)')"
