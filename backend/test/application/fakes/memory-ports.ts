@@ -38,6 +38,11 @@ import type {
   MessageUpsertRow,
 } from "../../../src/ports/outbound/message-repository.js";
 import type {
+  InsertStreamInput,
+  StreamRepository,
+  UpdateStreamPatch,
+} from "../../../src/ports/outbound/stream-repository.js";
+import type {
   DeviceAuthRecord,
   DeviceInfo,
   DeviceMe,
@@ -45,6 +50,7 @@ import type {
   PairingCodeRecord,
   RateLimitDecision,
 } from "../../../src/domain/device/types.js";
+import type { Stream } from "../../../src/domain/stream/types.js";
 import { evaluateMfa, extractMfaClaims, mapClaims } from "../../../src/domain/auth/index.js";
 import type { MfaPolicy } from "../../../src/domain/auth/types.js";
 import { InfrastructureError } from "../../../src/domain/errors.js";
@@ -501,5 +507,101 @@ export class MemoryMessageRepository implements MessageRepository {
     }
     this.lastSeenUpdates.push(input.deviceId);
     return results;
+  }
+}
+
+export class MemoryStreamRepository implements StreamRepository {
+  fault: FaultSwitch = { throwInfra: false };
+  readonly byId = new Map<string, Stream>();
+  published: Array<{
+    type: "stream.reclassify";
+    owner_id: string;
+    stream_id: string;
+    version: number;
+  }> = [];
+  private n = 0;
+
+  async insert(input: InsertStreamInput): Promise<Stream> {
+    maybeFault(this.fault, "memory stream insert failed");
+    this.n += 1;
+    const now = new Date();
+    const stream: Stream = {
+      id: `00000000-0000-4000-8000-${String(this.n).padStart(12, "0")}`,
+      ownerId: input.ownerId,
+      name: input.name,
+      mode: input.mode,
+      rulesJson: input.rulesJson,
+      aiPrompt: input.aiPrompt,
+      version: 1,
+      backfillStatus: "pending",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.byId.set(stream.id, stream);
+    return stream;
+  }
+
+  async list(ownerId: string, limit: number): Promise<Stream[]> {
+    maybeFault(this.fault, "memory stream list failed");
+    return [...this.byId.values()]
+      .filter((s) => s.ownerId === ownerId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit);
+  }
+
+  async findById(ownerId: string, streamId: string): Promise<Stream | null> {
+    maybeFault(this.fault, "memory stream lookup failed");
+    const stream = this.byId.get(streamId);
+    if (!stream || stream.ownerId !== ownerId) return null;
+    return stream;
+  }
+
+  async update(input: {
+    ownerId: string;
+    streamId: string;
+    patch: UpdateStreamPatch;
+  }): Promise<Stream | null> {
+    maybeFault(this.fault, "memory stream update failed");
+    const current = await this.findById(input.ownerId, input.streamId);
+    if (!current) return null;
+
+    const nextName = input.patch.name ?? current.name;
+    const nextMode = input.patch.mode ?? current.mode;
+    const nextRules =
+      input.patch.rulesJson !== undefined ? input.patch.rulesJson : current.rulesJson;
+    const nextPrompt = input.patch.aiPrompt !== undefined ? input.patch.aiPrompt : current.aiPrompt;
+    const definitionChanged =
+      nextMode !== current.mode ||
+      JSON.stringify(nextRules) !== JSON.stringify(current.rulesJson) ||
+      nextPrompt !== current.aiPrompt;
+
+    const updated: Stream = {
+      ...current,
+      name: nextName,
+      mode: nextMode,
+      rulesJson: nextRules,
+      aiPrompt: nextPrompt,
+      version: definitionChanged ? current.version + 1 : current.version,
+      backfillStatus: definitionChanged ? "pending" : current.backfillStatus,
+      updatedAt: new Date(),
+    };
+    this.byId.set(updated.id, updated);
+    if (definitionChanged) {
+      this.published.push({
+        type: "stream.reclassify",
+        owner_id: input.ownerId,
+        stream_id: updated.id,
+        version: updated.version,
+      });
+    }
+    return updated;
+  }
+
+  async delete(ownerId: string, streamId: string): Promise<boolean> {
+    maybeFault(this.fault, "memory stream delete failed");
+    const current = await this.findById(ownerId, streamId);
+    if (!current) return false;
+    this.byId.delete(streamId);
+    return true;
   }
 }

@@ -20,3 +20,14 @@ export type { PublishQueueOptions, QueueEventPayload, QueuePublisher } from "./q
 export type { BodyCodec } from "./body-codec.js";
 export type { MessageInsert, MessageRepository, MessageUpsertRow } from "./message-repository.js";
 export type { IngestRateLimiter } from "./ingest-rate-limiter.js";
+export type {
+  InsertStreamInput,
+  StreamRepository,
+  UpdateStreamPatch,
+} from "./stream-repository.js";
+export type {
+  CompileSafeRegex,
+  RegexMatcher,
+  SafeRegexCompileResult,
+  SafeRegexCompiler,
+} from "./safe-regex.js";

@@ -10,6 +10,7 @@ import {
   PgPairRateLimiter,
   PgReplayCache,
   PgSessionRepository,
+  PgStreamRepository,
   PgUserRepository,
   DEFAULT_RATE_LIMIT_CONFIG,
 } from "../../src/adapters/db-postgres/index.js";
@@ -25,6 +26,7 @@ import {
   MemoryQueuePublisher,
   MemoryReplayCache,
   MemorySessionRepository,
+  MemoryStreamRepository,
   MemoryUserRepository,
 } from "../application/fakes/memory-ports.js";
 import {
@@ -193,6 +195,29 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
       await expect(ingestRl.checkMessageVolumeAllowed(OWNER, 1)).rejects.toBeInstanceOf(
         InfrastructureError,
       );
+    });
+
+    it("StreamRepository: null/false on miss; every method → InfrastructureError on fault", async () => {
+      const streams = new MemoryStreamRepository();
+      await expect(streams.findById(OWNER, OWNER)).resolves.toBeNull();
+      await expect(streams.delete(OWNER, OWNER)).resolves.toBe(false);
+
+      streams.fault.throwInfra = true;
+      await expect(
+        streams.insert({
+          ownerId: OWNER,
+          name: "A",
+          mode: "rules",
+          rulesJson: [],
+          aiPrompt: null,
+        }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(streams.list(OWNER, 10)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(streams.findById(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(
+        streams.update({ ownerId: OWNER, streamId: OWNER, patch: { name: "B" } }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(streams.delete(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
     });
   });
 
@@ -409,6 +434,30 @@ describe("outbound port contracts (null = not found; infra throws Infrastructure
       await expect(brokenRl.checkMessageVolumeAllowed(OWNER, 1)).rejects.toBeInstanceOf(
         InfrastructureError,
       );
+    });
+
+    it("PgStreamRepository: null/false on miss; every method → InfrastructureError on fault", async () => {
+      const queue = new MemoryQueuePublisher();
+      const ok = new PgStreamRepository(appPool, queue);
+      await expect(ok.findById(OWNER, OWNER)).resolves.toBeNull();
+      await expect(ok.delete(OWNER, OWNER)).resolves.toBe(false);
+
+      const broken = new PgStreamRepository(exploding, queue);
+      await expect(
+        broken.insert({
+          ownerId: OWNER,
+          name: "A",
+          mode: "rules",
+          rulesJson: [],
+          aiPrompt: null,
+        }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(broken.list(OWNER, 10)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(broken.findById(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(
+        broken.update({ ownerId: OWNER, streamId: OWNER, patch: { name: "B" } }),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+      await expect(broken.delete(OWNER, OWNER)).rejects.toBeInstanceOf(InfrastructureError);
     });
   });
 });

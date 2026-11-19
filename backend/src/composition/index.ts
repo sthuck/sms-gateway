@@ -5,3 +5,8 @@ export {
   type DeviceStack,
   type BuildDeviceStackOptions,
 } from "./build-device.js";
+export {
+  buildStreamStack,
+  type StreamStack,
+  type BuildStreamStackOptions,
+} from "./build-streams.js";

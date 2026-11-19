@@ -22,6 +22,13 @@ export {
 export { deviceRoutes } from "./device-routes.js";
 export { messageRoutes } from "./message-routes.js";
 export { pairingCodeRoutes } from "./pairing-code-routes.js";
+export {
+  streamPlugin,
+  mapStreamError,
+  type StreamPluginOptions,
+  type StreamUseCases,
+} from "./stream-plugin.js";
+export { streamRoutes } from "./stream-routes.js";
 export { rawBodyPlugin } from "./raw-body.js";
 export {
   verifyPairProofOfPossession,

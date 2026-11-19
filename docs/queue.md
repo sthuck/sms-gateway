@@ -74,9 +74,13 @@ Payloads are Zod-validated (`.strict()` + forbidden-key guard). **IDs only.**
 {
   "type": "stream.reclassify",
   "owner_id": "<uuid>",
-  "stream_id": "<uuid>"
+  "stream_id": "<uuid>",
+  "version": 2
 }
 ```
+
+`version` is the stream definition version after the change that triggered
+reclassify (STH-23). The STH-24 worker uses it for membership rows.
 
 Forbidden keys (top-level or nested): `body`, `body_ciphertext`,
 `ciphertext`, `sender`, `text`, `message`, `messages`, `content`,

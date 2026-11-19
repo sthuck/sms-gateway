@@ -23,3 +23,13 @@ export {
   type IngestMessageBatchInput,
   type IngestMessageBatchResult,
 } from "./ingest-message-batch.js";
+export { CreateStream, type CreateStreamDeps, type CreateStreamInput } from "./create-stream.js";
+export {
+  ListStreams,
+  DEFAULT_STREAM_LIST_LIMIT,
+  MAX_STREAM_LIST_LIMIT,
+  type ListStreamsDeps,
+} from "./list-streams.js";
+export { GetStream, type GetStreamDeps } from "./get-stream.js";
+export { UpdateStream, type UpdateStreamDeps, type UpdateStreamInput } from "./update-stream.js";
+export { DeleteStream, type DeleteStreamDeps } from "./delete-stream.js";
