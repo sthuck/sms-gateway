@@ -17,17 +17,48 @@ Agreed hosts: app `https://sms.sthuck.info`, Authentik
 
 ## 2. Build and push the image
 
-From the **repo root** (see `backend/Dockerfile`):
+`backend/Dockerfile` builds the Web UI in a `web-build` stage (`pnpm --filter
+@sms-gateway/web build`) and copies `web/dist` into `/app/web-dist` in the
+runtime image (`ENV WEB_DIST_DIR=/app/web-dist`).
+
+### GitHub Releases → GHCR (automated)
+
+[`.github/workflows/docker-release.yml`](../.github/workflows/docker-release.yml)
+builds `backend/Dockerfile` (`linux/amd64`) and publishes to
+`ghcr.io/sthuck/sms-gateway-backend` using `GITHUB_TOKEN` when:
+
+- A **GitHub Release is published** (`release: [published]`) via the GitHub UI
+  or local `gh release create`, or
+- **Docker Release** is triggered manually (`workflow_dispatch`, with an
+  optional custom `tag` input).
+
+Tags published on release: the exact release tag (e.g. `v0.1.0`), semver tags
+(`0.1.0`, `0.1` for non-prereleases), `sha-<short>`, and `latest` (for
+non-prerelease releases). Optional repository variables (Settings → Secrets and
+variables → Actions → Variables) `VITE_APK_DOWNLOAD_URL` and
+`VITE_CSRF_COOKIE_NAME` are passed as Docker build args (both default empty).
+
+Note: Releases auto-created by `android-release.yml` using `GITHUB_TOKEN` on
+`git push origin v*` do **not** trigger `release: [published]` workflows in
+GitHub Actions — publish the Release from the GitHub UI / local `gh`, or run
+**Docker Release** via `workflow_dispatch`.
+
+### Manual local build & push (fallback)
+
+From the **repo root**:
 
 ```bash
 # GHCR login (private package)
 echo <github-token> | docker login ghcr.io -u <github-user> --password-stdin
 
-docker build -f backend/Dockerfile -t ghcr.io/sthuck/sms-gateway-backend:<sha> .
+docker build -f backend/Dockerfile \
+  --build-arg VITE_APK_DOWNLOAD_URL="<apk-release-or-install-url>" \
+  -t ghcr.io/sthuck/sms-gateway-backend:<sha> .
 docker push ghcr.io/sthuck/sms-gateway-backend:<sha>
 ```
 
-There is **no** image-publish workflow; CI only builds the image locally. For a
+(`VITE_APK_DOWNLOAD_URL` and `VITE_CSRF_COOKIE_NAME` are optional build args and
+default to `""`.) For a
 private GHCR package, create a pull secret and wire the chart’s top-level
 `imagePullSecrets` (default `[]` in `values.yaml`):
 
@@ -113,6 +144,7 @@ imagePullSecrets:
   - name: ghcr-pull
 
 config:
+  WEB_DIST_DIR: "/app/web-dist" # chart default; set "" to run API-only
   OIDC_ISSUER_URL: "https://auth.sthuck.info/application/o/sms-gateway/"
   OIDC_CLIENT_ID: "sms-gateway"
   OIDC_REDIRECT_URI: "https://sms.sthuck.info/v1/auth/callback"
@@ -135,6 +167,8 @@ ingress:
   className: "<your-ingress-class>"
   annotations:
     cert-manager.io/cluster-issuer: "<your-issuer>"
+    # For nginx Ingress, allow max-size 1 MiB SMS batches:
+    # nginx.ingress.kubernetes.io/proxy-body-size: "2m"
   hosts:
     - host: sms.sthuck.info
       paths:
@@ -152,45 +186,30 @@ helm upgrade --install sms-gateway deploy/helm/sms-gateway \
   -n <ns>
 ```
 
-## 6. Web UI (interim)
+Note: ensure your Ingress controller preserves the external `Host` header
+(`sms.sthuck.info`), which the API checks during ES256 device-signature verification.
 
-The chart deploys API / worker / MCP only — it does **not** serve `web/dist`
-(tracked as [STH-58](https://linear.app/sthuck/issue/STH-58)). The SPA expects
-same-origin `/v1` so session (`sms_session`) and CSRF (`sms_csrf`) cookies work
-(`web/README.md`).
+## 6. Web UI (single-host static serving)
 
-Interim:
+The API Deployment serves the bundled `web/dist` SPA on the same origin
+(`https://sms.sthuck.info`) via `config.WEB_DIST_DIR: "/app/web-dist"` (the
+chart default, matching `/app/web-dist` baked into `backend/Dockerfile`). The
+chart's single `/` Ingress therefore handles both SPA routes (`/`, `/login`,
+`/inbox`, `/devices`, `/tokens`, `/assets/*`) and `/v1/*` API calls with
+same-origin `sms_session` and `sms_csrf` cookies — no separate nginx Deployment
+or Ingress path split is required.
 
-1. `pnpm web:build` → `web/dist`
-2. Serve that tree with nginx (or similar)
-3. Route one host so `/v1` → API Service and `/` → the static server
+Static-serving behavior on the API:
 
-Example Ingress paths (API Service name is `<release>-api`, default
-`sms-gateway-api`; adjust the web Service name to match your nginx Deploy):
-
-```yaml
-# Idea only — not rendered by the chart today
-rules:
-  - host: sms.sthuck.info
-    http:
-      paths:
-        - path: /v1
-          pathType: Prefix
-          backend:
-            service:
-              name: sms-gateway-api
-              port:
-                number: 8080
-        - path: /
-          pathType: Prefix
-          backend:
-            service:
-              name: sms-gateway-web
-              port:
-                number: 80
-```
-
-Until that exists, the chart’s single `/` path sends everything to the API.
+- Unknown `/v1/*` routes and missing `/assets/*` or extensioned files always
+  return `404 application/problem+json` (never HTML).
+- `/assets/*` files are served with `Cache-Control: public, max-age=31536000, immutable`.
+- HTML (`index.html` and SPA fallback routes) is served with
+  `Cache-Control: no-cache`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`.
+- To disable bundled UI serving (for example, if serving `web/dist` externally),
+  set `config.WEB_DIST_DIR: ""` in your Helm values — the API Deployment
+  explicitly exports `WEB_DIST_DIR` so `""` overrides the Dockerfile default.
 
 ## 7. Android release APK
 
@@ -236,9 +255,6 @@ Verified against the repo as of this doc:
   the backend (`.env.example`, pairing/device auth) but **not** present in
   Helm `values.yaml` / `sms-gateway.env`.
 - No in-cluster migrate Job — migrations are laptop/`pnpm migrate:up` only.
-- No GHCR image publish workflow (CI builds `sms-gateway-backend:ci` only).
-- Chart does not serve `web/dist` (STH-58); same-origin SPA needs an interim
-  static + path split (section 6).
 - `templates/NOTES.txt` references `secrets.encryptionSecretName` /
   `secrets.encryptionSecretKey`, but `values.yaml` defines
   `encryptionKekSecretName` / `encryptionKekSecretKey` — NOTES will render
