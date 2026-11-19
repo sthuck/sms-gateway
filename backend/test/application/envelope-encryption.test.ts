@@ -50,6 +50,21 @@ describe("envelope encryption (STH-20)", () => {
     expect(await codec.decode(ctx, blob)).toBe("hello otp 123456");
   });
 
+  it.each([
+    { label: "empty string", plaintext: "" },
+    { label: "one character", plaintext: "x" },
+    { label: "emoji", plaintext: "🔐" },
+  ])("round-trips $label body (STH-53)", async ({ plaintext }) => {
+    const { codec } = buildCodec();
+    const ctx = { ownerId: OWNER_A, deviceId: DEVICE_A, deviceMsgId: `edge-${plaintext.length}` };
+    const blob = await codec.encode(ctx, plaintext);
+    // Empty plaintext → header(15) + tag(16) = 31 bytes; must still parse.
+    if (plaintext === "") {
+      expect(blob.length).toBe(31);
+    }
+    expect(await codec.decode(ctx, blob)).toBe(plaintext);
+  });
+
   it("user A's DEK cannot decrypt user B's ciphertext (and AAD swap fails)", async () => {
     const sharedKeys = new MemoryUserKeyRepository();
     const { codec } = buildCodec({ userKeys: sharedKeys });
@@ -234,6 +249,59 @@ describe("envelope encryption (STH-20)", () => {
     // dek_version uint16 BE at bytes 1..2 should be 2.
     expect(Buffer.from(stored).readUInt16BE(1)).toBe(2);
     expect(await codec.decode(ctx, stored)).toBe("version-one-body");
+  });
+
+  it("DEK rotation re-encrypt round-trips an empty body (STH-53)", async () => {
+    const wrapper = new MemoryKeyWrapper();
+    const userKeys = new MemoryUserKeyRepository();
+    const messages = new MemoryMessageRepository();
+    const cache = new DekCache({ ttlMs: 60_000, maxEntries: 10 });
+    const codec = new AesGcmBodyCodec({ keyWrapper: wrapper, userKeys, cache });
+    const ctx = { ownerId: OWNER_A, deviceId: DEVICE_A, deviceMsgId: "empty-1" };
+    const blobV1 = await codec.encode(ctx, "");
+    expect(blobV1.length).toBe(31);
+
+    await messages.upsertBatch({
+      ownerId: OWNER_A,
+      deviceId: DEVICE_A,
+      messages: [
+        {
+          deviceMsgId: "empty-1",
+          sender: "+15551234567",
+          bodyCiphertext: blobV1,
+          receivedAt: new Date(),
+          simSlot: 0,
+          direction: "inbound",
+        },
+      ],
+    });
+
+    await rotateDekForOwner(OWNER_A, {
+      userKeys,
+      keyWrapper: wrapper,
+      messages,
+      bodyCodec: codec,
+      generateDek: () => randomBytes(32),
+      cacheDek: (o, v, d) => cache.set(o, v, d),
+    });
+
+    const re = await reencryptMessagesForOwner(
+      OWNER_A,
+      {
+        userKeys,
+        keyWrapper: wrapper,
+        messages,
+        bodyCodec: codec,
+        generateDek: () => randomBytes(32),
+      },
+      { batchSize: 10 },
+    );
+    expect(re.updated).toBe(1);
+    expect(re.done).toBe(true);
+
+    const stored = [...messages.rows.values()][0]!.message.bodyCiphertext;
+    expect(Buffer.from(stored).readUInt16BE(1)).toBe(2);
+    expect(await codec.decode(ctx, stored)).toBe("");
   });
 
   it("crypto-shred deletes DEKs so leftover ciphertext is undecryptable", async () => {

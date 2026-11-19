@@ -40,7 +40,8 @@ function parseBlob(blob: Uint8Array): {
   ciphertext: Buffer;
   tag: Buffer;
 } {
-  if (blob.length < HEADER_BYTES + TAG_BYTES + 1) {
+  // Empty plaintext is valid: header + tag only (zero-length ciphertext).
+  if (blob.length < HEADER_BYTES + TAG_BYTES) {
     throw new DecryptionError("Ciphertext blob is truncated");
   }
   const buf = Buffer.from(blob);
@@ -51,7 +52,7 @@ function parseBlob(blob: Uint8Array): {
   const dekVersion = buf.readUInt16BE(1);
   const nonce = buf.subarray(3, 3 + NONCE_BYTES);
   const body = buf.subarray(HEADER_BYTES);
-  if (body.length <= TAG_BYTES) {
+  if (body.length < TAG_BYTES) {
     throw new DecryptionError("Ciphertext blob is truncated");
   }
   const tag = body.subarray(body.length - TAG_BYTES);
