@@ -1,7 +1,10 @@
 export {
   authPlugin,
   requireUserAuth,
+  requireOwnerReadAuth,
   requireOwnerWriteAuth,
+  OWNER_PAT_READ_ALLOWLIST,
+  PAT_READONLY_DETAIL,
   type AuthPluginOptions,
   type AuthRequestContext,
   type AuthUseCases,

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthError } from "../../domain/auth/errors.js";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
-import { requireOwnerWriteAuth } from "./auth-plugin.js";
+import { requireOwnerWriteAuth, requireUserAuth } from "./auth-plugin.js";
 import { sendProblem } from "./problems.js";
 
 const cookieBase = {
@@ -130,7 +130,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.post("/v1/auth/logout", async (request, reply) => {
+  app.post("/v1/auth/logout", { preHandler: requireUserAuth }, async (request, reply) => {
     const config = app.authConfig;
     const logout = app.authUseCases?.logout ?? null;
     const pool = app.dbPool;

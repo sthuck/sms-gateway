@@ -46,6 +46,19 @@ export type AuthUseCases = {
   revokeOwnerAccessToken: RevokeOwnerAccessToken | null;
 };
 
+/**
+ * Owner routes where a valid PAT is accepted (STH-57: default-deny elsewhere).
+ * Keep in sync with `requireOwnerReadAuth` call sites.
+ */
+export const OWNER_PAT_READ_ALLOWLIST = [
+  { method: "GET", url: "/v1/messages" },
+  { method: "GET", url: "/v1/messages/:id" },
+  { method: "GET", url: "/v1/devices" },
+] as const;
+
+export const PAT_READONLY_DETAIL =
+  "Personal access tokens are read-only and cannot call this endpoint";
+
 declare module "fastify" {
   interface FastifyInstance {
     authConfig: OidcAuthConfig | null;
@@ -104,14 +117,40 @@ export const authPlugin = fp(authPluginImpl, {
 });
 
 /**
- * Authenticate via session cookie, OIDC Bearer JWT, or owner PAT, then expose
- * `request.ownerId` and `request.withOwner`. Device-signed requests are not
- * accepted here (see `requireDeviceAuth`).
- *
- * PATs are read-only: use `requireOwnerWriteAuth` on mutating / privileged
- * owner routes (streams, token admin, deletes, pairing, device revoke, …).
+ * Session cookie or OIDC Bearer JWT only. Owner PATs are rejected with 403
+ * (STH-57 default-deny). Device-signed requests are not accepted here.
  */
 export async function requireUserAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  await authenticateOwner(request, reply, { allowPat: false });
+}
+
+/**
+ * Session, OIDC JWT, or owner PAT. Use only on the PAT read allowlist
+ * (`GET /v1/messages`, `GET /v1/messages/:id`, `GET /v1/devices`).
+ */
+export async function requireOwnerReadAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  await authenticateOwner(request, reply, { allowPat: true });
+}
+
+/**
+ * Alias of `requireUserAuth` for mutating / privileged owner routes.
+ * PATs are already denied by default in `requireUserAuth`.
+ */
+export async function requireOwnerWriteAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  await requireUserAuth(request, reply);
+}
+
+async function authenticateOwner(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  opts: { allowPat: boolean },
+): Promise<void> {
   const app = request.server;
   const pool = app.dbPool;
   const config = app.authConfig;
@@ -134,19 +173,26 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
         });
         return;
       }
+      let resolved;
       try {
-        const resolved = await useCases.resolveOwnerPat.execute({ token: bearer });
-        bindAuth(request, pool, {
-          ownerId: resolved.ownerId,
-          authMethod: "pat",
-          session: null,
-          patTokenId: resolved.tokenId,
-        });
-        // Throttled best-effort last_used_at; never fail the read.
-        schedulePatTouch(pool, resolved.ownerId, resolved.tokenId, resolved.lastUsedAt);
+        resolved = await useCases.resolveOwnerPat.execute({ token: bearer });
       } catch (err) {
         mapAuthError(reply, request, err);
+        return;
       }
+      if (!opts.allowPat) {
+        sendProblem(reply, "forbidden", 403, PAT_READONLY_DETAIL, {
+          instance: request.url,
+        });
+        return;
+      }
+      bindAuth(request, pool, {
+        ownerId: resolved.ownerId,
+        authMethod: "pat",
+        session: null,
+        patTokenId: resolved.tokenId,
+      });
+      schedulePatTouch(pool, resolved.ownerId, resolved.tokenId, resolved.lastUsedAt);
       return;
     }
 
@@ -246,27 +292,6 @@ export async function requireUserAuth(request: FastifyRequest, reply: FastifyRep
       resolved.sessionRowId,
     ]);
   }).catch(() => undefined);
-}
-
-/**
- * Session or OIDC JWT only — rejects PATs with 403 (read-only scope).
- * Use on writes, streams, token admin, pairing, and auth/me.
- */
-export async function requireOwnerWriteAuth(
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
-  await requireUserAuth(request, reply);
-  if (reply.sent) return;
-  if (request.auth?.authMethod === "pat") {
-    sendProblem(
-      reply,
-      "forbidden",
-      403,
-      "Personal access tokens are read-only and cannot call this endpoint",
-      { instance: request.url },
-    );
-  }
 }
 
 function schedulePatTouch(

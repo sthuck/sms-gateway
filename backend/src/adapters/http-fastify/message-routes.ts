@@ -9,13 +9,13 @@ import {
 import { MessageError, MAX_PAYLOAD_BYTES } from "../../domain/message/index.js";
 import { DEFAULT_MESSAGES_LIMIT } from "../../application/use-cases/list-messages.js";
 import { rateLimitHeaders } from "../db-postgres/rate-limit.js";
-import { requireOwnerWriteAuth, requireUserAuth } from "./auth-plugin.js";
+import { requireOwnerReadAuth, requireOwnerWriteAuth } from "./auth-plugin.js";
 import { deviceAuthPreHandler, mapDeviceError } from "./device-plugin.js";
 import { buildProblem, sendProblem, type ProblemCode } from "./problems.js";
 import { listMessagesQuerySchema, sendInvalidQuery } from "./query-params.js";
 
 export async function messageRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/v1/messages", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.get("/v1/messages", { preHandler: requireOwnerReadAuth }, async (request, reply) => {
     const list = app.deviceUseCases?.listMessages ?? null;
     if (!list) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
@@ -59,7 +59,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.get("/v1/messages/:id", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.get("/v1/messages/:id", { preHandler: requireOwnerReadAuth }, async (request, reply) => {
     const get = app.deviceUseCases?.getMessage ?? null;
     if (!get) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
