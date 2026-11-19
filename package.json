@@ -8,7 +8,12 @@
     "test": "pnpm --filter @sms-gateway/backend test",
     "backend:dev": "pnpm --filter @sms-gateway/backend dev",
     "backend:worker": "pnpm --filter @sms-gateway/backend worker",
-    "backend:mcp": "pnpm --filter @sms-gateway/backend mcp"
+    "backend:mcp": "pnpm --filter @sms-gateway/backend mcp",
+    "web:dev": "pnpm --filter @sms-gateway/web dev",
+    "web:build": "pnpm --filter @sms-gateway/web build",
+    "web:test": "pnpm --filter @sms-gateway/web test",
+    "web:lint": "pnpm --filter @sms-gateway/web lint",
+    "web:typecheck": "pnpm --filter @sms-gateway/web typecheck"
   },
   "engines": {
     "node": ">=22"

@@ -5,10 +5,16 @@ on:
     branches: [main]
     paths:
       - "web/**"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/web.yml"
   pull_request:
     paths:
       - "web/**"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/web.yml"
 
 concurrency:
@@ -17,14 +23,27 @@ concurrency:
 
 jobs:
   web:
-    name: Placeholder
+    name: Web
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
-      - name: Skip until web app exists
-        run: |
-          if [ -f web/package.json ]; then
-            echo "web/package.json present — replace this job with real lint/test"
-            exit 1
-          fi
-          echo "No web package yet; placeholder OK"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install
+        working-directory: ${{ github.workspace }}
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
