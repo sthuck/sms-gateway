@@ -20,6 +20,7 @@ export { InfrastructureError, isInfrastructureError } from "../errors.js";
 export {
   OWNER_PAT_PREFIX,
   MAX_TOKEN_NAME_LEN,
+  MAX_TOKEN_EXPIRES_IN_DAYS,
   buildOwnerPatSecret,
   isOwnerPatFormat,
   parseOwnerPatTokenId,

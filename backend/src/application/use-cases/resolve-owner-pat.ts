@@ -9,6 +9,8 @@ import type { TokenHasher } from "../../ports/outbound/token-hasher.js";
 
 export type ResolveOwnerPatInput = {
   token: string;
+  /** Injected for tests; defaults to Date.now(). */
+  now?: Date;
 };
 
 export type ResolveOwnerPatResult = {
@@ -31,6 +33,7 @@ export class ResolveOwnerPat {
   async execute(input: ResolveOwnerPatInput): Promise<ResolveOwnerPatResult> {
     const tokenId = parseOwnerPatTokenId(input.token);
     const presentedHash = this.deps.hasher.hash(input.token);
+    const now = input.now ?? new Date();
 
     let row: OwnerAccessTokenLookup | null = null;
     if (tokenId) {
@@ -44,7 +47,8 @@ export class ResolveOwnerPat {
 
     const expectedHex = row?.tokenHash ?? DUMMY_HASH_HEX;
     const ok = this.deps.hasher.safeEqual(presentedHash, expectedHex);
-    if (!ok || !row || row.revokedAt != null) {
+    const expired = row?.expiresAt != null && row.expiresAt.getTime() <= now.getTime();
+    if (!ok || !row || row.revokedAt != null || expired) {
       throw new AuthError("unauthorized", "Missing or invalid access token");
     }
 

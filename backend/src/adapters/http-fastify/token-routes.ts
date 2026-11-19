@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { MAX_TOKEN_NAME_LEN } from "../../domain/auth/access-token.js";
+import { MAX_TOKEN_EXPIRES_IN_DAYS, MAX_TOKEN_NAME_LEN } from "../../domain/auth/access-token.js";
 import { TokenError } from "../../domain/auth/token-errors.js";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
 import { requireOwnerWriteAuth } from "./auth-plugin.js";
@@ -9,6 +9,10 @@ import { sendProblem, type ProblemCode } from "./problems.js";
 const createBodySchema = z
   .object({
     name: z.string().min(1).max(MAX_TOKEN_NAME_LEN),
+    /** Integer days until expiry, or null for no expiry. Omitted → no expiry. */
+    expires_in_days: z
+      .union([z.number().int().min(1).max(MAX_TOKEN_EXPIRES_IN_DAYS), z.null()])
+      .optional(),
   })
   .strict();
 
@@ -25,6 +29,7 @@ function toTokenDto(token: {
   name: string;
   createdAt: Date;
   lastUsedAt: Date | null;
+  expiresAt: Date | null;
   revokedAt: Date | null;
 }) {
   return {
@@ -32,6 +37,7 @@ function toTokenDto(token: {
     name: token.name,
     created_at: token.createdAt.toISOString(),
     last_used_at: token.lastUsedAt ? token.lastUsedAt.toISOString() : null,
+    expires_at: token.expiresAt ? token.expiresAt.toISOString() : null,
     revoked_at: token.revokedAt ? token.revokedAt.toISOString() : null,
   };
 }
@@ -85,6 +91,7 @@ export async function tokenRoutes(app: FastifyInstance): Promise<void> {
       const result = await create.execute({
         ownerId: request.ownerId!,
         name: parsed.data.name,
+        expiresInDays: parsed.data.expires_in_days ?? null,
         clientIp: clientIp(request),
       });
       return reply.status(201).send({

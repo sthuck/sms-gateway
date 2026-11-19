@@ -24,7 +24,7 @@ info:
 
     Errors use RFC 9457 `application/problem+json` with `code` and
     `retryable`, consistent with `docs/contracts/semantics.md`.
-  version: 0.5.0
+  version: 0.6.0
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -660,7 +660,10 @@ paths:
       summary: Create a personal access token
       description: |
         Returns the full secret once in `token`. The server stores only a
-        SHA-256 hash. PATs cannot create tokens (`403`). Audit: `token.create`.
+        SHA-256 hash. Optional `expires_in_days` (1..366) sets `expires_at`;
+        omit or `null` for no expiry. Expired PATs authenticate like
+        unknown/revoked (`401 unauthorized`). PATs cannot create tokens
+        (`403`). Audit: `token.create` (never includes the secret).
       security:
         - sessionCookie: []
         - bearerJwt: []
@@ -677,6 +680,13 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 120
+                expires_in_days:
+                  type: [integer, "null"]
+                  minimum: 1
+                  maximum: 366
+                  description: |
+                    Days until expiry from server time. `null` or omitted →
+                    no expiry. Values outside 1..366 → `400 invalid_request`.
       responses:
         "201":
           description: Token created; secret included once
@@ -765,7 +775,7 @@ components:
       description: |
         Owner personal access token (`smsg_pat_<uuid>_<secret>`). Read-only:
         accepted on `GET /v1/messages`, `GET /v1/messages/{id}`, and
-        `GET /v1/devices`. Unknown/revoked/malformed → same `401`.
+        `GET /v1/devices`. Unknown/revoked/expired/malformed → same `401`.
 
   schemas:
     Me:
@@ -1171,7 +1181,7 @@ components:
     OwnerAccessToken:
       type: object
       additionalProperties: false
-      required: [id, name, created_at, last_used_at, revoked_at]
+      required: [id, name, created_at, last_used_at, expires_at, revoked_at]
       properties:
         id:
           type: string
@@ -1184,6 +1194,10 @@ components:
         last_used_at:
           type: [string, "null"]
           format: date-time
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: Null when the token does not expire.
         revoked_at:
           type: [string, "null"]
           format: date-time
@@ -1191,7 +1205,7 @@ components:
     OwnerAccessTokenCreated:
       type: object
       additionalProperties: false
-      required: [id, name, created_at, last_used_at, revoked_at, token]
+      required: [id, name, created_at, last_used_at, expires_at, revoked_at, token]
       properties:
         id:
           type: string
@@ -1204,6 +1218,10 @@ components:
         last_used_at:
           type: [string, "null"]
           format: date-time
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: Null when the token does not expire.
         revoked_at:
           type: [string, "null"]
           format: date-time

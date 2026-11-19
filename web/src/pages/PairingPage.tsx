@@ -47,7 +47,7 @@ export function PairingPage() {
     pollRef.current = setInterval(() => {
       void (async () => {
         try {
-          const list = await api.get<DeviceList>("/v1/devices");
+          const list = await api.get<DeviceList>("/v1/devices?limit=100");
           dispatch({ type: "DEVICES", devices: list.devices });
         } catch (err) {
           if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
@@ -67,7 +67,7 @@ export function PairingPage() {
     clearTimers();
     dispatch({ type: "REQUEST" });
     try {
-      const list = await api.get<DeviceList>("/v1/devices");
+      const list = await api.get<DeviceList>("/v1/devices?limit=100");
       const known = deviceIdSet(list.devices);
       const issued = await api.post<PairingCodeResponse>("/v1/pairing-codes");
       dispatch({ type: "ISSUED", response: issued, knownDeviceIds: known });

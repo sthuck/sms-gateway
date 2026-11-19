@@ -14,9 +14,11 @@ curl -sS -X POST "$BASE/v1/tokens" \
   -H "X-CSRF-Token: $CSRF" \
   -H "Origin: $BASE" \
   -H "Content-Type: application/json" \
-  -d '{"name":"agent-reader"}'
-# → { "id":"…", "name":"agent-reader", "token":"smsg_pat_<uuid>_<secret>", … }
+  -d '{"name":"agent-reader","expires_in_days":90}'
+# → { "id":"…", "name":"agent-reader", "token":"smsg_pat_<uuid>_<secret>",
+#     "expires_at":"…", … }
 # Store `token` once; it is never returned again.
+# expires_in_days: 1..366, or null/omit for no expiry. Expired → same 401 as revoked.
 ```
 
 ## Read messages

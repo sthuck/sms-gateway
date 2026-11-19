@@ -87,6 +87,7 @@ type OwnerAccessTokenRow = {
   token_hash: string;
   revoked_at: Date | null;
   last_used_at: Date | null;
+  expires_at: Date | null;
 };
 
 /** SECURITY DEFINER: resolve owner PAT by id without an owner GUC (includes revoked). */
@@ -106,5 +107,6 @@ export async function lookupOwnerAccessTokenById(
     tokenHash: row.token_hash,
     revokedAt: row.revoked_at,
     lastUsedAt: row.last_used_at,
+    expiresAt: row.expires_at,
   };
 }
