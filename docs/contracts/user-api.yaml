@@ -17,7 +17,7 @@ info:
 
     Errors use RFC 9457 `application/problem+json` with `code` and
     `retryable`, consistent with `docs/contracts/semantics.md`.
-  version: 0.4.0
+  version: 0.4.1
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -180,6 +180,7 @@ paths:
             minimum: 1
             maximum: 100
             default: 100
+          description: Single-valued; repeating the param yields 400
       responses:
         "200":
           description: Device list
@@ -187,6 +188,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeviceList"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "503":
@@ -267,9 +270,16 @@ paths:
         Cursor pagination on `(received_at, id)` descending (opaque `cursor`).
         Plaintext metadata filters (`device_id`, `sender`, date range) are
         applied in SQL. Optional `q` is a case-insensitive substring match on
-        the **decrypted** body (server-side decrypt-then-filter per ADR 0002);
-        work is bounded by page size and a scan cap so search cannot decrypt
-        unboundedly. Other owners' rows are invisible under RLS.
+        the **decrypted** body (server-side decrypt-then-filter per ADR 0002).
+
+        Search cost is bounded per request: SQL fetches at most a fixed scan
+        window of candidates, and decrypt-then-filter also stops on a wall-clock
+        budget. Hitting either cap with fewer than `limit` matches still returns
+        HTTP 200 with a `next_cursor` past the scanned window so clients can
+        continue; the cost cap never produces a 5xx. Repeated/array query params
+        (e.g. `?q=a&q=b`) are rejected with `400 invalid_request`.
+
+        Other owners' rows are invisible under RLS.
       security:
         - sessionCookie: []
         - bearerJwt: []
@@ -282,18 +292,23 @@ paths:
             minimum: 1
             maximum: 200
             default: 50
+          description: Single-valued; repeating the param yields 400
         - name: cursor
           in: query
           required: false
           schema:
             type: string
-          description: Opaque cursor from a previous `next_cursor`
+          description: |
+            Opaque cursor from a previous `next_cursor`. After a search cost
+            cap, this advances past the scanned candidates (not only matches).
+            Single-valued; repeating the param yields 400.
         - name: device_id
           in: query
           required: false
           schema:
             type: string
             format: uuid
+          description: Single-valued; repeating the param yields 400
         - name: sender
           in: query
           required: false
@@ -301,18 +316,21 @@ paths:
             type: string
             minLength: 1
             maxLength: 64
+          description: Single-valued; repeating the param yields 400
         - name: received_after
           in: query
           required: false
           schema:
             type: string
             format: date-time
+          description: Single-valued; repeating the param yields 400
         - name: received_before
           in: query
           required: false
           schema:
             type: string
             format: date-time
+          description: Single-valued; repeating the param yields 400
         - name: q
           in: query
           required: false
@@ -320,10 +338,15 @@ paths:
             type: string
             minLength: 1
             maxLength: 200
-          description: Substring search over decrypted body text
+          description: |
+            Substring search over decrypted body text. Single-valued;
+            repeating the param yields 400.
       responses:
         "200":
-          description: Message page
+          description: |
+            Message page. When `q` is set, `next_cursor` may be present even if
+            fewer than `limit` messages matched, indicating the scan/time budget
+            was exhausted and more candidates may remain.
           content:
             application/json:
               schema:
@@ -796,6 +819,10 @@ components:
             $ref: "#/components/schemas/OwnerMessage"
         next_cursor:
           type: [string, "null"]
+          description: |
+            Opaque keyset cursor. Present when more rows remain, including when
+            a `q` search hit the per-request decrypt scan or wall-clock budget
+            before filling `limit` matches.
         limit:
           type: integer
           minimum: 1

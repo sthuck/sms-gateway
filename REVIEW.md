@@ -180,9 +180,7 @@ Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed 
 
 | Date | Area | Location | Severity | Description | Suggestion |
 | --- | --- | --- | --- | --- | --- |
-| 2026-11-19 | Backend | `list-messages.ts` search loop (`MAX_MESSAGE_SEARCH_SCAN` 500) | medium | Up to 500 sequential decrypts (~16 MB at 32 KiB bodies) per request with no per-user rate limit or time budget. | Add a rate limit or wall-clock budget for `q`. |
 | 2026-11-19 | Backend | `list-messages.ts` `decodeRow` | medium | One undecryptable row fails the whole page with a non-retryable 500. | Return that row with `body: null` plus a `decrypt_error` flag, or skip and log by id only. |
-| 2026-11-19 | Backend | `list-messages.ts` `q` parsing | minor | `input.q?.trim()` runs outside the `try`, so multi-value `?q=a&q=b` (array) throws TypeError → generic 500. | Check `typeof q === "string"`, return 400, add a test. |
 | 2026-11-19 | Backend | `/v1/messages*` (+ stream message responses) | minor | No `Cache-Control: no-store` on responses carrying decrypted SMS text. | Add the header. |
 | 2026-11-19 | Backend | `list-messages.ts` date filters | minor | `received_after`/`before` use lenient `new Date(raw)` (timezone-less strings are server-local). | Require ISO 8601 with Z or offset. |
 | 2026-11-19 | Backend | `sender` filter | minor | Exact match on normalised sender; query input is not normalised like ingest. | Normalise the input like ingest, or document exact-match semantics. |

@@ -20,13 +20,19 @@ import type {
 
 export const DEFAULT_MESSAGES_LIMIT = 50;
 export const MAX_MESSAGES_LIMIT = 200;
-/** Max ciphertext rows decrypted per request when `q` is set (ADR 0002). */
+/** Max ciphertext rows fetched+decrypted per request when `q` is set (ADR 0002). */
 export const MAX_MESSAGE_SEARCH_SCAN = 500;
+/** Wall-clock budget for decrypt-then-filter when `q` is set. */
+export const MESSAGE_SEARCH_BUDGET_MS = 2_000;
 export const MAX_MESSAGE_SEARCH_QUERY_LEN = 200;
 
 export type ListMessagesDeps = {
   messages: MessageRepository;
   bodyCodec: BodyCodec;
+  /** Test override for `MAX_MESSAGE_SEARCH_SCAN`. */
+  maxSearchScan?: number;
+  /** Test override for `MESSAGE_SEARCH_BUDGET_MS`. */
+  searchBudgetMs?: number;
 };
 
 export type ListMessagesInput = {
@@ -92,6 +98,11 @@ export class ListMessages {
     }
 
     const filters = parseFilters(input);
+    if (input.q !== undefined && typeof input.q !== "string") {
+      throw new MessageError("invalid_request", 400, "q must be a single string value", {
+        errors: [{ path: "q", message: "must be a single string value" }],
+      });
+    }
     const q = input.q?.trim() ?? "";
     if (q.length > MAX_MESSAGE_SEARCH_QUERY_LEN) {
       throw new MessageError(
@@ -110,7 +121,9 @@ export class ListMessages {
     }
     const hasText = q.length > 0;
     const qLower = hasText ? q.toLowerCase() : "";
-    const fetchLimit = hasText ? MAX_MESSAGE_SEARCH_SCAN : limit + 1;
+    const maxScan = this.deps.maxSearchScan ?? MAX_MESSAGE_SEARCH_SCAN;
+    const budgetMs = this.deps.searchBudgetMs ?? MESSAGE_SEARCH_BUDGET_MS;
+    const fetchLimit = hasText ? maxScan : limit + 1;
 
     try {
       const listInput: {
@@ -127,8 +140,16 @@ export class ListMessages {
 
       const rows = await this.deps.messages.list(listInput);
       const matched: OwnerMessageDto[] = [];
+      let lastScanned: MessageRecord | undefined;
+      let hitBudget = false;
+      const startedAt = Date.now();
 
       for (const row of rows) {
+        if (hasText && Date.now() - startedAt >= budgetMs) {
+          hitBudget = true;
+          break;
+        }
+        lastScanned = row;
         const body = await this.decodeRow(input.ownerId, row);
         if (hasText && !body.toLowerCase().includes(qLower)) {
           continue;
@@ -140,21 +161,26 @@ export class ListMessages {
       }
 
       const page = matched.length > limit ? matched.slice(0, limit) : matched;
-      const hitScanCap = hasText && rows.length === MAX_MESSAGE_SEARCH_SCAN;
+      const hitScanCap = hasText && !hitBudget && rows.length === maxScan;
       const hasMoreMatches = matched.length > limit;
-      const hasMore = hasMoreMatches || hitScanCap;
+      const hitCap = hitScanCap || hitBudget;
+      const hasMore = hasMoreMatches || hitCap;
 
       let nextCursor: string | null = null;
       if (hasMore) {
-        if (page.length > 0 && (hasMoreMatches || !hitScanCap)) {
+        if (page.length > 0 && hasMoreMatches) {
           const last = page[page.length - 1]!;
           nextCursor = encodeMessageCursor({ receivedAt: last.receivedAt, id: last.id });
-        } else if (rows.length > 0) {
-          const lastScanned = rows[rows.length - 1]!;
+        } else if (hitCap && lastScanned) {
+          // Continue past the scanned window so the client can resume without
+          // re-decrypting the same candidates (never 5xx on the cost cap).
           nextCursor = encodeMessageCursor({
             receivedAt: lastScanned.receivedAt,
             id: lastScanned.id,
           });
+        } else if (page.length > 0) {
+          const last = page[page.length - 1]!;
+          nextCursor = encodeMessageCursor({ receivedAt: last.receivedAt, id: last.id });
         }
       }
 
