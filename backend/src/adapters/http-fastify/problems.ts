@@ -4,6 +4,7 @@ import type { FastifyReply } from "fastify";
 export type ProblemCode =
   | "invalid_request"
   | "unauthorized"
+  | "forbidden"
   | "mfa_required"
   | "csrf_rejected"
   | "auth_misconfigured"
@@ -36,6 +37,7 @@ export type ProblemBody = {
 const TITLES: Record<ProblemCode, string> = {
   invalid_request: "Invalid request",
   unauthorized: "Unauthorized",
+  forbidden: "Forbidden",
   mfa_required: "Multi-factor authentication required",
   csrf_rejected: "CSRF validation failed",
   auth_misconfigured: "Authentication is not configured",

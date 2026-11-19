@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { randomUUID } from "node:crypto";
 import type { Clock } from "../../ports/outbound/clock.js";
 import type { IdGenerator } from "../../ports/outbound/id-generator.js";
@@ -12,6 +12,17 @@ export function randomToken(bytes = 32): string {
   return randomBytes(bytes).toString("base64url");
 }
 
+export function safeEqualUtf8(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a, "utf8");
+    const bb = Buffer.from(b, "utf8");
+    if (ba.length !== bb.length) return false;
+    return timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
+
 export const systemClock: Clock = {
   now: () => new Date(),
 };
@@ -23,4 +34,5 @@ export const systemIdGenerator: IdGenerator = {
 
 export const sha256TokenHasher: TokenHasher = {
   hash: sha256Hex,
+  safeEqual: safeEqualUtf8,
 };

@@ -200,7 +200,7 @@ async function main() {
 
       // expected-catalog.json is the baseline stamp fingerprint. Ignore
       // post-baseline objects (added by 0001+) when comparing to migrate:up head.
-      const POST_BASELINE_RE = /\buser_keys\b/;
+      const POST_BASELINE_RE = /\b(user_keys|owner_access_tokens|lookup_owner_access_token)\b/;
       if (process.env.SMS_UPDATE_EXPECTED_CATALOG === "1") {
         console.warn(
           "SMS_UPDATE_EXPECTED_CATALOG=1 ignored: expected-catalog.json must stay baseline-only. " +

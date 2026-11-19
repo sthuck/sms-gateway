@@ -5,19 +5,26 @@ info:
   description: |
     User authentication for the web UI and bearer-JWT API access, plus
     owner-facing device management (pairing code issue, list, rename,
-    revoke), owner inbox messages (STH-21), and stream CRUD (STH-23).
+    revoke), owner inbox messages (STH-21), stream CRUD (STH-23), and
+    owner personal access tokens (PATs) for agent/script read access.
 
     Login uses a generic OIDC provider (Authentik in production/homelab)
     via authorization code + PKCE. The browser holds an httpOnly session
     cookie; API clients may send `Authorization: Bearer` JWTs from the
-    same issuer.
+    same issuer, or a long-lived owner PAT (`smsg_pat_…`) on the read
+    routes listed under `bearerAuth`.
+
+    PATs are **read-only**: they may call `GET /v1/messages`,
+    `GET /v1/messages/{id}`, and `GET /v1/devices` only. Writes, streams,
+    token admin, pairing, and device revoke return `403 forbidden`.
+    See `docs/agent-access.md`.
 
     Device-signed requests are **not** accepted on these endpoints.
     Pairing completion and device status live in `device-api.yaml`.
 
     Errors use RFC 9457 `application/problem+json` with `code` and
     `retryable`, consistent with `docs/contracts/semantics.md`.
-  version: 0.4.1
+  version: 0.5.0
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -39,6 +46,11 @@ tags:
     description: Owner inbox — list, get, delete (STH-21)
   - name: Streams
     description: Owner-facing stream definitions (rules / AI / hybrid)
+  - name: Tokens
+    description: |
+      Owner personal access tokens (PATs). Create/list/revoke require a
+      session or OIDC JWT — never another PAT. The secret is returned once
+      on create and stored only as a SHA-256 hash.
 
 paths:
   /v1/auth/login:
@@ -171,6 +183,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerJwt: []
+        - bearerAuth: []
       parameters:
         - name: limit
           in: query
@@ -277,12 +290,15 @@ paths:
         budget. Hitting either cap with fewer than `limit` matches still returns
         HTTP 200 with a `next_cursor` past the scanned window so clients can
         continue; the cost cap never produces a 5xx. Repeated/array query params
-        (e.g. `?q=a&q=b`) are rejected with `400 invalid_request`.
+        (e.g. `?q=a&q=b`) are rejected with `400 invalid_request`. NUL (`U+0000`)
+        in `sender` or `q` is rejected with `400 invalid_request`.
 
-        Other owners' rows are invisible under RLS.
+        Other owners' rows are invisible under RLS. Owner PATs (`bearerAuth`)
+        see the owner's full inbox (read-only).
       security:
         - sessionCookie: []
         - bearerJwt: []
+        - bearerAuth: []
       parameters:
         - name: limit
           in: query
@@ -366,6 +382,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerJwt: []
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -636,6 +653,99 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /v1/tokens:
+    post:
+      operationId: createOwnerAccessToken
+      tags: [Tokens]
+      summary: Create a personal access token
+      description: |
+        Returns the full secret once in `token`. The server stores only a
+        SHA-256 hash. PATs cannot create tokens (`403`). Audit: `token.create`.
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+      responses:
+        "201":
+          description: Token created; secret included once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerAccessTokenCreated"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+    get:
+      operationId: listOwnerAccessTokens
+      tags: [Tokens]
+      summary: List personal access tokens
+      description: |
+        Metadata only — never the secret or hash. PATs cannot list tokens (`403`).
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      responses:
+        "200":
+          description: Token list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerAccessTokenList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+
+  /v1/tokens/{id}:
+    delete:
+      operationId: revokeOwnerAccessToken
+      tags: [Tokens]
+      summary: Revoke a personal access token
+      description: |
+        Idempotent: already-revoked tokens return `204`. Another owner's token
+        id returns `404`. PATs cannot revoke tokens (`403`). Audit: `token.revoke`
+        only when newly revoked.
+      security:
+        - sessionCookie: []
+        - bearerJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked (or already revoked)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthMisconfigured"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -648,6 +758,14 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Access token from the OIDC provider (JWKS-verified)
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: smsg_pat
+      description: |
+        Owner personal access token (`smsg_pat_<uuid>_<secret>`). Read-only:
+        accepted on `GET /v1/messages`, `GET /v1/messages/{id}`, and
+        `GET /v1/devices`. Unknown/revoked/malformed → same `401`.
 
   schemas:
     Me:
@@ -1050,6 +1168,62 @@ components:
           minimum: 1
           maximum: 200
 
+    OwnerAccessToken:
+      type: object
+      additionalProperties: false
+      required: [id, name, created_at, last_used_at, revoked_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: [string, "null"]
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+
+    OwnerAccessTokenCreated:
+      type: object
+      additionalProperties: false
+      required: [id, name, created_at, last_used_at, revoked_at, token]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: [string, "null"]
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+        token:
+          type: string
+          description: |
+            Full secret (`smsg_pat_<uuid>_<secret>`). Returned only on create;
+            never listed again.
+          pattern: "^smsg_pat_[0-9a-fA-F-]{36}_[A-Za-z0-9_-]+$"
+
+    OwnerAccessTokenList:
+      type: object
+      additionalProperties: false
+      required: [tokens]
+      properties:
+        tokens:
+          type: array
+          items:
+            $ref: "#/components/schemas/OwnerAccessToken"
+
     Problem:
       type: object
       additionalProperties: true
@@ -1071,6 +1245,7 @@ components:
           enum:
             - invalid_request
             - unauthorized
+            - forbidden
             - mfa_required
             - csrf_rejected
             - auth_misconfigured
@@ -1131,6 +1306,21 @@ components:
                 status: 404
                 detail: Device not found
                 code: not_found
+                retryable: false
+    Forbidden:
+      description: Authenticated but not permitted (e.g. PAT on a write route)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            pat_readonly:
+              value:
+                type: https://sms-gateway.example/problems/forbidden
+                title: Forbidden
+                status: 403
+                detail: Personal access tokens are read-only and cannot call this endpoint
+                code: forbidden
                 retryable: false
     AuthMisconfigured:
       description: OIDC env not configured

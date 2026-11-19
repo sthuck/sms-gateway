@@ -1,12 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { DeviceError } from "../../domain/device/errors.js";
 import { InfrastructureError, isInfrastructureError } from "../../domain/errors.js";
-import { requireUserAuth } from "./auth-plugin.js";
+import { requireOwnerWriteAuth } from "./auth-plugin.js";
 import { mapDeviceError } from "./device-plugin.js";
 import { sendProblem } from "./problems.js";
 
 export async function pairingCodeRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/v1/pairing-codes", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.post("/v1/pairing-codes", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const issue = app.deviceUseCases?.issuePairingCode ?? null;
     if (!issue || !app.dbPool || !app.deviceAuthConfig) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {

@@ -397,6 +397,34 @@ export const sessions = pgTable(
   ],
 ).enableRLS();
 
+/**
+ * Owner personal access tokens (PATs). Secret shown once at creation;
+ * only SHA-256 hex of the full `smsg_pat_<id>_<secret>` string is stored.
+ */
+export const ownerAccessTokens = pgTable(
+  "owner_access_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** SHA-256 hex of the full presented token; never the secret. */
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("owner_access_tokens_hash_unique").on(t.tokenHash),
+    index("idx_owner_access_tokens_owner").on(t.ownerId),
+    index("idx_owner_access_tokens_owner_active")
+      .on(t.ownerId)
+      .where(sql`${t.revokedAt} IS NULL`),
+    pgPolicy("owner_isolation", ownerIsolation),
+  ],
+).enableRLS();
+
 export const queueProcessedJobs = pgTable(
   "queue_processed_jobs",
   {
@@ -457,6 +485,7 @@ export const OWNED_TABLES = ownedTablesJson as unknown as readonly [
   "audit_log",
   "sender_ai_optout",
   "sessions",
+  "owner_access_tokens",
   "queue_processed_jobs",
 ];
 

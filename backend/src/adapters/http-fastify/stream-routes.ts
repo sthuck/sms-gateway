@@ -12,7 +12,7 @@ import {
 import { DEFAULT_STREAM_LIST_LIMIT } from "../../application/use-cases/list-streams.js";
 import { DEFAULT_STREAM_MESSAGES_LIMIT } from "../../application/use-cases/list-stream-messages.js";
 import { DEFAULT_PREVIEW_LIMIT } from "../../application/use-cases/preview-stream.js";
-import { requireUserAuth } from "./auth-plugin.js";
+import { requireOwnerWriteAuth } from "./auth-plugin.js";
 import { mapStreamError } from "./stream-plugin.js";
 import { sendProblem } from "./problems.js";
 
@@ -60,7 +60,7 @@ function toDto(stream: Stream) {
 }
 
 export async function streamRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/v1/streams:preview", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.post("/v1/streams:preview", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const preview = app.streamUseCases?.previewStream ?? null;
     if (!preview) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
@@ -136,7 +136,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.get("/v1/streams", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.get("/v1/streams", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const list = app.streamUseCases?.listStreams ?? null;
     if (!list) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
@@ -175,7 +175,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.post("/v1/streams", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.post("/v1/streams", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const create = app.streamUseCases?.createStream ?? null;
     if (!create) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
@@ -225,7 +225,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.get("/v1/streams/:id", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.get("/v1/streams/:id", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const get = app.streamUseCases?.getStream ?? null;
     if (!get) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
@@ -255,7 +255,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.patch("/v1/streams/:id", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.patch("/v1/streams/:id", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const update = app.streamUseCases?.updateStream ?? null;
     if (!update) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
@@ -307,7 +307,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.delete("/v1/streams/:id", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.delete("/v1/streams/:id", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const del = app.streamUseCases?.deleteStream ?? null;
     if (!del) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
@@ -337,71 +337,75 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.get("/v1/streams/:id/messages", { preHandler: requireUserAuth }, async (request, reply) => {
-    const listMessages = app.streamUseCases?.listStreamMessages ?? null;
-    if (!listMessages) {
-      return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
-        retryable: true,
-        instance: "/v1/streams",
-      });
-    }
-    const { id } = request.params as { id: string };
-    const query = request.query as { limit?: string; cursor?: string };
-    const listInput: {
-      ownerId: string;
-      streamId: string;
-      limit?: number;
-      cursor?: string;
-    } = {
-      ownerId: request.ownerId!,
-      streamId: id,
-    };
-    if (query.limit !== undefined) listInput.limit = Number(query.limit);
-    if (query.cursor !== undefined) listInput.cursor = query.cursor;
-
-    try {
-      const result = await listMessages.execute(listInput);
-      return reply.status(200).send({
-        messages: result.messages.map((m) => ({
-          id: m.id,
-          sender: m.sender,
-          body: m.body,
-          received_at: m.receivedAt.toISOString(),
-          device_id: m.deviceId,
-          sim_slot: m.simSlot,
-          direction: m.direction,
-          matched_by: m.matchedBy,
-          confidence: m.confidence,
-          stream_version: m.streamVersion,
-        })),
-        next_cursor: result.nextCursor,
-        limit: result.limit ?? listInput.limit ?? DEFAULT_STREAM_MESSAGES_LIMIT,
-      });
-    } catch (err) {
-      if (err instanceof StreamError) {
-        return mapStreamError(reply, request, err);
-      }
-      if (isDecryptionError(err) || err instanceof DecryptionError) {
-        request.log.error(
-          { err: err instanceof Error ? err.message : String(err) },
-          "stream messages decrypt failed",
-        );
-        return sendProblem(reply, "internal_error", 500, "Failed to decrypt message body", {
-          retryable: false,
-          instance: `/v1/streams/${id}/messages`,
-        });
-      }
-      if (isInfrastructureError(err) || err instanceof InfrastructureError) {
-        request.log.error(
-          { err: err instanceof Error ? err.message : String(err) },
-          "stream messages list failed",
-        );
-        return sendProblem(reply, "service_unavailable", 503, "Failed to list stream messages", {
+  app.get(
+    "/v1/streams/:id/messages",
+    { preHandler: requireOwnerWriteAuth },
+    async (request, reply) => {
+      const listMessages = app.streamUseCases?.listStreamMessages ?? null;
+      if (!listMessages) {
+        return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
           retryable: true,
-          instance: `/v1/streams/${id}/messages`,
+          instance: "/v1/streams",
         });
       }
-      throw err;
-    }
-  });
+      const { id } = request.params as { id: string };
+      const query = request.query as { limit?: string; cursor?: string };
+      const listInput: {
+        ownerId: string;
+        streamId: string;
+        limit?: number;
+        cursor?: string;
+      } = {
+        ownerId: request.ownerId!,
+        streamId: id,
+      };
+      if (query.limit !== undefined) listInput.limit = Number(query.limit);
+      if (query.cursor !== undefined) listInput.cursor = query.cursor;
+
+      try {
+        const result = await listMessages.execute(listInput);
+        return reply.status(200).send({
+          messages: result.messages.map((m) => ({
+            id: m.id,
+            sender: m.sender,
+            body: m.body,
+            received_at: m.receivedAt.toISOString(),
+            device_id: m.deviceId,
+            sim_slot: m.simSlot,
+            direction: m.direction,
+            matched_by: m.matchedBy,
+            confidence: m.confidence,
+            stream_version: m.streamVersion,
+          })),
+          next_cursor: result.nextCursor,
+          limit: result.limit ?? listInput.limit ?? DEFAULT_STREAM_MESSAGES_LIMIT,
+        });
+      } catch (err) {
+        if (err instanceof StreamError) {
+          return mapStreamError(reply, request, err);
+        }
+        if (isDecryptionError(err) || err instanceof DecryptionError) {
+          request.log.error(
+            { err: err instanceof Error ? err.message : String(err) },
+            "stream messages decrypt failed",
+          );
+          return sendProblem(reply, "internal_error", 500, "Failed to decrypt message body", {
+            retryable: false,
+            instance: `/v1/streams/${id}/messages`,
+          });
+        }
+        if (isInfrastructureError(err) || err instanceof InfrastructureError) {
+          request.log.error(
+            { err: err instanceof Error ? err.message : String(err) },
+            "stream messages list failed",
+          );
+          return sendProblem(reply, "service_unavailable", 503, "Failed to list stream messages", {
+            retryable: true,
+            instance: `/v1/streams/${id}/messages`,
+          });
+        }
+        throw err;
+      }
+    },
+  );
 }

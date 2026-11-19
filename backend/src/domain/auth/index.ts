@@ -15,4 +15,14 @@ export { extractMfaClaims, mapClaims } from "./claims.js";
 export { detectMfaMethod, evaluateMfa } from "./mfa.js";
 export { isSessionActive } from "./session.js";
 export { AuthError, type AuthErrorCode } from "./errors.js";
+export { TokenError, type TokenErrorCode } from "./token-errors.js";
 export { InfrastructureError, isInfrastructureError } from "../errors.js";
+export {
+  OWNER_PAT_PREFIX,
+  MAX_TOKEN_NAME_LEN,
+  buildOwnerPatSecret,
+  isOwnerPatFormat,
+  parseOwnerPatTokenId,
+  type OwnerAccessToken,
+  type OwnerAccessTokenLookup,
+} from "./access-token.js";

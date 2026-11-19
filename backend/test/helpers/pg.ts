@@ -288,6 +288,14 @@ export async function seedTwoOwners(admin: Pool): Promise<SeededOwners> {
     );
 
     await client.query(
+      `INSERT INTO owner_access_tokens (owner_id, name, token_hash)
+       VALUES
+         ($1, 'seed-pat-a', 'pat-hash-a'),
+         ($2, 'seed-pat-b', 'pat-hash-b')`,
+      [userA, userB],
+    );
+
+    await client.query(
       `INSERT INTO queue_processed_jobs (owner_id, dedupe_key, job_name)
        VALUES
          ($1, 'seed:a', 'seed'),

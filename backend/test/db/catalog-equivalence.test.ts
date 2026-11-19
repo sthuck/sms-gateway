@@ -104,7 +104,9 @@ describe.skipIf(!migratorOk)("catalog fingerprint catches privilege/role drift",
       const catalog = await captureCatalog(client);
       // expected-catalog.json fingerprints the baseline (stamp target).
       // Post-baseline migrations (e.g. user_keys) appear only in the DB.
-      const diffs = diffAgainstExpected(catalog).filter((d) => !/\buser_keys\b/.test(d));
+      const diffs = diffAgainstExpected(catalog).filter(
+        (d) => !/\b(user_keys|owner_access_tokens|lookup_owner_access_token)\b/.test(d),
+      );
       expect(diffs, formatCatalogDiffs(diffs)).toEqual([]);
     } finally {
       client.release();

@@ -41,6 +41,16 @@ describe("owner list query schemas", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("rejects NUL in sender and q", () => {
+    for (const key of ["sender", "q"] as const) {
+      const parsed = listMessagesQuerySchema.safeParse({ [key]: "a\u0000b" });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.issues.some((i) => i.path[0] === key)).toBe(true);
+      }
+    }
+  });
+
   it("rejects repeated device list limit", () => {
     const parsed = listDevicesQuerySchema.safeParse({ limit: ["1", "2"] });
     expect(parsed.success).toBe(false);

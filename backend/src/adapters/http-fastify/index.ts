@@ -1,11 +1,13 @@
 export {
   authPlugin,
   requireUserAuth,
+  requireOwnerWriteAuth,
   type AuthPluginOptions,
   type AuthRequestContext,
   type AuthUseCases,
 } from "./auth-plugin.js";
 export { authRoutes } from "./auth-routes.js";
+export { tokenRoutes } from "./token-routes.js";
 export {
   devicePlugin,
   requireDeviceAuth,

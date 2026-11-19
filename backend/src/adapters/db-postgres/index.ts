@@ -11,6 +11,8 @@ export { PgIngestRateLimiter } from "./pg-ingest-rate-limiter.js";
 export { PgMessageRepository } from "./message-repository.js";
 export { PgStreamRepository } from "./stream-repository.js";
 export { PgUserKeyRepository } from "./user-key-repository.js";
+export { PgOwnerAccessTokenRepository } from "./owner-access-token-repository.js";
+export { PgAuditRepository } from "./audit-repository.js";
 export {
   lookupDeviceForAuth,
   lookupPairingCode,
@@ -36,6 +38,11 @@ export {
   type RateLimitConfig,
   type RateLimitDecision,
 } from "./rate-limit.js";
-export { lookupSessionByHash, lookupUserByEmail, lookupUserIdentity } from "./lookups.js";
+export {
+  lookupSessionByHash,
+  lookupUserByEmail,
+  lookupUserIdentity,
+  lookupOwnerAccessTokenById,
+} from "./lookups.js";
 export { findOrProvisionUser, type ResolvedUser } from "./provision.js";
 export { withDbInfra } from "./infra.js";

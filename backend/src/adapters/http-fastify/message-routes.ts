@@ -9,7 +9,7 @@ import {
 import { MessageError, MAX_PAYLOAD_BYTES } from "../../domain/message/index.js";
 import { DEFAULT_MESSAGES_LIMIT } from "../../application/use-cases/list-messages.js";
 import { rateLimitHeaders } from "../db-postgres/rate-limit.js";
-import { requireUserAuth } from "./auth-plugin.js";
+import { requireOwnerWriteAuth, requireUserAuth } from "./auth-plugin.js";
 import { deviceAuthPreHandler, mapDeviceError } from "./device-plugin.js";
 import { buildProblem, sendProblem, type ProblemCode } from "./problems.js";
 import { listMessagesQuerySchema, sendInvalidQuery } from "./query-params.js";
@@ -82,7 +82,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.delete("/v1/messages/:id", { preHandler: requireUserAuth }, async (request, reply) => {
+  app.delete("/v1/messages/:id", { preHandler: requireOwnerWriteAuth }, async (request, reply) => {
     const del = app.deviceUseCases?.deleteMessage ?? null;
     if (!del) {
       return sendProblem(reply, "service_unavailable", 503, "Database is not configured", {
