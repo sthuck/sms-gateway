@@ -175,3 +175,17 @@ Recorded from the Code Reviewer while on the STH-47 keepalive branch. Not fixed 
 | 2026-11-19 | Backend | GET /v1/messages `q` | medium | Text search is case-insensitive substring on decrypted body only. No owner-facing regex filter is exposed (CompileSafeRegex / re2 remains the seam for stream rules). | Add an explicit `q_regex` (or documented regex mode) via CompileSafeRegex if product needs it; keep scan/page caps. |
 | 2026-11-19 | Backend | ListMessages search pagination | medium | When `q` is set, each request decrypts at most `MAX_MESSAGE_SEARCH_SCAN` (500) candidates. Hitting the scan cap with fewer than `limit` matches returns a `next_cursor` past the scanned window; dense matches after a short page still keyset from the last returned id (may re-decrypt non-matches between pages). | Acceptable for launch; revisit blind index / larger caps only with a privacy trade-off review (ADR 0002). |
 | 2026-11-19 | Backend | DELETE /v1/messages/{id} | medium | Second delete of the same id returns `404` (not `204`). Required so other-owner deletes stay `404` under RLS; unlike device revoke which is idempotent `204`. | Document in client SDKs; treat 404 as success for “ensure gone” if needed. |
+
+## 2026-11-19 — PR #34 review (STH-21, approved/merged)
+
+| Date | Area | Location | Severity | Description | Suggestion |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | Backend | `list-messages.ts` `decodeRow` | medium | One undecryptable row fails the whole page with a non-retryable 500. | Return that row with `body: null` plus a `decrypt_error` flag, or skip and log by id only. |
+| 2026-11-19 | Backend | `/v1/messages*` (+ stream message responses) | minor | No `Cache-Control: no-store` on responses carrying decrypted SMS text. | Add the header. |
+| 2026-11-19 | Backend | `list-messages.ts` date filters | minor | `received_after`/`before` use lenient `new Date(raw)` (timezone-less strings are server-local). | Require ISO 8601 with Z or offset. |
+| 2026-11-19 | Backend | `sender` filter | minor | Exact match on normalised sender; query input is not normalised like ingest. | Normalise the input like ingest, or document exact-match semantics. |
+| 2026-11-19 | Backend | device rename / device routes | minor | NUL in device `name` can yield retryable 500; device routes return 500 on infra where message routes return 503. | Reject NUL with 400; align device infra mapping to 503. |
+| 2026-11-19 | Backend | `docs/contracts/user-api.yaml` | minor | Missing declared 400 on `getMessage`/`deleteMessage` and 503 on `deleteMessage`. | Declare those responses. |
+| 2026-11-19 | Backend | DELETE vs ingest recreate | UX | Second DELETE returns 404; device resend of same `device_msg_id` recreates the deleted row and fires `message.created` again. | Document or keep a tombstone. |
+| 2026-11-19 | Backend | composition / message inbox UCs | minor | Message read/delete use cases exist only when a queue publisher is configured (owner reads return 503 without pg-boss). | Build the message repository independently of the queue. |
+| 2026-11-19 | Backend | tests | minor | Gaps: multi-value `q`, search scan cap, HTTP-level owner-read key outage, corrupt-row listing, renaming a revoked device, cascade delete of stream memberships. | Add them. |

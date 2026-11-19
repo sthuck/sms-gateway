@@ -7,6 +7,7 @@ import { requireUserAuth } from "./auth-plugin.js";
 import { deviceAuthPreHandler, mapDeviceError } from "./device-plugin.js";
 import { pairProofErrorToDeviceError, verifyPairProofOfPossession } from "./pair-auth.js";
 import { sendProblem, type ProblemCode } from "./problems.js";
+import { listDevicesQuerySchema, sendInvalidQuery } from "./query-params.js";
 
 const deviceInfoSchema = z
   .object({
@@ -186,10 +187,13 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const rawLimit = (request.query as { limit?: string }).limit;
+    const parsedQuery = listDevicesQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return sendInvalidQuery(reply, "/v1/devices", parsedQuery);
+    }
     const listInput: { ownerId: string; limit?: number } = { ownerId: request.ownerId! };
-    if (rawLimit !== undefined) {
-      listInput.limit = Number(rawLimit);
+    if (parsedQuery.data.limit !== undefined) {
+      listInput.limit = Number(parsedQuery.data.limit);
     }
 
     try {

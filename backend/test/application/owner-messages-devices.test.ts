@@ -108,6 +108,58 @@ describe("ListMessages use case", () => {
     }
   });
 
+  it("enforces search scan cap with next_cursor continuation (no 5xx)", async () => {
+    const messages = new MemoryMessageRepository();
+    const maxSearchScan = 5;
+    for (let i = 0; i < 12; i += 1) {
+      const id = `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
+      messages.seed({
+        id,
+        ownerId: OWNER,
+        deviceId: DEVICE,
+        deviceMsgId: `scan-${i}`,
+        sender: "+1",
+        bodyCiphertext: await identity.encode(
+          { ownerId: OWNER, deviceId: DEVICE, deviceMsgId: `scan-${i}` },
+          i === 0 || i === 11 ? "needle" : `other-${i}`,
+        ),
+        receivedAt: new Date(Date.UTC(2026, 0, 1, 12, 0, i)),
+        simSlot: 0,
+        direction: "inbound",
+      });
+    }
+
+    const list = new ListMessages({
+      messages,
+      bodyCodec: identity,
+      maxSearchScan,
+      searchBudgetMs: 60_000,
+    });
+    const page1 = await list.execute({ ownerId: OWNER, q: "needle", limit: 10 });
+    // Newest first: first window is 5 candidates; only the newest matches.
+    expect(page1.messages.map((m) => m.body)).toEqual(["needle"]);
+    expect(page1.nextCursor).toBeTruthy();
+
+    const found: string[] = [...page1.messages.map((m) => m.body)];
+    let cursor = page1.nextCursor;
+    let pages = 1;
+    while (cursor && pages < 5) {
+      const page = await list.execute({ ownerId: OWNER, q: "needle", limit: 10, cursor });
+      found.push(...page.messages.map((m) => m.body));
+      cursor = page.nextCursor;
+      pages += 1;
+    }
+    expect(found.filter((b) => b === "needle")).toHaveLength(2);
+    expect(pages).toBeGreaterThan(1);
+  });
+
+  it("rejects non-string q with 400", async () => {
+    const list = new ListMessages({ messages: new MemoryMessageRepository(), bodyCodec: identity });
+    await expect(
+      list.execute({ ownerId: OWNER, q: ["a", "b"] as unknown as string }),
+    ).rejects.toMatchObject({ code: "invalid_request", status: 400 });
+  });
+
   it("round-trips empty body", async () => {
     const codec = aesCodec();
     const messages = new MemoryMessageRepository();

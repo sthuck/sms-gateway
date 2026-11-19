@@ -463,4 +463,32 @@ describe.skipIf(!migratorOk)("owner messages + devices API (STH-21)", () => {
       401,
     );
   });
+
+  it("rejects repeated/array query params with 400 (not 5xx)", async () => {
+    const repeatedQ = await app.inject({
+      method: "GET",
+      url: "/v1/messages?q=a&q=b",
+      cookies: { sms_session: aliceSession },
+    });
+    const qBody = expectAuthProblem(userApi, "/v1/messages", "get", repeatedQ, 400) as {
+      code: string;
+      errors?: Array<{ path: string }>;
+    };
+    expect(qBody.code).toBe("invalid_request");
+    expect(qBody.errors?.some((e) => e.path === "q")).toBe(true);
+
+    const repeatedLimit = await app.inject({
+      method: "GET",
+      url: "/v1/messages?limit=1&limit=2",
+      cookies: { sms_session: aliceSession },
+    });
+    expectAuthProblem(userApi, "/v1/messages", "get", repeatedLimit, 400);
+
+    const repeatedDevice = await app.inject({
+      method: "GET",
+      url: "/v1/devices?limit=1&limit=2",
+      cookies: { sms_session: aliceSession },
+    });
+    expectAuthProblem(userApi, "/v1/devices", "get", repeatedDevice, 400);
+  });
 });

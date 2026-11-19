@@ -12,6 +12,7 @@ import { rateLimitHeaders } from "../db-postgres/rate-limit.js";
 import { requireUserAuth } from "./auth-plugin.js";
 import { deviceAuthPreHandler, mapDeviceError } from "./device-plugin.js";
 import { buildProblem, sendProblem, type ProblemCode } from "./problems.js";
+import { listMessagesQuerySchema, sendInvalidQuery } from "./query-params.js";
 
 export async function messageRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/messages", { preHandler: requireUserAuth }, async (request, reply) => {
@@ -23,15 +24,11 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const query = request.query as {
-      limit?: string;
-      cursor?: string;
-      device_id?: string;
-      sender?: string;
-      received_after?: string;
-      received_before?: string;
-      q?: string;
-    };
+    const parsedQuery = listMessagesQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return sendInvalidQuery(reply, "/v1/messages", parsedQuery);
+    }
+    const query = parsedQuery.data;
     const listInput: {
       ownerId: string;
       limit?: number;
