@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Instrumentation runner is SmsGatewayHiltTestRunner (see build.gradle.kts).
+     It forces HiltTestApplication at runtime for @HiltAndroidTest. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
