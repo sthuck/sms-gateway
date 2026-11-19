@@ -12,7 +12,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -20,7 +19,6 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sthuck.smsgateway.keepalive.BatteryOptimization
 import com.sthuck.smsgateway.keepalive.OemSetupLauncher
-import com.sthuck.smsgateway.pairing.PairingSession
 import com.sthuck.smsgateway.sms.SmsPermissionStore
 import com.sthuck.smsgateway.ui.PairingScreen
 import com.sthuck.smsgateway.ui.PairingViewModel
@@ -35,9 +33,6 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var smsPermissionStore: SmsPermissionStore
-
-    @Inject
-    lateinit var pairingSession: PairingSession
 
     @Inject
     lateinit var batteryOptimization: BatteryOptimization
@@ -69,12 +64,6 @@ class MainActivity : ComponentActivity() {
             SmsGatewayTheme {
                 val pairingState by pairingViewModel.uiState.collectAsStateWithLifecycle()
                 val statusState by statusViewModel.uiState.collectAsStateWithLifecycle()
-
-                LaunchedEffect(Unit) {
-                    pairingSession.rePairRequired.collect {
-                        // Credentials already cleared; UI flips via pairingState.pairedDeviceId.
-                    }
-                }
 
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                     refreshSmsPermission()

@@ -5,7 +5,14 @@
     <string name="status_backend">Backend URL</string>
     <string name="status_version">App version</string>
     <string name="status_pairing">Pairing</string>
+    <string name="status_device_name">Device name</string>
+    <string name="status_account">Account / server</string>
+    <string name="status_last_sync">Last successful sync</string>
+    <string name="status_last_sync_never">Never</string>
     <string name="status_sms_permission">SMS access</string>
+    <string name="pairing_revoked_banner">This device was revoked. Pair again to resume forwarding.</string>
+    <string name="pairing_unknown_banner">This device is no longer recognised. Pair again to resume forwarding.</string>
+    <string name="pairing_key_missing_banner">The signing key is missing. Pair again to resume forwarding.</string>
     <string name="status_queue">Outbound queue</string>
     <plurals name="status_queue_count">
         <item quantity="one">%d pending</item>

@@ -8,6 +8,7 @@ import com.sthuck.smsgateway.crypto.DeviceSigner
 import com.sthuck.smsgateway.crypto.PrivateKeyDeviceSigner
 import com.sthuck.smsgateway.crypto.verifyEs256P1363
 import com.sthuck.smsgateway.data.remote.dto.ProblemCodes
+import com.sthuck.smsgateway.pairing.DeviceRevocationHandler
 import com.sthuck.smsgateway.pairing.PairingCredentials
 import com.sthuck.smsgateway.pairing.PairingSession
 import com.sthuck.smsgateway.pairing.PairingStateAccess
@@ -22,6 +23,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -66,11 +68,17 @@ class RequestSigningInterceptorTest {
         )
         keys = FakeKeys(PrivateKeyDeviceSigner(privateKey))
         clock = ClockSkewStore()
+        val pairingSession = PairingSession()
         val interceptor = RequestSigningInterceptor(
             credentialStore = credentials,
             deviceKeyStore = keys,
             clockSkewStore = clock,
-            pairingSession = PairingSession(),
+            revocationHandler = DeviceRevocationHandler(
+                credentialStore = credentials,
+                deviceKeyStore = keys,
+                clockSkewStore = clock,
+                pairingSession = pairingSession,
+            ),
             json = json,
             signerProvider = Provider { keys.requireSigner() },
         )
@@ -192,15 +200,48 @@ class RequestSigningInterceptorTest {
         assertTrue(keys.deleted)
     }
 
+    @Test
+    fun invalidSignatureDoesNotClearPairing() {
+        val mock = server!!
+        DeviceApiMock.enqueueProblem(
+            mock,
+            httpCode = 401,
+            code = ProblemCodes.INVALID_SIGNATURE,
+            title = "bad sig",
+            detail = "mismatch",
+            retryable = false,
+        )
+        client.newCall(
+            Request.Builder()
+                .url(mock.url("/v1/messages:batch"))
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build(),
+        ).execute().close()
+
+        assertEquals(DeviceApiMock.SAMPLE_DEVICE_ID, runBlocking { credentials.current() }.deviceId)
+        assertFalse(keys.deleted)
+    }
+
     private class FakeCredentials(
         private var value: PairingCredentials,
     ) : PairingStateAccess {
         override suspend fun current() = value
         override suspend fun clearDeviceId() {
-            value = value.copy(deviceId = null)
+            value = value.copy(deviceId = null, deviceName = null, lastSuccessfulSyncAtEpochMs = null)
         }
-        override suspend fun savePairing(deviceId: String, serverUrl: String, activeKeyAlias: String) {
-            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias)
+        override suspend fun savePairing(
+            deviceId: String,
+            serverUrl: String,
+            activeKeyAlias: String,
+            deviceName: String,
+        ) {
+            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias, deviceName)
+        }
+        override suspend fun updateDeviceName(deviceName: String) {
+            value = value.copy(deviceName = deviceName)
+        }
+        override suspend fun recordSuccessfulSync(atEpochMs: Long) {
+            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs)
         }
         override suspend fun clearAll() {
             value = PairingCredentials(null, value.serverUrl)

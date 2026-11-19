@@ -47,6 +47,7 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.sthuck.smsgateway.R
+import com.sthuck.smsgateway.pairing.RePairReason
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -86,6 +87,20 @@ fun PairingScreen(
             text = stringResource(R.string.pairing_body),
             style = MaterialTheme.typography.bodyMedium,
         )
+        state.rePairReason?.let { reason ->
+            Text(
+                text = stringResource(
+                    when (reason) {
+                        RePairReason.REVOKED -> R.string.pairing_revoked_banner
+                        RePairReason.UNKNOWN -> R.string.pairing_unknown_banner
+                        RePairReason.KEY_MISSING -> R.string.pairing_key_missing_banner
+                        RePairReason.OTHER -> R.string.pairing_unknown_banner
+                    },
+                ),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
         Text(
             text = stringResource(R.string.pairing_server_hint, state.serverHint),
             style = MaterialTheme.typography.bodySmall,

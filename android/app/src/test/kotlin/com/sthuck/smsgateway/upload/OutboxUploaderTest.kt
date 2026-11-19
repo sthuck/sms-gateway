@@ -5,9 +5,13 @@ import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.data.local.QueuedMessageEntity
 import com.sthuck.smsgateway.data.remote.DeviceApi
 import com.sthuck.smsgateway.data.remote.dto.ProblemCodes
+import com.sthuck.smsgateway.crypto.ClockSkewStore
+import com.sthuck.smsgateway.crypto.DeviceKeyAccess
+import com.sthuck.smsgateway.crypto.DeviceSigner
+import com.sthuck.smsgateway.pairing.DeviceRevocationHandler
 import com.sthuck.smsgateway.pairing.PairingCredentials
-import com.sthuck.smsgateway.pairing.PairingCredentialsReader
 import com.sthuck.smsgateway.pairing.PairingSession
+import com.sthuck.smsgateway.pairing.PairingStateAccess
 import com.sthuck.smsgateway.testing.DeviceApiMock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -43,16 +47,31 @@ class OutboxUploaderTest {
         server = MockWebServer()
         server.start()
         dao = FakeDao()
-        val credentials = PairingCredentialsReader {
-            PairingCredentials(DeviceApiMock.SAMPLE_DEVICE_ID, server.url("/").toString())
-        }
+        val credentials = FakeStateAccess(
+            PairingCredentials(DeviceApiMock.SAMPLE_DEVICE_ID, server.url("/").toString()),
+        )
         val api = Retrofit.Builder()
             .baseUrl(server.url("/"))
             .client(OkHttpClient())
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(DeviceApi::class.java)
-        uploader = OutboxUploader(dao, api, credentials, PairingSession(), json, OutboxHousekeeping(dao))
+        val pairingSession = PairingSession()
+        val revocation = DeviceRevocationHandler(
+            credentialStore = credentials,
+            deviceKeyStore = FakeKeys(),
+            clockSkewStore = ClockSkewStore(),
+            pairingSession = pairingSession,
+        )
+        uploader = OutboxUploader(
+            dao = dao,
+            deviceApi = api,
+            credentialStore = credentials,
+            pairingSession = pairingSession,
+            revocationHandler = revocation,
+            json = json,
+            housekeeping = OutboxHousekeeping(dao),
+        )
     }
 
     @After
@@ -62,6 +81,7 @@ class OutboxUploaderTest {
 
     @Test
     fun acceptedDeletesRow() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-42")
         DeviceApiMock.enqueueBatchAccepted(server, deviceMsgId = "sms-42")
 
@@ -72,6 +92,7 @@ class OutboxUploaderTest {
 
     @Test
     fun rejectedParksRow() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-bad")
         server.enqueue(
             MockResponse()
@@ -98,15 +119,17 @@ class OutboxUploaderTest {
 
     @Test
     fun oversizedBodyParkedLocallyWithoutNetwork() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-huge", body = "x".repeat(UploadDefaults.MAX_BODY_CHARS + 1))
         uploader.runOnce(nowEpochMs = 1_000L)
-        assertEquals(0, server.requestCount)
+        assertEquals(1, server.requestCount) // GET /v1/devices/me only
         assertTrue(dao.rows.single().parked)
         assertTrue(dao.rows.single().lastError!!.contains("body_too_large"))
     }
 
     @Test
     fun deviceRevokedStopsUploader() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         DeviceApiMock.enqueueProblem(
             server,
@@ -120,11 +143,12 @@ class OutboxUploaderTest {
         assertTrue(result is UploadPassResult.StopForRePair)
         assertEquals(ProblemCodes.DEVICE_REVOKED, (result as UploadPassResult.StopForRePair).code)
         assertEquals(1, dao.rows.size)
-        assertEquals(1, server.requestCount)
+        assertEquals(2, server.requestCount)
     }
 
     @Test
     fun deviceUnknownStopsUploader() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         DeviceApiMock.enqueueProblem(
             server,
@@ -141,6 +165,7 @@ class OutboxUploaderTest {
 
     @Test
     fun retryableServerErrorSchedulesRetry() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         DeviceApiMock.enqueueProblem(
             server,
@@ -160,6 +185,7 @@ class OutboxUploaderTest {
 
     @Test
     fun html502DoesNotParkAndRetries() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         server.enqueue(
             MockResponse()
@@ -176,6 +202,7 @@ class OutboxUploaderTest {
 
     @Test
     fun empty404BodyDoesNotParkAndRetries() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         server.enqueue(MockResponse().setResponseCode(404).setBody(""))
         val result = uploader.runOnce(nowEpochMs = 1_000L)
@@ -185,6 +212,7 @@ class OutboxUploaderTest {
 
     @Test
     fun empty500BodyDoesNotParkAndRetries() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         server.enqueue(MockResponse().setResponseCode(500).setBody(""))
         val result = uploader.runOnce(nowEpochMs = 1_000L)
@@ -195,6 +223,7 @@ class OutboxUploaderTest {
 
     @Test
     fun replayDetectedSchedulesImmediateRetry() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         DeviceApiMock.enqueueProblem(
             server,
@@ -213,6 +242,7 @@ class OutboxUploaderTest {
 
     @Test
     fun invalidTimestampSchedulesImmediateRetry() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         DeviceApiMock.enqueueProblem(
             server,
@@ -232,6 +262,7 @@ class OutboxUploaderTest {
 
     @Test
     fun rateLimitedHonoursRetryAfter() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         server.enqueue(
             MockResponse()
@@ -259,6 +290,7 @@ class OutboxUploaderTest {
 
     @Test
     fun serviceUnavailableHonoursRetryAfter() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         server.enqueue(
             MockResponse()
@@ -285,6 +317,7 @@ class OutboxUploaderTest {
 
     @Test
     fun retryAfterHttpDateIsHonoured() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         val now = 1_000_000L
         val httpDate = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
@@ -314,6 +347,7 @@ class OutboxUploaderTest {
 
     @Test
     fun batchTooLargeSplitsAndUploadsSubset() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-a")
         dao.rows += sample("sms-b")
         DeviceApiMock.enqueueProblem(
@@ -329,11 +363,12 @@ class OutboxUploaderTest {
         assertTrue(result is UploadPassResult.MorePending)
         assertEquals(1, dao.rows.size)
         assertEquals("sms-b", dao.rows.single().deviceMsgId)
-        assertEquals(2, server.requestCount)
+        assertEquals(3, server.requestCount) // me + batch_too_large + subset accept
     }
 
     @Test
     fun missingResultSchedulesRetryWithoutParking() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         server.enqueue(
             MockResponse()
@@ -351,8 +386,9 @@ class OutboxUploaderTest {
     }
 
     @Test
-    fun invalidSignatureStopsForRePairWithoutParking() = runBlocking {
+    fun invalidSignatureRetriesWithoutWipingOrParking() = runBlocking {
         dao.rows += sample("sms-otp")
+        DeviceApiMock.enqueueDeviceMe(server)
         DeviceApiMock.enqueueProblem(
             server,
             httpCode = 401,
@@ -362,14 +398,25 @@ class OutboxUploaderTest {
             retryable = false,
         )
         val result = uploader.runOnce(nowEpochMs = 1_000L)
-        assertTrue(result is UploadPassResult.StopForRePair)
-        assertEquals(ProblemCodes.INVALID_SIGNATURE, (result as UploadPassResult.StopForRePair).code)
+        assertTrue(result is UploadPassResult.RetryLater)
+        assertEquals(ProblemCodes.INVALID_SIGNATURE, (result as UploadPassResult.RetryLater).reason)
         assertTrue(!dao.rows.single().parked)
-        assertEquals(0, dao.rows.single().attemptCount)
+        assertTrue(dao.rows.single().attemptCount >= 1)
+    }
+
+    fun devicesMeRevokedStopsAndWipesWithoutBatch() = runBlocking {
+        dao.rows += sample("sms-1")
+        DeviceApiMock.enqueueDeviceMe(server, status = "revoked")
+        val result = uploader.runOnce(nowEpochMs = 1_000L)
+        assertTrue(result is UploadPassResult.StopForRePair)
+        assertEquals(ProblemCodes.DEVICE_REVOKED, (result as UploadPassResult.StopForRePair).code)
+        assertEquals(1, dao.rows.size)
+        assertEquals(1, server.requestCount)
     }
 
     @Test
     fun explicitNonRetryable4xxParksBatch() = runBlocking {
+        DeviceApiMock.enqueueDeviceMe(server)
         dao.rows += sample("sms-1")
         DeviceApiMock.enqueueProblem(
             server,
@@ -413,10 +460,45 @@ class OutboxUploaderTest {
     )
 }
 
-private fun PairingCredentialsReader(
-    block: suspend () -> PairingCredentials,
-): PairingCredentialsReader = object : PairingCredentialsReader {
-    override suspend fun current(): PairingCredentials = block()
+private class FakeStateAccess(
+    private var value: PairingCredentials,
+) : PairingStateAccess {
+    override suspend fun current() = value
+    override suspend fun clearDeviceId() {
+        value = value.copy(deviceId = null, deviceName = null, lastSuccessfulSyncAtEpochMs = null)
+    }
+    override suspend fun savePairing(
+        deviceId: String,
+        serverUrl: String,
+        activeKeyAlias: String,
+        deviceName: String,
+    ) {
+        value = PairingCredentials(deviceId, serverUrl, activeKeyAlias, deviceName)
+    }
+    override suspend fun updateDeviceName(deviceName: String) {
+        value = value.copy(deviceName = deviceName)
+    }
+    override suspend fun recordSuccessfulSync(atEpochMs: Long) {
+        value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs)
+    }
+    override suspend fun clearAll() {
+        value = PairingCredentials(null, value.serverUrl)
+    }
+}
+
+private class FakeKeys : DeviceKeyAccess {
+    var deleted = false
+    override fun hasKey() = !deleted
+    override fun hasPendingKey() = false
+    override fun deleteKey() { deleted = true }
+    override fun requireSigner(): DeviceSigner = error("unused")
+    override fun requirePendingSigner(): DeviceSigner = error("unused")
+    override fun createPendingKeypair() = error("unused")
+    override fun commitPendingKey(): String = error("unused")
+    override fun currentActiveAlias(): String? = if (deleted) null else "alias_a"
+    override fun restorePreferredActiveAlias(alias: String?) = Unit
+    override fun deleteKeyAlias(alias: String) = Unit
+    override fun discardPendingKey() = Unit
 }
 
 private class FakeDao : QueuedMessageDao {

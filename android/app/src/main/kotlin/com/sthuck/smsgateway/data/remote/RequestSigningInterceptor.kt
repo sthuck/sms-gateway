@@ -7,8 +7,9 @@ import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.crypto.DeviceSigner
 import com.sthuck.smsgateway.data.remote.dto.Problem
 import com.sthuck.smsgateway.data.remote.dto.ProblemCodes
+import com.sthuck.smsgateway.pairing.DeviceRevocationHandler
 import com.sthuck.smsgateway.pairing.PairingStateAccess
-import com.sthuck.smsgateway.pairing.PairingSession
+import com.sthuck.smsgateway.pairing.RePairReason
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
@@ -26,7 +27,8 @@ import javax.inject.Singleton
 /**
  * Signs every device API request per STH-5 draft 2.
  * Retries once on `401 invalid_timestamp` after applying `server_time`.
- * Clears pairing on `device_unknown` / `device_revoked`.
+ * Clears pairing only on genuine `device_unknown` / `device_revoked`.
+ * `invalid_signature` must NOT wipe credentials (STH-18) — resign/retry.
  * A paired device with a missing Keystore key is treated as re-pair required (M2).
  */
 @Singleton
@@ -34,7 +36,7 @@ class RequestSigningInterceptor @Inject constructor(
     private val credentialStore: PairingStateAccess,
     private val deviceKeyStore: DeviceKeyAccess,
     private val clockSkewStore: ClockSkewStore,
-    private val pairingSession: PairingSession,
+    private val revocationHandler: DeviceRevocationHandler,
     private val json: Json,
     private val signerProvider: Provider<DeviceSigner>,
 ) : Interceptor {
@@ -51,10 +53,8 @@ class RequestSigningInterceptor @Inject constructor(
 
         if (!isPair && credentials.isPaired && !deviceKeyStore.hasKey()) {
             runBlocking {
-                credentialStore.clearDeviceId()
-                clockSkewStore.clear()
+                revocationHandler.wipeAndPromptRePair(RePairReason.KEY_MISSING)
             }
-            pairingSession.notifyRePairRequired()
             return chain.proceed(original)
         }
 
@@ -102,23 +102,18 @@ class RequestSigningInterceptor @Inject constructor(
                         response = chain.proceed(request)
                     }
                 }
-                ProblemCodes.DEVICE_UNKNOWN, ProblemCodes.DEVICE_REVOKED -> {
+                ProblemCodes.DEVICE_UNKNOWN -> {
                     runBlocking {
-                        credentialStore.clearDeviceId()
-                        deviceKeyStore.deleteKey()
-                        clockSkewStore.clear()
+                        revocationHandler.wipeAndPromptRePair(RePairReason.UNKNOWN)
                     }
-                    pairingSession.notifyRePairRequired()
+                }
+                ProblemCodes.DEVICE_REVOKED -> {
+                    runBlocking {
+                        revocationHandler.wipeAndPromptRePair(RePairReason.REVOKED)
+                    }
                 }
                 ProblemCodes.INVALID_SIGNATURE -> {
-                    if (credentials.isPaired) {
-                        runBlocking {
-                            credentialStore.clearDeviceId()
-                            deviceKeyStore.deleteKey()
-                            clockSkewStore.clear()
-                        }
-                        pairingSession.notifyRePairRequired()
-                    }
+                    // Keep credentials and outbox pending — resign on the next attempt (STH-18).
                 }
             }
         }

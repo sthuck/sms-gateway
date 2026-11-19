@@ -7,7 +7,9 @@ import com.sthuck.smsgateway.keepalive.KeepaliveController
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.pairing.PairingRepository
 import com.sthuck.smsgateway.pairing.PairingResult
+import com.sthuck.smsgateway.pairing.PairingSession
 import com.sthuck.smsgateway.pairing.PairingUriParser
+import com.sthuck.smsgateway.pairing.RePairReason
 import com.sthuck.smsgateway.pairing.ServerUrlValidator
 import com.sthuck.smsgateway.upload.UploadScheduler
 import androidx.work.ExistingWorkPolicy
@@ -34,12 +36,15 @@ data class PairingUiState(
     val error: String? = null,
     val pairedDeviceId: String? = null,
     val confirmation: PairingConfirmation? = null,
+    /** Non-null after a genuine revocation / unknown-device wipe (STH-18). */
+    val rePairReason: RePairReason? = null,
 )
 
 @HiltViewModel
 class PairingViewModel @Inject constructor(
     private val pairingRepository: PairingRepository,
     private val credentialStore: PairingCredentialStore,
+    private val pairingSession: PairingSession,
     private val uploadScheduler: UploadScheduler,
     private val keepaliveController: KeepaliveController,
 ) : ViewModel() {
@@ -53,8 +58,14 @@ class PairingViewModel @Inject constructor(
                     it.copy(
                         serverHint = creds.serverUrl,
                         pairedDeviceId = creds.deviceId,
+                        rePairReason = if (creds.isPaired) null else it.rePairReason,
                     )
                 }
+            }
+        }
+        viewModelScope.launch {
+            pairingSession.rePairRequired.collect { reason ->
+                _uiState.update { it.copy(rePairReason = reason) }
             }
         }
     }
@@ -98,6 +109,7 @@ class PairingViewModel @Inject constructor(
                             codeInput = "",
                             confirmation = null,
                             error = null,
+                            rePairReason = null,
                         )
                     }
                 }

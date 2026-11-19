@@ -72,9 +72,24 @@ fun StatusScreen(
             )
             StatusRow(stringResource(R.string.status_sms_permission), permissionLabel(state.smsPermission))
             StatusRow(stringResource(R.string.status_flavor), state.flavor)
-            StatusRow(stringResource(R.string.status_backend), state.backendUrl)
+            StatusRow(stringResource(R.string.status_account), state.backendUrl)
             StatusRow(stringResource(R.string.status_version), state.versionName)
-            StatusRow(stringResource(R.string.status_pairing), state.pairingStatus)
+            StatusRow(
+                stringResource(R.string.status_pairing),
+                if (state.deviceId != null) {
+                    "${state.pairingStatus} (${state.deviceId})"
+                } else {
+                    state.pairingStatus
+                },
+            )
+            if (!state.deviceName.isNullOrBlank()) {
+                StatusRow(stringResource(R.string.status_device_name), state.deviceName)
+            }
+            StatusRow(
+                stringResource(R.string.status_last_sync),
+                state.lastSuccessfulSyncAtEpochMs?.let { formatSyncTime(it) }
+                    ?: stringResource(R.string.status_last_sync_never),
+            )
             if (state.deviceId != null) {
                 if (state.unpairConfirmVisible) {
                     Text(
@@ -174,6 +189,9 @@ private fun formatQueuedPreview(item: QueuedMessagePreview): String = buildStrin
         append(item.lastError)
     }
 }
+
+private fun formatSyncTime(epochMs: Long): String =
+    java.time.Instant.ofEpochMilli(epochMs).toString()
 
 @Composable
 private fun KeepaliveSetupCard(
