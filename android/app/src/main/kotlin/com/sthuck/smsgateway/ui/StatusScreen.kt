@@ -58,6 +58,9 @@ fun StatusScreen(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            state.tunnelAuthError?.takeIf { it.isNotBlank() }?.let { authError ->
+                TunnelAuthErrorCard(error = authError)
+            }
             SmsPermissionCard(
                 state = state.smsPermission,
                 onGrantSmsClick = onGrantSmsClick,
@@ -192,6 +195,31 @@ private fun formatQueuedPreview(item: QueuedMessagePreview): String = buildStrin
 
 private fun formatSyncTime(epochMs: Long): String =
     java.time.Instant.ofEpochMilli(epochMs).toString()
+
+@Composable
+private fun TunnelAuthErrorCard(error: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.status_tunnel_auth_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.status_tunnel_auth_body, error),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
 
 @Composable
 private fun KeepaliveSetupCard(

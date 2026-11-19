@@ -3,6 +3,7 @@ package com.sthuck.smsgateway.di
 import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.crypto.DeviceKeyStore
 import com.sthuck.smsgateway.crypto.DeviceSigner
+import com.sthuck.smsgateway.data.remote.AccessHeadersInterceptor
 import com.sthuck.smsgateway.data.remote.BackendUrlInterceptor
 import com.sthuck.smsgateway.data.remote.DeviceApi
 import com.sthuck.smsgateway.data.remote.RequestSigningInterceptor
@@ -40,10 +41,14 @@ object NetworkModule {
     @Singleton
     fun okHttpClient(
         backendUrlInterceptor: BackendUrlInterceptor,
+        accessHeadersInterceptor: AccessHeadersInterceptor,
         requestSigningInterceptor: RequestSigningInterceptor,
     ): OkHttpClient {
         val builder = OkHttpClient.Builder()
+            .followRedirects(false)
+            .followSslRedirects(false)
             .addInterceptor(backendUrlInterceptor)
+            .addInterceptor(accessHeadersInterceptor)
             .addInterceptor(requestSigningInterceptor)
         if (BuildConfig.DEBUG) {
             // BASIC only: message bodies, pairing codes, and signatures must not be logged.

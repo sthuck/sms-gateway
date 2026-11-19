@@ -27,6 +27,7 @@ data class PairingConfirmation(
     val hostLabel: String,
     val requiresExtraWarning: Boolean,
     val replacingExisting: Boolean,
+    val accessHeaders: Map<String, String> = emptyMap(),
 )
 
 data class PairingUiState(
@@ -97,7 +98,13 @@ class PairingViewModel @Inject constructor(
         if (_uiState.value.inProgress) return
         viewModelScope.launch {
             _uiState.update { it.copy(inProgress = true, error = null) }
-            when (val result = pairingRepository.pair(pending.code, pending.serverUrl)) {
+            when (
+                val result = pairingRepository.pair(
+                    pending.code,
+                    pending.serverUrl,
+                    pending.accessHeaders,
+                )
+            ) {
                 is PairingResult.Success -> {
                     uploadScheduler.enqueueUpload(ExistingWorkPolicy.REPLACE)
                     keepaliveController.ensureStarted()
@@ -128,15 +135,17 @@ class PairingViewModel @Inject constructor(
     }
 
     private fun prepareConfirmation(raw: String) {
-        val parsed = PairingUriParser.parse(raw)
-        if (parsed == null) {
-            _uiState.update {
-                it.copy(
-                    error = "Enter a valid pairing code (e.g. 7K3M-9Q2P) or scan the QR.",
-                    confirmation = null,
-                )
+        val parsed = when (val parsedResult = PairingUriParser.parseDetailed(raw)) {
+            is PairingUriParser.ParseResult.Ok -> parsedResult.value
+            is PairingUriParser.ParseResult.Err -> {
+                _uiState.update {
+                    it.copy(
+                        error = parsedResult.message,
+                        confirmation = null,
+                    )
+                }
+                return
             }
-            return
         }
         val fallback = _uiState.value.serverHint
         when (
@@ -162,6 +171,7 @@ class PairingViewModel @Inject constructor(
                             hostLabel = validated.value.hostWithPort,
                             requiresExtraWarning = validated.value.requiresExtraWarning,
                             replacingExisting = replacing,
+                            accessHeaders = parsed.accessHeaders,
                         ),
                     )
                 }

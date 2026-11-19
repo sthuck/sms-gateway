@@ -24,6 +24,8 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -34,6 +36,7 @@ class OutboxUploaderTest {
 
     private lateinit var server: MockWebServer
     private lateinit var dao: FakeDao
+    private lateinit var credentials: FakeStateAccess
     private lateinit var uploader: OutboxUploader
     private val json = Json {
         ignoreUnknownKeys = true
@@ -47,7 +50,7 @@ class OutboxUploaderTest {
         server = MockWebServer()
         server.start()
         dao = FakeDao()
-        val credentials = FakeStateAccess(
+        credentials = FakeStateAccess(
             PairingCredentials(DeviceApiMock.SAMPLE_DEVICE_ID, server.url("/").toString()),
         )
         val api = Retrofit.Builder()
@@ -455,6 +458,103 @@ class OutboxUploaderTest {
         assertEquals("hello", dao.rows.single().body)
     }
 
+    @Test
+    fun proxy302AndHtml401And403RetryWithoutParkingOrWipingAndClearOnNextSuccess() = runBlocking {
+        val clientNoRedirects = OkHttpClient.Builder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+        val apiNoRedirects = Retrofit.Builder()
+            .baseUrl(server.url("/"))
+            .client(clientNoRedirects)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(DeviceApi::class.java)
+        val pairingSession = PairingSession()
+        val uploaderNoRedirects = OutboxUploader(
+            dao = dao,
+            deviceApi = apiNoRedirects,
+            credentialStore = credentials,
+            pairingSession = pairingSession,
+            revocationHandler = DeviceRevocationHandler(
+                credentialStore = credentials,
+                deviceKeyStore = FakeKeys(),
+                clockSkewStore = ClockSkewStore(),
+                pairingSession = pairingSession,
+            ),
+            json = json,
+            housekeeping = OutboxHousekeeping(dao),
+        )
+
+        dao.rows += sample("sms-cf-1")
+
+        // 1) 302 redirect on batch (after /devices/me succeeds or fails)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(302)
+                .addHeader("Location", "https://cf.example/login"),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(302)
+                .addHeader("Location", "https://cf.example/login"),
+        )
+        val r302 = uploaderNoRedirects.runOnce(nowEpochMs = 1_000L)
+        assertTrue(r302 is UploadPassResult.RetryLater)
+        assertEquals("HTTP 302", credentials.current().tunnelAuthError)
+        assertEquals(DeviceApiMock.SAMPLE_DEVICE_ID, credentials.current().deviceId)
+        assertFalse(dao.rows.single().parked)
+
+        // 2) HTML 401
+        val nextAt1 = dao.rows.single().nextAttemptAtEpochMs
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .addHeader("Content-Type", "text/html")
+                .setBody("<html>Access login required</html>"),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .addHeader("Content-Type", "text/html")
+                .setBody("<html>Access login required</html>"),
+        )
+        val r401 = uploaderNoRedirects.runOnce(nowEpochMs = nextAt1 + 1)
+        assertTrue(r401 is UploadPassResult.RetryLater)
+        assertEquals("HTTP 401", credentials.current().tunnelAuthError)
+        assertEquals(DeviceApiMock.SAMPLE_DEVICE_ID, credentials.current().deviceId)
+        assertFalse(dao.rows.single().parked)
+
+        // 3) HTML 403
+        val nextAt2 = dao.rows.single().nextAttemptAtEpochMs
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(403)
+                .addHeader("Content-Type", "text/html")
+                .setBody("<html>Access forbidden</html>"),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(403)
+                .addHeader("Content-Type", "text/html")
+                .setBody("<html>Access forbidden</html>"),
+        )
+        val r403 = uploaderNoRedirects.runOnce(nowEpochMs = nextAt2 + 1)
+        assertTrue(r403 is UploadPassResult.RetryLater)
+        assertEquals("HTTP 403", credentials.current().tunnelAuthError)
+        assertEquals(DeviceApiMock.SAMPLE_DEVICE_ID, credentials.current().deviceId)
+        assertFalse(dao.rows.single().parked)
+
+        // 4) Next success clears tunnelAuthError and uploads row
+        val nextAt3 = dao.rows.single().nextAttemptAtEpochMs
+        DeviceApiMock.enqueueDeviceMe(server)
+        DeviceApiMock.enqueueBatchAccepted(server, deviceMsgId = "sms-cf-1")
+        val rOk = uploaderNoRedirects.runOnce(nowEpochMs = nextAt3 + 1)
+        assertTrue(rOk is UploadPassResult.Idle)
+        assertNull(credentials.current().tunnelAuthError)
+        assertTrue(dao.rows.isEmpty())
+    }
+
     private fun sample(id: String, body: String = "hello") = QueuedMessageEntity(
         deviceMsgId = id,
         contentKey = id,
@@ -472,21 +572,38 @@ private class FakeStateAccess(
 ) : PairingStateAccess {
     override suspend fun current() = value
     override suspend fun clearDeviceId() {
-        value = value.copy(deviceId = null, deviceName = null, lastSuccessfulSyncAtEpochMs = null)
+        value = value.copy(
+            deviceId = null,
+            deviceName = null,
+            lastSuccessfulSyncAtEpochMs = null,
+            accessHeaders = emptyMap(),
+            tunnelAuthError = null,
+        )
     }
     override suspend fun savePairing(
         deviceId: String,
         serverUrl: String,
         activeKeyAlias: String,
         deviceName: String,
+        accessHeaders: Map<String, String>,
     ) {
-        value = PairingCredentials(deviceId, serverUrl, activeKeyAlias, deviceName)
+        value = PairingCredentials(
+            deviceId = deviceId,
+            serverUrl = serverUrl,
+            activeKeyAlias = activeKeyAlias,
+            deviceName = deviceName,
+            accessHeaders = accessHeaders,
+            tunnelAuthError = null,
+        )
     }
     override suspend fun updateDeviceName(deviceName: String) {
         value = value.copy(deviceName = deviceName)
     }
     override suspend fun recordSuccessfulSync(atEpochMs: Long) {
-        value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs)
+        value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs, tunnelAuthError = null)
+    }
+    override suspend fun recordTunnelAuthError(message: String?) {
+        value = value.copy(tunnelAuthError = message)
     }
     override suspend fun clearAll() {
         value = PairingCredentials(null, value.serverUrl)

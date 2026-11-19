@@ -4,11 +4,14 @@ import android.os.Build
 import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
+import com.sthuck.smsgateway.data.remote.AccessHeadersInterceptor
 import com.sthuck.smsgateway.data.remote.DeviceApi
+import com.sthuck.smsgateway.data.remote.PairAccessHeadersTag
 import com.sthuck.smsgateway.data.remote.dto.DeviceInfo
 import com.sthuck.smsgateway.data.remote.dto.PairRequest
 import com.sthuck.smsgateway.data.remote.dto.Problem
 import com.sthuck.smsgateway.data.remote.dto.ProblemCodes
+import com.sthuck.smsgateway.upload.OutboxUploader
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import javax.inject.Inject
@@ -38,11 +41,31 @@ class PairingRepository @Inject constructor(
      * On success the pending Keystore key is committed before credentials are
      * saved, so a crash cannot leave a device id without its signing key.
      */
-    suspend fun pair(code: String, serverUrl: String): PairingResult {
+    suspend fun pair(
+        code: String,
+        serverUrl: String,
+        accessHeaders: Map<String, String> = emptyMap(),
+    ): PairingResult {
         val validated = when (val result = ServerUrlValidator.validate(serverUrl)) {
             is ServerUrlValidator.Result.Ok -> result.value
             is ServerUrlValidator.Result.Err ->
                 return PairingResult.Failure(result.message)
+        }
+        val validatedHeaders = if (accessHeaders.isEmpty()) {
+            emptyMap()
+        } else {
+            when (val headerResult = AccessHeadersValidator.validate(accessHeaders)) {
+                is AccessHeadersValidator.Result.Ok -> headerResult.headers
+                is AccessHeadersValidator.Result.Err ->
+                    return PairingResult.Failure(headerResult.message)
+            }
+        }
+        val pairTag = if (validatedHeaders.isEmpty()) {
+            null
+        } else {
+            val origin = AccessHeadersInterceptor.originKey(validated.url)
+                ?: return PairingResult.Failure("Server URL is not a valid http(s) URL.")
+            PairAccessHeadersTag(serverOrigin = origin, headers = validatedHeaders)
         }
 
         val publicKey = try {
@@ -73,6 +96,7 @@ class PairingRepository @Inject constructor(
                         sdkInt = Build.VERSION.SDK_INT,
                     ),
                 ),
+                pairAccessHeaders = pairTag,
             )
             // Promote key, persist alias+credentials, then retire the previous
             // Keystore alias — never delete the old key before savePairing.
@@ -83,6 +107,7 @@ class PairingRepository @Inject constructor(
                 serverUrl = validated.url,
                 activeKeyAlias = activeAlias,
                 deviceName = response.name,
+                accessHeaders = validatedHeaders,
             )
             deviceKeyStore.restorePreferredActiveAlias(activeAlias)
             if (previousAlias != null && previousAlias != activeAlias) {
@@ -99,10 +124,13 @@ class PairingRepository @Inject constructor(
             val problem = e.response()?.errorBody()?.string()?.let { body ->
                 runCatching { json.decodeFromString<Problem>(body) }.getOrNull()
             }
-            val message = when (problem?.code) {
-                ProblemCodes.INVALID_PAIRING_CODE ->
+            val message = when {
+                OutboxUploader.isProxyAuthBlocked(e.code(), problem) ->
+                    "Tunnel or proxy authentication failed (HTTP ${e.code()}). " +
+                        "Check the Cloudflare Access headers in the pairing QR."
+                problem?.code == ProblemCodes.INVALID_PAIRING_CODE ->
                     "That pairing code is invalid, expired, or already used."
-                ProblemCodes.INVALID_PUBLIC_KEY ->
+                problem?.code == ProblemCodes.INVALID_PUBLIC_KEY ->
                     "Device key was rejected. Try pairing again."
                 else -> {
                     val detail = problem?.detail ?: problem?.title

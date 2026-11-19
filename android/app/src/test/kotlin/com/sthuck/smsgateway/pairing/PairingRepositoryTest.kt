@@ -6,7 +6,9 @@ import com.sthuck.smsgateway.crypto.PrivateKeyDeviceSigner
 import com.sthuck.smsgateway.data.local.ContentKeyCounterEntity
 import com.sthuck.smsgateway.data.local.QueuedMessageDao
 import com.sthuck.smsgateway.data.local.QueuedMessageEntity
+import com.sthuck.smsgateway.data.remote.AccessHeadersInterceptor
 import com.sthuck.smsgateway.data.remote.DeviceApi
+import com.sthuck.smsgateway.data.remote.PairAccessHeadersTag
 import com.sthuck.smsgateway.data.remote.dto.PairRequest
 import com.sthuck.smsgateway.data.remote.dto.PairResponse
 import com.sthuck.smsgateway.testing.DeviceApiMock
@@ -68,7 +70,12 @@ class PairingRepositoryTest {
         recordingApi = RecordingDeviceApi(
             delegate = Retrofit.Builder()
                 .baseUrl(server.url("/"))
-                .client(OkHttpClient())
+                .client(
+                    OkHttpClient.Builder()
+                        .followRedirects(false)
+                        .followSslRedirects(false)
+                        .build(),
+                )
                 .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
                 .build()
                 .create(DeviceApi::class.java),
@@ -172,16 +179,85 @@ class PairingRepositoryTest {
         assertEquals(1, dao.deleteAllCount.get())
     }
 
+    @Test
+    fun failedRePairPreservesExistingPairingAndStoredHeaders() = runBlocking {
+        assumeTrue(com.sthuck.smsgateway.BuildConfig.FLAVOR == "dev")
+        val oldHeaders = mapOf("CF-Access-Client-Id" to "old-id", "CF-Access-Client-Secret" to "old-sec")
+        credentials.savePairing(
+            deviceId = "existing-device",
+            serverUrl = "https://sms.sthuck.info",
+            activeKeyAlias = "alias_a",
+            deviceName = "Existing",
+            accessHeaders = oldHeaders,
+        )
+        events.clear()
+
+        server.enqueue(
+            okhttp3.mockwebserver.MockResponse()
+                .setResponseCode(403)
+                .addHeader("Content-Type", "text/html")
+                .setBody("<html>Access denied</html>"),
+        )
+        val candidate = server.url("/").toString().trimEnd('/')
+        val newHeaders = mapOf("CF-Access-Client-Id" to "new-id", "CF-Access-Client-Secret" to "new-sec")
+        val result = repo.pair("7K3M-9Q2P", candidate, newHeaders)
+        assertTrue(result is PairingResult.Failure)
+        val msg = (result as PairingResult.Failure).message
+        assertTrue("expected tunnel auth message, got: $msg", msg.contains("HTTP 403"))
+        assertEquals("existing-device", credentials.current().deviceId)
+        assertEquals("https://sms.sthuck.info", credentials.current().serverUrl)
+        assertEquals(oldHeaders, credentials.current().accessHeaders)
+        assertFalse(events.contains("save"))
+    }
+
+    @Test
+    fun proxy302OnPairReturnsClearTunnelError() = runBlocking {
+        assumeTrue(com.sthuck.smsgateway.BuildConfig.FLAVOR == "dev")
+        server.enqueue(
+            okhttp3.mockwebserver.MockResponse()
+                .setResponseCode(302)
+                .addHeader("Location", "https://example.cloudflareaccess.com/cdn-cgi/access/login"),
+        )
+        val candidate = server.url("/").toString().trimEnd('/')
+        val result = repo.pair("7K3M-9Q2P", candidate)
+        assertTrue(result is PairingResult.Failure)
+        assertTrue((result as PairingResult.Failure).message.contains("HTTP 302"))
+    }
+
+    @Test
+    fun successfulPairWithHeadersPassesOriginScopedTagAndCommitsHeaders() = runBlocking {
+        assumeTrue(com.sthuck.smsgateway.BuildConfig.FLAVOR == "dev")
+        DeviceApiMock.enqueuePairCreated(server)
+        val candidate = server.url("/").toString().trimEnd('/')
+        val headers = mapOf("CF-Access-Client-Id" to "id-1", "CF-Access-Client-Secret" to "sec-2")
+        val result = repo.pair("7K3M-9Q2P", candidate, headers)
+        assertTrue(result is PairingResult.Success)
+        assertEquals(headers, credentials.current().accessHeaders)
+        assertEquals(
+            PairAccessHeadersTag(
+                serverOrigin = AccessHeadersInterceptor.originKey(candidate)!!,
+                headers = headers,
+            ),
+            recordingApi.lastPairTag.get(),
+        )
+    }
+
     private class RecordingDeviceApi(
         private val delegate: DeviceApi,
     ) : DeviceApi by delegate {
         val lastPairUrl = AtomicReference<String?>(null)
+        val lastPairTag = AtomicReference<PairAccessHeadersTag?>(null)
         val pairCallCount = AtomicInteger(0)
 
-        override suspend fun pair(url: String, body: PairRequest): PairResponse {
+        override suspend fun pair(
+            url: String,
+            body: PairRequest,
+            pairAccessHeaders: PairAccessHeadersTag?,
+        ): PairResponse {
             pairCallCount.incrementAndGet()
             lastPairUrl.set(url)
-            return delegate.pair(url, body)
+            lastPairTag.set(pairAccessHeaders)
+            return delegate.pair(url, body, pairAccessHeaders)
         }
     }
 
@@ -191,22 +267,39 @@ class PairingRepositoryTest {
     ) : PairingStateAccess {
         override suspend fun current() = value
         override suspend fun clearDeviceId() {
-            value = value.copy(deviceId = null)
+            value = value.copy(
+                deviceId = null,
+                deviceName = null,
+                lastSuccessfulSyncAtEpochMs = null,
+                accessHeaders = emptyMap(),
+                tunnelAuthError = null,
+            )
         }
         override suspend fun savePairing(
             deviceId: String,
             serverUrl: String,
             activeKeyAlias: String,
             deviceName: String,
+            accessHeaders: Map<String, String>,
         ) {
             events += "save"
-            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias, deviceName)
+            value = PairingCredentials(
+                deviceId = deviceId,
+                serverUrl = serverUrl,
+                activeKeyAlias = activeKeyAlias,
+                deviceName = deviceName,
+                accessHeaders = accessHeaders,
+                tunnelAuthError = null,
+            )
         }
         override suspend fun updateDeviceName(deviceName: String) {
             value = value.copy(deviceName = deviceName)
         }
         override suspend fun recordSuccessfulSync(atEpochMs: Long) {
-            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs)
+            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs, tunnelAuthError = null)
+        }
+        override suspend fun recordTunnelAuthError(message: String?) {
+            value = value.copy(tunnelAuthError = message)
         }
         override suspend fun clearAll() {
             value = PairingCredentials(null, "https://sms.sthuck.info")

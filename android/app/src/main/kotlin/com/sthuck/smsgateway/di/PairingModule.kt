@@ -2,6 +2,8 @@ package com.sthuck.smsgateway.di
 
 import com.sthuck.smsgateway.crypto.DeviceKeyAccess
 import com.sthuck.smsgateway.crypto.DeviceKeyStore
+import com.sthuck.smsgateway.crypto.KeystoreSecretBox
+import com.sthuck.smsgateway.crypto.SecretBox
 import com.sthuck.smsgateway.pairing.PairingCredentialStore
 import com.sthuck.smsgateway.pairing.PairingCredentialsReader
 import com.sthuck.smsgateway.pairing.PairingStateAccess
@@ -27,6 +29,10 @@ abstract class PairingModule {
     @Binds
     @Singleton
     abstract fun deviceKeyAccess(store: DeviceKeyStore): DeviceKeyAccess
+
+    @Binds
+    @Singleton
+    abstract fun secretBox(box: KeystoreSecretBox): SecretBox
 
     @Binds
     @Singleton

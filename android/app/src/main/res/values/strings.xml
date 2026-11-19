@@ -13,6 +13,8 @@
     <string name="pairing_revoked_banner">This device was revoked. Pair again to resume forwarding.</string>
     <string name="pairing_unknown_banner">This device is no longer recognised. Pair again to resume forwarding.</string>
     <string name="pairing_key_missing_banner">The signing key is missing. Pair again to resume forwarding.</string>
+    <string name="status_tunnel_auth_title">Tunnel authentication blocked</string>
+    <string name="status_tunnel_auth_body">Uploads are blocked by tunnel or proxy authentication (%1$s). Your Cloudflare Access service token may have expired or rotated. Unpair this device and scan a fresh QR code from the web UI to resume forwarding.</string>
     <string name="status_queue">Outbound queue</string>
     <plurals name="status_queue_count">
         <item quantity="one">%d pending</item>
@@ -50,6 +52,7 @@
     <string name="pairing_confirm_body">Pair with code %1$s to server %2$s?</string>
     <string name="pairing_confirm_unlisted_host">Warning: %1$s is not the default production host (sms.sthuck.info). Only continue if you trust this server.</string>
     <string name="pairing_confirm_replace">This will replace the existing pairing after the new one succeeds.</string>
+    <string name="pairing_confirm_access_headers">Includes tunnel access headers: %1$s</string>
     <string name="pairing_confirm_action">Confirm and pair</string>
     <string name="pairing_confirm_cancel">Cancel</string>
 

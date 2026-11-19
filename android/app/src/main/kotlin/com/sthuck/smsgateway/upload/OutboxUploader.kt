@@ -75,6 +75,7 @@ class OutboxUploader @Inject constructor(
             }
             is DeviceMeProbe.Ok -> {
                 credentialStore.updateDeviceName(probe.name)
+                credentialStore.recordTunnelAuthError(null)
             }
             DeviceMeProbe.Continue -> Unit
         }
@@ -144,6 +145,8 @@ class OutboxUploader @Inject constructor(
             if (toDelete.isNotEmpty()) {
                 dao.deleteByIds(toDelete)
                 credentialStore.recordSuccessfulSync(nowEpochMs)
+            } else {
+                credentialStore.recordTunnelAuthError(null)
             }
             if (dao.getReadyForUpload(nowEpochMs, 1).isNotEmpty()) {
                 UploadPassResult.MorePending
@@ -171,6 +174,10 @@ class OutboxUploader @Inject constructor(
             }
         } catch (e: HttpException) {
             val problem = parseProblem(e)
+            if (isProxyAuthBlocked(e.code(), problem)) {
+                credentialStore.recordTunnelAuthError("HTTP ${e.code()}")
+                return DeviceMeProbe.Continue
+            }
             when (problem?.code) {
                 ProblemCodes.DEVICE_REVOKED, ProblemCodes.DEVICE_UNKNOWN ->
                     DeviceMeProbe.StopForRePair(problem.code)
@@ -191,6 +198,14 @@ class OutboxUploader @Inject constructor(
     ): UploadPassResult {
         val problem = parseProblem(e)
         val code = problem?.code
+        if (isProxyAuthBlocked(e.code(), problem)) {
+            credentialStore.recordTunnelAuthError("HTTP ${e.code()}")
+            val reason = code ?: "http_${e.code()}"
+            val delay = retryAfterDelayMs(e, nowEpochMs)
+                ?: backoffMs(rows.minOf { it.attemptCount })
+            scheduleRetry(rows, nowEpochMs, reason, delayMs = delay)
+            return UploadPassResult.RetryLater(reason)
+        }
         when (code) {
             ProblemCodes.DEVICE_UNKNOWN,
             ProblemCodes.DEVICE_REVOKED,
@@ -290,6 +305,8 @@ class OutboxUploader @Inject constructor(
             if (toDelete.isNotEmpty()) {
                 dao.deleteByIds(toDelete)
                 credentialStore.recordSuccessfulSync(nowEpochMs)
+            } else {
+                credentialStore.recordTunnelAuthError(null)
             }
             UploadPassResult.MorePending
         } catch (e: HttpException) {
@@ -335,12 +352,17 @@ class OutboxUploader @Inject constructor(
             ProblemCodes.BODY_TOO_LARGE,
         )
 
+        fun isProxyAuthBlocked(httpCode: Int, problem: Problem?): Boolean =
+            httpCode in 300..399 || ((httpCode == 401 || httpCode == 403) && problem == null)
+
         /**
-         * Retry when: 5xx / 408 / 429, missing/unparsable problem body, or
+         * Retry when: proxy/tunnel auth block (3xx or non-problem 401/403),
+         * 5xx / 408 / 429, missing/unparsable problem body, or
          * problem.retryable == true. Park only for an explicit non-retryable
          * 4xx problem code.
          */
         fun shouldRetryHttp(httpCode: Int, problem: Problem?): Boolean {
+            if (isProxyAuthBlocked(httpCode, problem)) return true
             if (httpCode in 500..599 || httpCode == 408 || httpCode == 429) return true
             if (problem == null) return true
             if (problem.retryable) return true

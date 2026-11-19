@@ -20,6 +20,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -222,26 +223,64 @@ class RequestSigningInterceptorTest {
         assertFalse(keys.deleted)
     }
 
+    @Test
+    fun html401And403FromTunnelDoNotClearPairing() {
+        val mock = server!!
+        for (code in listOf(401, 403)) {
+            mock.enqueue(
+                MockResponse()
+                    .setResponseCode(code)
+                    .addHeader("Content-Type", "text/html")
+                    .setBody("<html>Cloudflare Access denied</html>"),
+            )
+            client.newCall(
+                Request.Builder()
+                    .url(mock.url("/v1/messages:batch"))
+                    .post("{}".toRequestBody("application/json".toMediaType()))
+                    .build(),
+            ).execute().close()
+            assertEquals(DeviceApiMock.SAMPLE_DEVICE_ID, runBlocking { credentials.current() }.deviceId)
+            assertFalse(keys.deleted)
+        }
+    }
+
     private class FakeCredentials(
         private var value: PairingCredentials,
     ) : PairingStateAccess {
         override suspend fun current() = value
         override suspend fun clearDeviceId() {
-            value = value.copy(deviceId = null, deviceName = null, lastSuccessfulSyncAtEpochMs = null)
+            value = value.copy(
+                deviceId = null,
+                deviceName = null,
+                lastSuccessfulSyncAtEpochMs = null,
+                accessHeaders = emptyMap(),
+                tunnelAuthError = null,
+            )
         }
         override suspend fun savePairing(
             deviceId: String,
             serverUrl: String,
             activeKeyAlias: String,
             deviceName: String,
+            accessHeaders: Map<String, String>,
         ) {
-            value = PairingCredentials(deviceId, serverUrl, activeKeyAlias, deviceName)
+            value = PairingCredentials(
+                deviceId = deviceId,
+                serverUrl = serverUrl,
+                activeKeyAlias = activeKeyAlias,
+                deviceName = deviceName,
+                accessHeaders = accessHeaders,
+                tunnelAuthError = null,
+            )
         }
         override suspend fun updateDeviceName(deviceName: String) {
             value = value.copy(deviceName = deviceName)
         }
         override suspend fun recordSuccessfulSync(atEpochMs: Long) {
-            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs)
+            value = value.copy(lastSuccessfulSyncAtEpochMs = atEpochMs, tunnelAuthError = null)
+        }
+        override suspend fun recordTunnelAuthError(message: String?) {
+            value = value.copy(tunnelAuthError = message)
         }
         override suspend fun clearAll() {
             value = PairingCredentials(null, value.serverUrl)

@@ -2,6 +2,7 @@ package com.sthuck.smsgateway.keepalive
 
 import com.sthuck.smsgateway.BuildConfig
 import com.sthuck.smsgateway.data.remote.DeviceApi
+import com.sthuck.smsgateway.data.remote.PairAccessHeadersTag
 import com.sthuck.smsgateway.data.remote.dto.DeviceStatus
 import com.sthuck.smsgateway.data.remote.dto.MessageBatchRequest
 import com.sthuck.smsgateway.data.remote.dto.MessageBatchResponse
@@ -89,8 +90,11 @@ class HeartbeatClientTest {
         var heartbeatBody: RequestBody? = null
             private set
 
-        override suspend fun pair(url: String, body: PairRequest): PairResponse =
-            error("unused")
+        override suspend fun pair(
+            url: String,
+            body: PairRequest,
+            pairAccessHeaders: PairAccessHeadersTag?,
+        ): PairResponse = error("unused")
 
         override suspend fun ingestMessageBatch(body: MessageBatchRequest): MessageBatchResponse =
             error("unused")

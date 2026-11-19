@@ -121,6 +121,16 @@ fun PairingScreen(
                 ),
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (confirmation.accessHeaders.isNotEmpty()) {
+                Text(
+                    text = stringResource(
+                        R.string.pairing_confirm_access_headers,
+                        confirmation.accessHeaders.keys.sorted().joinToString(", "),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (confirmation.requiresExtraWarning) {
                 Text(
                     text = stringResource(
