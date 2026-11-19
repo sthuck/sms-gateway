@@ -27,7 +27,6 @@ import {
   captureCatalog,
   diffCatalogs,
   formatCatalogDiffs,
-  stableStringify,
   EXPECTED_CATALOG_PATH,
 } from "./catalog-fingerprint.mjs";
 
