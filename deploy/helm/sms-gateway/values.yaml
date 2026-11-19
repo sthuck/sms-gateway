@@ -100,10 +100,16 @@ secrets:
   sessionSecretKey: SESSION_SECRET
   # When false, OIDC secret refs are omitted (API runs without login until configured).
   oidcEnabled: false
+  # Privileged migrator credentials (used ONLY by the pre-install/pre-upgrade migrate Job when migrations.enabled=true).
+  # Expected keys: MIGRATE_DATABASE_URL, SMS_APP_PASSWORD
+  migrateSecretName: sms-gateway-migrate
+  migrateDatabaseUrlKey: MIGRATE_DATABASE_URL
+  migrateAppPasswordKey: SMS_APP_PASSWORD
 
 api:
   enabled: true
   replicaCount: 1
+  terminationGracePeriodSeconds: 30
   command: ["node", "dist/index.js"]
   service:
     type: ClusterIP
@@ -128,7 +134,38 @@ api:
 worker:
   enabled: true
   replicaCount: 1
+  terminationGracePeriodSeconds: 45
   command: ["node", "dist/worker.js"]
+  metricsService:
+    enabled: false # set true to expose ClusterIP Service for Prometheus scraping on QUEUE_METRICS_PORT
+    type: ClusterIP
+  probes:
+    enabled: true
+    liveness:
+      path: /healthz
+      initialDelaySeconds: 10
+      periodSeconds: 15
+    readiness:
+      path: /readyz
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+migrations:
+  # Run `node scripts/migrate.mjs up` as a Helm pre-install/pre-upgrade hook Job.
+  # Requires secrets.migrateSecretName (MIGRATE_DATABASE_URL + SMS_APP_PASSWORD).
+  enabled: false
+  command: ["node", "scripts/migrate.mjs", "up"]
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  hookWeight: "-5"
+  hookDeletePolicy: before-hook-creation
   resources:
     requests:
       cpu: 50m

@@ -60,8 +60,10 @@ See `values.yaml`. Notable knobs:
   - `encryptionKekSecretName` — mounted at `/var/run/secrets/sms-gateway/` (mode `0440`) on `api` and `worker` when `ENCRYPTION_ENABLED != "false"`
   - `oidcEnabled` (default **false**) — mounts `OIDC_CLIENT_SECRET` + `SESSION_SECRET` on `api` only
   - `llmEnabled` (default **false**) — mounts `LLM_API_KEY` on `api` and `worker` when enabled
+  - `migrateSecretName` (`MIGRATE_DATABASE_URL`, `SMS_APP_PASSWORD`) — mounted **only** on the hook Job when `migrations.enabled=true`
+- `migrations.enabled` — default **false**; set **true** to run `node scripts/migrate.mjs up` as a `pre-install,pre-upgrade` Helm hook Job before API/worker pods start
 - `ingress.enabled` — optional Ingress for the API + Web UI Service
-- `api` / `worker` / `mcp` — replicas, resources, commands (`mcp.enabled` defaults to **false** until MCP transport is implemented)
+- `api` / `worker` / `mcp` — replicas, resources, commands, `terminationGracePeriodSeconds` (`30s` on `api`, `45s` on `worker`), `worker.probes` (`/healthz` & `/readyz` on `QUEUE_METRICS_PORT` when `> 0`), and `worker.metricsService.enabled` (ClusterIP Service for Prometheus scraping; `mcp.enabled` defaults to **false** until MCP transport is implemented)
 
 Homelab hostnames (`sms.sthuck.info` / `auth.sthuck.info`) are documented as
 commented examples in `values.yaml` and `docs/deployment-auth.md`. Homelab

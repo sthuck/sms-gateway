@@ -23,6 +23,7 @@ spec:
         {{- include "sms-gateway.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
     spec:
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -37,6 +38,13 @@ spec:
             {{- toYaml .Values.worker.command | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- $metricsPort := (.Values.config.QUEUE_METRICS_PORT | int) }}
+          {{- if gt $metricsPort 0 }}
+          ports:
+            - name: metrics
+              containerPort: {{ $metricsPort }}
+              protocol: TCP
+          {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "sms-gateway.fullname" . }}-worker
@@ -45,6 +53,20 @@ spec:
           {{- if (include "sms-gateway.encryptionEnabled" .) }}
           volumeMounts:
             {{- include "sms-gateway.kekVolumeMount" . | nindent 12 }}
+          {{- end }}
+          {{- if and (gt $metricsPort 0) .Values.worker.probes.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.worker.probes.liveness.path }}
+              port: metrics
+            initialDelaySeconds: {{ .Values.worker.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.worker.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.worker.probes.readiness.path }}
+              port: metrics
+            initialDelaySeconds: {{ .Values.worker.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.worker.probes.readiness.periodSeconds }}
           {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}

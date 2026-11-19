@@ -1,0 +1,78 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sms-gateway.fullname" . }}-migrate
+  labels:
+    {{- include "sms-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": {{ .Values.migrations.hookWeight | quote }}
+    "helm.sh/hook-delete-policy": {{ .Values.migrations.hookDeletePolicy | quote }}
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "sms-gateway.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "sms-gateway.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.migrations.command | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.config.NODE_ENV | quote }}
+            - name: QUEUE_SCHEMA
+              value: {{ .Values.config.QUEUE_SCHEMA | quote }}
+            - name: QUEUE_RETRY_LIMIT
+              value: {{ .Values.config.QUEUE_RETRY_LIMIT | quote }}
+            - name: QUEUE_RETRY_DELAY_SECONDS
+              value: {{ .Values.config.QUEUE_RETRY_DELAY_SECONDS | quote }}
+            - name: QUEUE_RETRY_BACKOFF
+              value: {{ .Values.config.QUEUE_RETRY_BACKOFF | quote }}
+            - name: QUEUE_RETRY_DELAY_MAX_SECONDS
+              value: {{ .Values.config.QUEUE_RETRY_DELAY_MAX_SECONDS | quote }}
+            - name: MIGRATE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.migrateSecretName | quote }}
+                  key: {{ .Values.secrets.migrateDatabaseUrlKey | quote }}
+            - name: SMS_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.migrateSecretName | quote }}
+                  key: {{ .Values.secrets.migrateAppPasswordKey | quote }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

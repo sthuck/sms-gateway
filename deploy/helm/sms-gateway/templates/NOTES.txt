@@ -22,6 +22,9 @@ Required Secrets (create before pods become Ready):
 {{- if .Values.secrets.oidcEnabled }}
   - {{ .Values.secrets.oidcSecretName }} (keys {{ .Values.secrets.oidcClientSecretKey }}, {{ .Values.secrets.sessionSecretKey }})
 {{- end }}
+{{- if .Values.migrations.enabled }}
+  - {{ .Values.secrets.migrateSecretName }} (keys {{ .Values.secrets.migrateDatabaseUrlKey }}, {{ .Values.secrets.migrateAppPasswordKey }})
+{{- end }}
 
 Postgres is not bundled. Point DATABASE_URL at an in-cluster StatefulSet or a
 CloudNativePG Cluster. pg-boss uses the same Postgres (no extra queue infra).

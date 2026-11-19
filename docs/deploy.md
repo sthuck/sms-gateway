@@ -77,13 +77,34 @@ imagePullSecrets:
   - name: ghcr-pull
 ```
 
-## 3. Migrations (from a laptop)
+## 3. Migrations
 
-Run against the cluster Postgres from a machine that can reach it. Script:
-`backend` package `migrate:up` (`scripts/migrate.mjs up`). It applies Drizzle
-migrations, creates role `sms_app` (`LOGIN`, **no** `BYPASSRLS`) if missing,
-sets its password **only on first create** from `SMS_APP_PASSWORD`, then
-bootstraps pg-boss. Runtime pods use `DATABASE_URL` as `sms_app` (RLS).
+`scripts/migrate.mjs up` applies pending Drizzle migrations, creates role
+`sms_app` (`LOGIN`, **no** `BYPASSRLS`) if missing, sets its password **only on
+first create** from `SMS_APP_PASSWORD`, then bootstraps pg-boss. Runtime API and
+worker pods use `DATABASE_URL` as `sms_app` (RLS). Details:
+[schema.md](./schema.md), [queue.md](./queue.md).
+
+### Option A — In-cluster Helm hook Job (recommended)
+
+`backend/Dockerfile` bundles `drizzle/` and `scripts/`, and the chart provides
+an opt-in `pre-install,pre-upgrade` hook Job (`migrations.enabled: true`) so
+migrations finish before API/worker pods start, without exposing migrator
+credentials to runtime Deployments:
+
+```bash
+kubectl create secret generic sms-gateway-migrate \
+  --from-literal=MIGRATE_DATABASE_URL='postgres://<migrator>:<password>@<pg-host>:5432/sms' \
+  --from-literal=SMS_APP_PASSWORD='<sms-app-password>' \
+  -n <ns>
+```
+
+Set `migrations.enabled: true` in `my-values.yaml` (Section 5) before running
+`helm upgrade --install`.
+
+### Option B — Manual from a laptop
+
+Run against the cluster Postgres from a machine that can reach it:
 
 ```bash
 export MIGRATE_DATABASE_URL='postgres://<migrator>:<password>@<host>:5432/sms'
@@ -92,9 +113,9 @@ pnpm --filter @sms-gateway/backend migrate:up
 # or: cd backend && pnpm migrate:up
 ```
 
-Put the same app password into the k8s `DATABASE_URL` secret below. Rotating an
-existing `sms_app` password is a manual `ALTER ROLE`, not part of `migrate:up`.
-Details: [schema.md](./schema.md), [queue.md](./queue.md).
+Put the same `sms_app` password into the k8s `DATABASE_URL` secret below.
+Rotating an existing `sms_app` password is a manual `ALTER ROLE`, not part of
+`migrate:up`.
 
 ## 4. Secrets
 
@@ -264,8 +285,11 @@ curl -sS -H "Authorization: Bearer <pat>" \
 
 More PAT usage: [agent-access.md](./agent-access.md).
 
-## 9. Known gaps
+## 9. Deployment status & remaining work
 
-Verified against the repo as of this doc:
-
-- No in-cluster migrate Job — migrations are laptop/`pnpm migrate:up` only.
+All homelab Kubernetes deployment gaps tracked here (bundled single-host UI,
+GHCR image & OCI chart release workflows, production `TRUST_PROXY` /
+`DEVICE_*` / `INGEST_*` Helm knobs, `NOTES.txt`, graceful shutdown / DB `/readyz`,
+and optional `pre-install,pre-upgrade` migration hook Job) are wired. Remaining
+feature work (MCP server implementation and stream rule/AI worker handlers) is
+tracked separately.

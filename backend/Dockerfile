@@ -36,6 +36,9 @@ RUN groupadd --system --gid 1001 app \
   && useradd --system --uid 1001 --gid app --home /app --shell /usr/sbin/nologin app
 COPY --from=build --chown=app:app /out/ ./
 COPY --from=web-build --chown=app:app /app/web/dist ./web-dist
+COPY --chown=app:app backend/drizzle ./drizzle
+COPY --chown=app:app backend/scripts/migrate.mjs backend/scripts/bootstrap-pgboss.mjs backend/scripts/catalog-fingerprint.mjs ./scripts/
+COPY --chown=app:app backend/src/adapters/db-postgres/owned-tables.json ./src/adapters/db-postgres/owned-tables.json
 USER app
 EXPOSE 8080
 # Default: API. Override command for worker / MCP Deployments.
