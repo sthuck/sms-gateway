@@ -22,17 +22,18 @@ fun propOrEnv(name: String): String? {
 val appVersionName = propOrEnv("APP_VERSION_NAME") ?: "0.1.0"
 val appVersionCode = propOrEnv("APP_VERSION_CODE")?.toIntOrNull() ?: 1
 
-val keystoreFilePath = propOrEnv("ANDROID_KEYSTORE_FILE")
-val keystorePassword = propOrEnv("ANDROID_KEYSTORE_PASSWORD")
-val keyAlias = propOrEnv("ANDROID_KEY_ALIAS")
-val keyPassword = propOrEnv("ANDROID_KEY_PASSWORD")
+val releaseKeystoreFilePath = propOrEnv("ANDROID_KEYSTORE_FILE")
+val releaseKeystorePassword = propOrEnv("ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = propOrEnv("ANDROID_KEY_ALIAS")
+val releaseKeyPassword = propOrEnv("ANDROID_KEY_PASSWORD")
 
-val keystoreFile = keystoreFilePath?.let { path -> file(path).takeIf { it.isFile } }
+val releaseKeystoreFile =
+    releaseKeystoreFilePath?.let { path -> file(path).takeIf { it.isFile } }
 val releaseSigningReady =
-    keystoreFile != null &&
-        !keystorePassword.isNullOrBlank() &&
-        !keyAlias.isNullOrBlank() &&
-        !keyPassword.isNullOrBlank()
+    releaseKeystoreFile != null &&
+        !releaseKeystorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "com.sthuck.smsgateway"
@@ -79,10 +80,10 @@ android {
     signingConfigs {
         if (releaseSigningReady) {
             create("release") {
-                storeFile = keystoreFile
-                storePassword = keystorePassword
-                this.keyAlias = keyAlias
-                this.keyPassword = keyPassword
+                storeFile = releaseKeystoreFile
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -98,7 +99,7 @@ android {
             if (releaseSigningReady) {
                 signingConfig = signingConfigs.getByName("release")
                 logger.lifecycle(
-                    "Release signing: enabled (store=${keystoreFile!!.path}, alias=$keyAlias)",
+                    "Release signing: enabled (store=${releaseKeystoreFile!!.path}, alias=$releaseKeyAlias)",
                 )
             } else {
                 // Debug/CI keep working without secrets. Tag release workflow
