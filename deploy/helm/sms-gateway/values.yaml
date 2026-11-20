@@ -48,7 +48,7 @@ config:
   LLM_MODEL: ""
   # OIDC (Authentik or any generic provider) — see docs/deployment-auth.md
   # Homelab production examples (wire later; leave empty until deploy):
-  #   OIDC_ISSUER_URL: "https://auth.sthuck.info/application/o/sms-gateway/"
+  #   OIDC_ISSUER_URL: "https://sso.sthuck.info/application/o/sms-gateway/"
   #   OIDC_CLIENT_ID: "sms-gateway"
   #   OIDC_REDIRECT_URI: "https://sms.sthuck.info/v1/auth/callback"
   #   PUBLIC_BASE_URL: "https://sms.sthuck.info"
@@ -117,6 +117,10 @@ secrets:
   migrateDatabaseUrlKey: MIGRATE_DATABASE_URL
   migrateAppPasswordKey: SMS_APP_PASSWORD
 
+# Resources: no CPU limits by default. A CPU limit only throttles (CFS quota),
+# which shows up as latency spikes on bursty Node.js work such as startup,
+# migrations and crypto; requests already give the scheduler what it needs.
+# The memory limit stays: exceeding it is what should restart a pod.
 api:
   enabled: true
   replicaCount: 1
@@ -130,7 +134,6 @@ api:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
       memory: 512Mi
   probes:
     liveness:
@@ -165,7 +168,6 @@ worker:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
       memory: 512Mi
 
 migrations:
@@ -182,7 +184,6 @@ migrations:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
       memory: 512Mi
 
 mcp:
@@ -199,7 +200,6 @@ mcp:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
       memory: 512Mi
 
 # Single `/` Ingress routes both the bundled Web UI and `/v1/*` API to `<release>-api`
@@ -221,6 +221,27 @@ ingress:
   #   hosts:
   #     - sms.sthuck.info
 
+# Extra env vars, envFrom sources, volumes and volume mounts added to EVERY
+# workload container: api, worker, mcp and the migrate Job. Rendered verbatim
+# (standard Kubernetes syntax). Empty by default.
+#
+# Example -- trust a private CA (the API fetches OIDC discovery/JWKS server-side
+# from Node.js, which ignores the OS trust store additions of the cluster):
+#   extraVolumes:
+#     - name: private-ca
+#       configMap:
+#         name: private-ca        # key ca.crt
+#   extraVolumeMounts:
+#     - name: private-ca
+#       mountPath: /etc/ssl/private-ca
+#       readOnly: true
+#   extraEnv:
+#     - name: NODE_EXTRA_CA_CERTS
+#       value: /etc/ssl/private-ca/ca.crt
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
 podAnnotations: {}
 podSecurityContext:
   runAsNonRoot: true

@@ -48,11 +48,22 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "sms-gateway.fullname" . }}-worker
+          {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             {{- include "sms-gateway.workerSecretEnv" . | nindent 12 }}
-          {{- if (include "sms-gateway.encryptionEnabled" .) }}
+          {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or (include "sms-gateway.encryptionEnabled" .) .Values.extraVolumeMounts }}
           volumeMounts:
+            {{- if (include "sms-gateway.encryptionEnabled" .) }}
             {{- include "sms-gateway.kekVolumeMount" . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- if and (gt $metricsPort 0) .Values.worker.probes.enabled }}
           livenessProbe:
@@ -70,9 +81,14 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
-      {{- if (include "sms-gateway.encryptionEnabled" .) }}
+      {{- if or (include "sms-gateway.encryptionEnabled" .) .Values.extraVolumes }}
       volumes:
+        {{- if (include "sms-gateway.encryptionEnabled" .) }}
         {{- include "sms-gateway.kekVolume" . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

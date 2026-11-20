@@ -184,7 +184,7 @@ by `scripts/bootstrap-pgboss.mjs` after migrations; see `docs/queue.md`.
 
 | Role | Purpose |
 | --- | --- |
-| **Migrator** (`sms` in local Compose / CI) | Owns tables, runs Drizzle migrations via `scripts/migrate.mjs`. Connect with `MIGRATE_DATABASE_URL`. May be a superuser locally; production should be a non-superuser table owner with rights to create objects. |
+| **Migrator** (`sms` in local Compose / CI) | Owns tables and the `SECURITY DEFINER` lookups, runs Drizzle migrations via `scripts/migrate.mjs`. Connect with `MIGRATE_DATABASE_URL`. A superuser locally / in CI. In production, a non-superuser owner with **`CREATEROLE` and `BYPASSRLS`** (see below). |
 | **`sms_app`** | Application / worker / MCP. `LOGIN`, **no** `BYPASSRLS`, **no** superuser. Connect with `DATABASE_URL`. |
 
 ### `sms_app` password
@@ -281,7 +281,15 @@ Device ingestion and pairing authenticate by device id or pairing code
 **before** `app.owner_id` is known. The app role must not use `BYPASSRLS`.
 
 Narrow `SECURITY DEFINER` functions (owned by the migrator, `search_path`
-pinned, `EXECUTE` granted only to `sms_app`):
+pinned, `EXECUTE` granted only to `sms_app`).
+
+**Their owner must bypass RLS** (superuser or `BYPASSRLS`). Every table uses
+`FORCE ROW LEVEL SECURITY`, which applies to the table owner too, and these
+functions run as that owner with no `app.owner_id` set. With a plain
+non-superuser owner they silently return **no rows**. Symptoms: OIDC login
+succeeds, but `/v1/auth/me` returns 401 (session not found), and the next login
+fails with a duplicate key on `user_identities` (identity not found). Local
+Compose and CI use a superuser migrator, so tests do not catch this.
 
 | Function | Use |
 | --- | --- |
