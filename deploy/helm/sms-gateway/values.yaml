@@ -221,6 +221,27 @@ ingress:
   #   hosts:
   #     - sms.sthuck.info
 
+# Extra env vars, envFrom sources, volumes and volume mounts added to EVERY
+# workload container: api, worker, mcp and the migrate Job. Rendered verbatim
+# (standard Kubernetes syntax). Empty by default.
+#
+# Example -- trust a private CA (the API fetches OIDC discovery/JWKS server-side
+# from Node.js, which ignores the OS trust store additions of the cluster):
+#   extraVolumes:
+#     - name: private-ca
+#       configMap:
+#         name: private-ca        # key ca.crt
+#   extraVolumeMounts:
+#     - name: private-ca
+#       mountPath: /etc/ssl/private-ca
+#       readOnly: true
+#   extraEnv:
+#     - name: NODE_EXTRA_CA_CERTS
+#       value: /etc/ssl/private-ca/ca.crt
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
 podAnnotations: {}
 podSecurityContext:
   runAsNonRoot: true
