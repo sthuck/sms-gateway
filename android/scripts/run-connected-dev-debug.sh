@@ -15,7 +15,7 @@ PACKAGE="com.sthuck.smsgateway.dev"
 SINGLE_SENDER="+15551234567"
 MULTIPART_SENDER="+15559876543"
 TOKEN="${SMS_E2E_TOKEN:-${GITHUB_RUN_ID:-local}-$(date +%s)}"
-DEADLINE=$((SECONDS + 240))
+WAIT_TIMEOUT_SECONDS="${SMS_E2E_WAIT_TIMEOUT_SEC:-240}"
 SCREENSHOT_HOST="$ROOT/app/build/screenshots"
 SCREENSHOT_DEVICE_APP="/sdcard/Android/data/${PACKAGE}/files/sms-gateway-screenshots"
 SCREENSHOT_DEVICE_DL="/sdcard/Download/sms-gateway-screenshots"
@@ -103,9 +103,15 @@ png_count() {
 }
 
 log "E2E token: $TOKEN"
+# Pre-build APKs before starting the wait deadline so Gradle compilation
+# never consumes the SMS injector's post-install timeout budget.
+log "Pre-building devDebug and androidTest APKs"
+./gradlew assembleDevDebug assembleDevDebugAndroidTest --stacktrace
+
 adb wait-for-device
 adb shell setprop debug.smsgateway.e2e_token "$TOKEN"
 
+DEADLINE=$((SECONDS + WAIT_TIMEOUT_SECONDS))
 # SMS injection must run against the install used by connectedDevDebugAndroidTest.
 # Do not install/run a separate am-instrument pass beforehand — that races
 # Gradle's reinstall and drops the injected SMS (multipart especially).
