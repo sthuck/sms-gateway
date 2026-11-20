@@ -12,8 +12,10 @@ ships today. Authentik, Postgres, Ingress, and TLS are external. Chart:
 - **Authentik** installed separately: blueprints under `deploy/authentik/`,
   hostnames and Helm OIDC wiring in [deployment-auth.md](./deployment-auth.md)
 
-Agreed hosts: app `https://sms.sthuck.info`, Authentik
-`https://auth.sthuck.info` (slug `sms-gateway`).
+Homelab hosts: app `https://sms.sthuck.info`, Authentik
+`https://sso.sthuck.info` (slug `sms-gateway`). Both need certificates the
+clients trust. The app host must be **publicly** trusted, because the Android
+app trusts system CAs only. See [deployment-auth.md](./deployment-auth.md#tls-requirements).
 
 ## 2. Build and push the image
 
@@ -85,6 +87,30 @@ first create** from `SMS_APP_PASSWORD`, then bootstraps pg-boss. Runtime API and
 worker pods use `DATABASE_URL` as `sms_app` (RLS). Details:
 [schema.md](./schema.md), [queue.md](./queue.md).
 
+### Database roles
+
+- **Migrator** (`MIGRATE_DATABASE_URL`, migrate Job only): must **own** the
+  `sms` database and have **`CREATEROLE`** (superuser is not needed).
+  `0000_baseline` creates `sms_app` and `migrate.mjs` sets its password. On
+  PostgreSQL 16+ a `CREATEROLE` role gets `ADMIN OPTION` on the roles it creates,
+  which is what allows that `ALTER ROLE`.
+- **Do not pre-create `sms_app`**: its password is set only when the migration
+  creates it.
+- **Never point `DATABASE_URL` at the migrator**: as table owner it bypasses the
+  `FORCE ROW LEVEL SECURITY` policies.
+
+### TLS to Postgres (`sslmode`)
+
+The backend uses `pg` with `pg-connection-string` 2.x, where `sslmode=require`
+means **verify-full**, not libpq's "encrypt, don't verify". Against a server with
+a self-signed or cluster-internal certificate (e.g. CloudNativePG), either:
+
+- add `uselibpqcompat=true` for libpq semantics:
+  `postgres://sms_app:<pw>@<host>:5432/sms?sslmode=require&uselibpqcompat=true`
+  (the homelab uses this for both URLs), or
+- verify properly with `sslrootcert=<ca file>` (mount it with the chart's
+  `extraVolumes` / `extraVolumeMounts`).
+
 ### Option A — In-cluster Helm hook Job (recommended)
 
 `backend/Dockerfile` bundles `drizzle/` and `scripts/`, and the chart provides
@@ -101,6 +127,12 @@ kubectl create secret generic sms-gateway-migrate \
 
 Set `migrations.enabled: true` in `my-values.yaml` (Section 5) before running
 `helm upgrade --install`.
+
+**Under ArgoCD** the hook becomes a **PreSync** hook, and PreSync runs *before*
+ordinary resources are applied. If the Secrets are managed in the same
+Application (e.g. as SealedSecrets), a first install deadlocks: the Job waits
+for Secrets that are only created after it finishes. Create the Secrets first,
+in a separate sync, then enable the workloads.
 
 ### Option B — Manual from a laptop
 
@@ -159,7 +191,7 @@ Publishing a GitHub Release also packages and pushes the Helm chart to GHCR via
 `--app-version <tag>`, matching the published container image tag so `image.tag`
 can stay `""`).
 
-Example override for `sms.sthuck.info` / `auth.sthuck.info` (keys from
+Example override for `sms.sthuck.info` / `sso.sthuck.info` (keys from
 `values.yaml`; also in [deployment-auth.md](./deployment-auth.md)):
 
 ```yaml
@@ -167,10 +199,11 @@ Example override for `sms.sthuck.info` / `auth.sthuck.info` (keys from
 image:
   repository: ghcr.io/sthuck/sms-gateway-backend
   # Optional when installing matching OCI chart version (defaults to Chart appVersion):
-  # tag: "v0.1.0"
+  # tag: "v0.2.2"
 
-imagePullSecrets:
-  - name: ghcr-pull
+# Only if the GHCR packages are private (they are public):
+# imagePullSecrets:
+#   - name: ghcr-pull
 
 config:
   WEB_DIST_DIR: "/app/web-dist" # chart default; set "" to run API-only
@@ -178,11 +211,12 @@ config:
   DEVICE_ALLOWED_HOSTS: "sms.sthuck.info"
   DEVICE_API_PUBLIC_URL: "https://sms.sthuck.info"
   INGEST_DEFAULT_PHONE_REGION: "IL" # or your 2-letter region for national senders
-  OIDC_ISSUER_URL: "https://auth.sthuck.info/application/o/sms-gateway/"
+  OIDC_ISSUER_URL: "https://sso.sthuck.info/application/o/sms-gateway/"
   OIDC_CLIENT_ID: "sms-gateway"
   OIDC_REDIRECT_URI: "https://sms.sthuck.info/v1/auth/callback"
   OIDC_SCOPES: "openid profile email"
   OIDC_AUDIENCE: "sms-gateway"
+  OIDC_APPLICATION_SLUG: "sms-gateway"
   REQUIRE_MFA: "true"
   MFA_CLAIMS_MISSING: "deny"
   AUTO_LINK_BY_EMAIL: "false"
@@ -199,7 +233,9 @@ ingress:
   enabled: true
   className: "<your-ingress-class>"
   annotations:
-    cert-manager.io/cluster-issuer: "<your-issuer>"
+    # Must issue a PUBLICLY trusted cert (e.g. Let's Encrypt): the Android app
+    # trusts system CAs only. ACME DNS-01 works for LAN-only hosts.
+    cert-manager.io/cluster-issuer: "<your-public-issuer>"
     # For nginx Ingress, allow max-size 1 MiB SMS batches:
     # nginx.ingress.kubernetes.io/proxy-body-size: "2m"
   hosts:

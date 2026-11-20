@@ -48,7 +48,7 @@ config:
   LLM_MODEL: ""
   # OIDC (Authentik or any generic provider) — see docs/deployment-auth.md
   # Homelab production examples (wire later; leave empty until deploy):
-  #   OIDC_ISSUER_URL: "https://auth.sthuck.info/application/o/sms-gateway/"
+  #   OIDC_ISSUER_URL: "https://sso.sthuck.info/application/o/sms-gateway/"
   #   OIDC_CLIENT_ID: "sms-gateway"
   #   OIDC_REDIRECT_URI: "https://sms.sthuck.info/v1/auth/callback"
   #   PUBLIC_BASE_URL: "https://sms.sthuck.info"

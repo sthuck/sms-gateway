@@ -67,7 +67,7 @@ See `values.yaml`. Notable knobs:
 - `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` — added verbatim to every workload container (api, worker, mcp, migrate Job); e.g. mount a private CA and set `NODE_EXTRA_CA_CERTS` (see `values.yaml`)
 - `api` / `worker` / `mcp` — replicas, resources, commands, `terminationGracePeriodSeconds` (`30s` on `api`, `45s` on `worker`), `worker.probes` (`/healthz` & `/readyz` on `QUEUE_METRICS_PORT` when `> 0`), and `worker.metricsService.enabled` (ClusterIP Service for Prometheus scraping; `mcp.enabled` defaults to **false** until MCP transport is implemented)
 
-Homelab hostnames (`sms.sthuck.info` / `auth.sthuck.info`) are documented as
+Homelab hostnames (`sms.sthuck.info` / `sso.sthuck.info`) are documented as
 commented examples in `values.yaml` and `docs/deployment-auth.md`. Homelab
 Ingress/TLS deploy is deferred. Authentik itself is installed separately.
 
