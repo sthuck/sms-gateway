@@ -42,6 +42,12 @@ entries:
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       client_type: confidential
       client_id: sms-gateway
+      # REQUIRED on recent authentik: the model default is [] (only the UI fills
+      # in defaults). With none, every authorize request fails with "Invalid
+      # grant_type for provider" and the callback gets error=invalid_request.
+      # The backend uses authorization_code (+PKCE) only.
+      grant_types:
+        - authorization_code
       client_secret: !Env SMS_GATEWAY_OIDC_CLIENT_SECRET
       redirect_uris:
         - matching_mode: strict

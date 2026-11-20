@@ -73,6 +73,7 @@ What the prod blueprint sets, and why each is required on current Authentik:
 | --- | --- | --- |
 | `authorization_flow` | `default-provider-authorization-implicit-consent` | Required field |
 | `invalidation_flow` | `default-provider-invalidation-flow` | Required field (authentik ≥ 2024.10) |
+| `grant_types` | `[authorization_code]` | **Model default is `[]`** (only the UI fills in defaults). Without it every login fails: authentik logs `Invalid grant_type for provider` and the callback returns `Invalid OAuth callback` with `error=invalid_request` |
 | `redirect_uris` | list: `{matching_mode: strict, url: …/v1/auth/callback}` | The plain-string form is legacy |
 | `signing_key` | `authentik Self-signed Certificate` (RSA → RS256) | **Without a key pair, Authentik signs with HS256 using the client secret**, which the backend rejects (`OIDC_ALLOWED_ALGS=RS256,ES256`) |
 | `property_mappings` | `openid`, `profile`, `email` scope mappings | Otherwise the email/name claims are missing |
