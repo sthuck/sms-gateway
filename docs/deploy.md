@@ -90,7 +90,10 @@ worker pods use `DATABASE_URL` as `sms_app` (RLS). Details:
 ### Database roles
 
 - **Migrator** (`MIGRATE_DATABASE_URL`, migrate Job only): must **own** the
-  `sms` database and have **`CREATEROLE`** (superuser is not needed).
+  `sms` database and have **`CREATEROLE` and `BYPASSRLS`** (or be superuser).
+  `BYPASSRLS` is required because the pre-owner `SECURITY DEFINER` lookups run as
+  this role under `FORCE ROW LEVEL SECURITY`. Without it they return nothing and
+  login breaks (see [schema.md](./schema.md#device-and-pairing-lookups-pre-owner)).
   `0000_baseline` creates `sms_app` and `migrate.mjs` sets its password. On
   PostgreSQL 16+ a `CREATEROLE` role gets `ADMIN OPTION` on the roles it creates,
   which is what allows that `ALTER ROLE`.
