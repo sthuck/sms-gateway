@@ -117,6 +117,10 @@ secrets:
   migrateDatabaseUrlKey: MIGRATE_DATABASE_URL
   migrateAppPasswordKey: SMS_APP_PASSWORD
 
+# Resources: no CPU limits by default. A CPU limit only throttles (CFS quota),
+# which shows up as latency spikes on bursty Node.js work such as startup,
+# migrations and crypto; requests already give the scheduler what it needs.
+# The memory limit stays: exceeding it is what should restart a pod.
 api:
   enabled: true
   replicaCount: 1
@@ -130,7 +134,6 @@ api:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
       memory: 512Mi
   probes:
     liveness:
@@ -165,7 +168,6 @@ worker:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
       memory: 512Mi
 
 migrations:
@@ -182,7 +184,6 @@ migrations:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
       memory: 512Mi
 
 mcp:
@@ -199,7 +200,6 @@ mcp:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
       memory: 512Mi
 
 # Single `/` Ingress routes both the bundled Web UI and `/v1/*` API to `<release>-api`
