@@ -97,8 +97,10 @@ export function createJwtVerifier(
 }
 
 export async function resolveJwksUri(issuerUrl: string, allowInsecure: boolean): Promise<string> {
+  // Relative path: a leading "/" would resolve against the origin and drop the
+  // issuer's own path (e.g. Authentik's /application/o/<slug>/).
   const discoveryUrl = new URL(
-    "/.well-known/openid-configuration",
+    ".well-known/openid-configuration",
     issuerUrl.endsWith("/") ? issuerUrl : `${issuerUrl}/`,
   );
   if (discoveryUrl.protocol === "http:" && !allowInsecure) {
